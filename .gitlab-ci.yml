@@ -1,0 +1,17 @@
+# Thin wrapper (ADR-013): all logic lives in tools/ci/*.sh so it is portable.
+# Runner image must be an Authority-mirrored image with JDK 21, Maven 3.9, Python 3, Docker (Testcontainers).
+stages: [verify, security]
+
+verify:
+  stage: verify
+  script: [tools/ci/verify.sh]
+  artifacts:
+    when: always
+    paths: ["**/target/site/jacoco/", "**/target/bom.*", "**/target/surefire-reports/", "**/target/failsafe-reports/"]
+    reports:
+      junit: ["**/target/surefire-reports/TEST-*.xml", "**/target/failsafe-reports/TEST-*.xml"]
+
+security:
+  stage: security
+  script: [tools/ci/security.sh]
+  allow_failure: false

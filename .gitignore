@@ -1,0 +1,30 @@
+# Build outputs
+target/
+build/
+out/
+*.class
+node_modules/
+dist/
+coverage/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Local env / secrets (SEC-004: never commit secrets)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.jks
+secrets/
+
+# Original BRD binary: authoritative copy lives with the Authority; markdown extracts are tracked
+main_doc/
+~$*

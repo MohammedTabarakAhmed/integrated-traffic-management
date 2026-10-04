@@ -1,0 +1,7 @@
+# Secret scanning (SEC-021, SEC-004). Extends the default ruleset.
+title = "ITMS gitleaks config"
+[extend]
+useDefault = true
+[allowlist]
+description = "Generated / binary paths"
+paths = ['''target/''', '''node_modules/''', '''main_doc/''']

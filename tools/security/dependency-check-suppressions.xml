@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Time-boxed SCA waivers only. Each entry needs: CVE, reason, approver, expiry (until="YYYY-MM-DDZ"). -->
+<suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.3.xsd">
+</suppressions>

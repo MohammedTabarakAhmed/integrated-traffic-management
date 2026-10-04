@@ -319,6 +319,190 @@ class IamApiIT {
     }
 
     @Test
+    @Tag("CC-003")
+    @DisplayName("CC-003: approval limits are configured per role at runtime, versioned, historised, audited and granted")
+    void approvalLimits() throws Exception {
+        assertThat(postAs("/v1/roles", Map.of("code", "IT_REFUND_APPROVER",
+                "name", Map.of("nl", "معتمد الاسترداد", "en", "Refund approver"),
+                "permissions", List.of("refdata.read"), "reason", "limit test role"), ADMIN).getResponse().getStatus())
+                .isEqualTo(201);
+        assign("u-approver", "IT_REFUND_APPROVER", List.of("R5"), ADMIN);
+
+        // Default: no limits, so no authority to approve.
+        JsonNode initial = body(getAs("/v1/roles/IT_REFUND_APPROVER/approval-limits", ADMIN));
+        assertThat(initial.get("items")).isEmpty();
+        assertThat(initial.get("version").asLong()).isEqualTo(1);
+        assertThat(myGrants("u-approver").get(0).get("approvalLimits")).isEmpty();
+
+        MvcResult set = putAs("/v1/roles/IT_REFUND_APPROVER/approval-limits", Map.of("version", 1,
+                "reason", "finance policy", "limits", List.of(
+                        Map.of("limitType", "REFUND_AMOUNT", "maxAmountMinor", 250000, "currency", "XTS"),
+                        Map.of("limitType", "FINE_REDUCTION_AMOUNT", "maxAmountMinor", 5000, "currency", "XTS"))),
+                ADMIN);
+        assertThat(set.getResponse().getStatus()).as(set.getResponse().getContentAsString()).isEqualTo(200);
+        assertThat(body(set).get("version").asLong()).isEqualTo(2);
+        JsonNode granted = myGrants("u-approver").get(0).get("approvalLimits");
+        assertThat(granted.valueStream().map(l -> l.get("limitType").asString() + "=" + l.get("maxAmountMinor")
+                .asLong())).containsExactly("FINE_REDUCTION_AMOUNT=5000", "REFUND_AMOUNT=250000");
+
+        // A different configured value; FINE_REDUCTION_AMOUNT is removed.
+        MvcResult changed = putAs("/v1/roles/IT_REFUND_APPROVER/approval-limits", Map.of("version", 2,
+                "reason", "tighten refunds", "limits", List.of(
+                        Map.of("limitType", "REFUND_AMOUNT", "maxAmountMinor", 100, "currency", "XTS"))), ADMIN);
+        assertThat(changed.getResponse().getStatus()).isEqualTo(200);
+        assertThat(body(getAs("/v1/roles/IT_REFUND_APPROVER/approval-limits", ADMIN)).get("items"))
+                .singleElement().satisfies(l -> assertThat(l.get("maxAmountMinor").asLong()).isEqualTo(100));
+
+        MvcResult stale = putAs("/v1/roles/IT_REFUND_APPROVER/approval-limits", Map.of("version", 2,
+                "reason", "stale", "limits", List.of()), ADMIN);
+        assertThat(stale.getResponse().getStatus()).isEqualTo(409);
+        MvcResult own = putAs("/v1/roles/IT_ADMINISTRATOR/approval-limits", Map.of("version", 2,
+                "reason", "raise my own", "limits", List.of()), ADMIN);
+        assertThat(own.getResponse().getStatus()).isEqualTo(403);
+        assertThat(body(own).get("code").asString()).isEqualTo("ROLE_HELD_BY_ACTOR");
+        MvcResult duplicate = putAs("/v1/roles/IT_REFUND_APPROVER/approval-limits", Map.of("version", 3,
+                "reason", "twice", "limits", List.of(
+                        Map.of("limitType", "REFUND_AMOUNT", "maxAmountMinor", 1, "currency", "XTS"),
+                        Map.of("limitType", "REFUND_AMOUNT", "maxAmountMinor", 2, "currency", "XTS"))), ADMIN);
+        assertThat(duplicate.getResponse().getStatus()).isEqualTo(422);
+        assertThat(body(duplicate).get("code").asString()).isEqualTo("LIMIT_DUPLICATE");
+        MvcResult noAuthority = putAs("/v1/roles/IT_REFUND_APPROVER/approval-limits", Map.of("version", 3,
+                "reason", "not an admin", "limits", List.of()), as("u-approver"));
+        assertThat(noAuthority.getResponse().getStatus()).isEqualTo(403);
+
+        var history = db.sql("""
+                        select limit_type, max_amount_minor, valid_to is null as open, changed_by, ended_by
+                          from approval_limit_history where role_code = 'IT_REFUND_APPROVER' order by history_id""")
+                .query().listOfRows();
+        assertThat(history).extracting(r -> r.get("limit_type") + "=" + r.get("max_amount_minor") + "/" + r.get("open"))
+                .containsExactly("FINE_REDUCTION_AMOUNT=5000/false", "REFUND_AMOUNT=250000/false",
+                        "REFUND_AMOUNT=100/true");
+        assertThat(history).allSatisfy(r -> assertThat(r.get("changed_by")).isEqualTo("u-admin"));
+        assertThat(history.get(0).get("ended_by")).as("removal attributed to the role change").isEqualTo("u-admin");
+        assertThat(db.sql("""
+                        select count(*) from audit_outbox
+                         where action = 'IAM_APPROVAL_LIMITS_REPLACED' and entity_id = 'IT_REFUND_APPROVER'""")
+                .query(Long.class).single()).isEqualTo(2);
+        assertThatThrownBy(() -> db.sql("""
+                update approval_limit set max_amount_minor = -1 where role_code = 'IT_REFUND_APPROVER'""").update())
+                .isInstanceOf(DataAccessException.class);
+        assertThatThrownBy(() -> db.sql("delete from approval_limit_history").update())
+                .isInstanceOf(DataAccessException.class);
+    }
+
+    private MvcResult delegate(String sourceId, String delegate, String validTo, RequestPostProcessor who)
+            throws Exception {
+        return postAs("/v1/delegations", Map.of("sourceAssignmentId", sourceId, "delegateSubjectId", delegate,
+                "validTo", validTo, "reason", "annual leave"), who);
+    }
+
+    private static String inHours(long hours) {
+        return java.time.Instant.now().plusSeconds(hours * 3600).truncatedTo(java.time.temporal.ChronoUnit.SECONDS)
+                .toString();
+    }
+
+    @Test
+    @Tag("CC-004")
+    @DisplayName("CC-004: a holder delegates for a set period; the delegate is granted until the source ends; audited")
+    void delegationByHolder() throws Exception {
+        MvcResult src = postAs("/v1/role-assignments", Map.of("subjectId", "u-holder", "roleCode", "REFDATA_CHECKER",
+                "scopes", scopes(List.of("R6")), "validTo", inHours(48), "reason", "checker for R6"), ADMIN);
+        String sourceId = body(src).get("id").asString();
+        RequestPostProcessor holder = as("u-holder");
+
+        MvcResult created = delegate(sourceId, "u-deputy", inHours(24), holder);
+        assertThat(created.getResponse().getStatus()).as(created.getResponse().getContentAsString()).isEqualTo(201);
+        JsonNode d = body(created);
+        String delegationId = d.get("id").asString();
+        assertThat(d.get("source").asString()).isEqualTo("DELEGATION");
+        assertThat(d.get("delegatedFrom").asString()).isEqualTo(sourceId);
+        assertThat(d.get("assignedBy").get("id").asString()).isEqualTo("u-holder");
+        assertThat(myGrants("u-deputy")).singleElement().satisfies(g -> {
+            assertThat(g.get("roleCode").asString()).isEqualTo("REFDATA_CHECKER");
+            assertThat(g.get("scopes").get("regions").get(0).asString()).isEqualTo("R6");
+        });
+
+        assertThat(body(getAs("/v1/delegations", holder)).get("items")).singleElement()
+                .satisfies(n -> assertThat(n.get("id").asString()).isEqualTo(delegationId));
+        assertThat(body(getAs("/v1/delegations?subjectId=u-holder", as("u-stranger"))).get("items")).isEmpty();
+        assertThat(body(getAs("/v1/delegations?subjectId=u-deputy", ADMIN)).get("items")).hasSize(1);
+
+        MvcResult tooLong = delegate(sourceId, "u-other", inHours(72), holder);
+        assertThat(tooLong.getResponse().getStatus()).isEqualTo(422);
+        assertThat(body(tooLong).get("code").asString()).isEqualTo("DELEGATION_EXCEEDS_SOURCE");
+        MvcResult chain = delegate(delegationId, "u-other", inHours(1), as("u-deputy"));
+        assertThat(body(chain).get("code").asString()).isEqualTo("REDELEGATION");
+        MvcResult self = delegate(sourceId, "u-holder", inHours(1), holder);
+        assertThat(self.getResponse().getStatus()).isEqualTo(403);
+        assertThat(body(self).get("code").asString()).isEqualTo("SELF_DELEGATION");
+        MvcResult stranger = delegate(sourceId, "u-other", inHours(1), as("u-stranger"));
+        assertThat(stranger.getResponse().getStatus()).isEqualTo(404);
+        Map<String, Object> noEnd = Map.of("sourceAssignmentId", sourceId, "delegateSubjectId", "u-other",
+                "reason", "open ended");
+        assertThat(postAs("/v1/delegations", noEnd, holder).getResponse().getStatus()).isEqualTo(400);
+
+        // Revoking the source ends the delegate's grant even though the delegation itself is still ACTIVE.
+        postAs("/v1/role-assignments/" + sourceId + "/revocations", Map.of("reason", "holder moved"), ADMIN);
+        assertThat(myGrants("u-deputy")).isEmpty();
+
+        MvcResult revoked = postAs("/v1/delegations/" + delegationId + "/revocations", Map.of("reason", "tidy up"),
+                holder);
+        assertThat(revoked.getResponse().getStatus()).isEqualTo(200);
+        assertThat(body(revoked).get("status").asString()).isEqualTo("REVOKED");
+        assertThat(postAs("/v1/delegations/" + sourceId + "/revocations", Map.of("reason", "not a delegation"),
+                ADMIN).getResponse().getStatus()).isEqualTo(404);
+
+        assertThat(db.sql("select action from audit_outbox where entity_id = :id order by occurred_at")
+                .param("id", delegationId).query(String.class).list())
+                .containsExactly("IAM_DELEGATION_CREATED", "IAM_DELEGATION_REVOKED");
+        assertThat(db.sql("select actor_id from audit_outbox where entity_id = :id and action = 'IAM_DELEGATION_CREATED'")
+                .param("id", delegationId).query(String.class).single()).isEqualTo("u-holder");
+    }
+
+    @Test
+    @Tag("CC-004")
+    @DisplayName("CC-004: an administrator delegates for an absent holder within scope; the database guards the rules")
+    void delegationByAdministratorAndDatabaseGuards() throws Exception {
+        String sourceId = assign("u-absent", "REFDATA_MAKER", List.of("R7"), ADMIN);
+        assign("u-r8-admin", "IT_ADMINISTRATOR", List.of("R8"), ADMIN);
+
+        MvcResult outOfScope = delegate(sourceId, "u-cover", inHours(8), as("u-r8-admin"));
+        assertThat(outOfScope.getResponse().getStatus()).isEqualTo(404);
+
+        MvcResult created = delegate(sourceId, "u-cover", inHours(8), ADMIN);
+        assertThat(created.getResponse().getStatus()).as(created.getResponse().getContentAsString()).isEqualTo(201);
+        String delegationId = body(created).get("id").asString();
+        assertThat(myGrants("u-cover")).hasSize(1);
+        assertThat(postAs("/v1/delegations/" + delegationId + "/revocations", Map.of("reason", "nosy"),
+                as("u-cover")).getResponse().getStatus()).isEqualTo(403);
+
+        // Defence in depth: the trigger and constraints refuse invalid delegations written directly.
+        String insert = """
+                insert into role_assignment (id, subject_id, role_code, regions, centres, modules, valid_from,
+                    valid_to, status, reason, assigned_by, assigned_at, source, delegated_from)
+                values (gen_random_uuid(), :subject, :role, '{R7}', '{*}', '{*}', now(), :to, 'ACTIVE', 'direct',
+                    'u-admin', now(), 'DELEGATION', cast(:from as uuid))""";
+        assertThatThrownBy(() -> db.sql(insert).param("subject", "u-x").param("role", "REFDATA_MAKER")
+                .param("to", java.sql.Timestamp.from(java.time.Instant.now().plusSeconds(60)))
+                .param("from", delegationId).update()).as("re-delegation").isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("cannot be delegated again");
+        assertThatThrownBy(() -> db.sql(insert).param("subject", "u-x").param("role", "REFDATA_CHECKER")
+                .param("to", java.sql.Timestamp.from(java.time.Instant.now().plusSeconds(60)))
+                .param("from", sourceId).update()).as("other role").isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("role and scopes of its source");
+        assertThatThrownBy(() -> db.sql(insert).param("subject", "u-absent").param("role", "REFDATA_MAKER")
+                .param("to", java.sql.Timestamp.from(java.time.Instant.now().plusSeconds(60)))
+                .param("from", sourceId).update()).as("to the holder").isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("holder of its source");
+        assertThatThrownBy(() -> db.sql(insert).param("subject", "u-x").param("role", "REFDATA_MAKER")
+                .param("to", null).param("from", sourceId).update()).as("no end")
+                .isInstanceOf(DataAccessException.class).hasMessageContaining("ck_delegation_validity");
+        assertThatThrownBy(() -> db.sql("update role_assignment set source = 'DIRECT', delegated_from = null "
+                + "where id = cast(:id as uuid)").param("id", delegationId).update()).as("immutable")
+                .isInstanceOf(DataAccessException.class).hasMessageContaining("can only be revoked once");
+    }
+
+    @Test
     @Tag("SEC-022")
     @Tag("CH-053")
     @DisplayName("SEC-022/CH-053: malformed and rule-breaking requests are refused with plain-language problems")

@@ -31,7 +31,7 @@ class DomainExceptionAdvice {
             case VALIDATION -> HttpStatus.UNPROCESSABLE_CONTENT;
             case NOT_FOUND -> HttpStatus.NOT_FOUND;
             case CONFLICT -> HttpStatus.CONFLICT;
-            case SEGREGATION_OF_DUTIES, OUT_OF_SCOPE -> HttpStatus.FORBIDDEN;
+            case SEGREGATION_OF_DUTIES, OUT_OF_SCOPE, NOT_PERMITTED -> HttpStatus.FORBIDDEN;
         };
         String detail = messages.getMessage("problem." + e.code(), e.args(), e.getMessage(),
                 LocaleContextHolder.getLocale());

@@ -1,7 +1,9 @@
 package gov.itms.iam.api;
 
+import gov.itms.iam.application.IamService.RoleApprovalLimits;
 import gov.itms.iam.application.RoleRepository.RoleVersion;
 import gov.itms.iam.domain.Actor;
+import gov.itms.iam.domain.ApprovalLimit;
 import gov.itms.iam.domain.AssignmentScopes;
 import gov.itms.iam.domain.BilingualName;
 import gov.itms.iam.domain.Codes;
@@ -105,15 +107,55 @@ final class ApiModels {
     }
 
     record RoleAssignmentDto(UUID id, String subjectId, String subjectUsername, String roleCode, ScopesDto scopes,
-                             Instant validFrom, Instant validTo, RoleAssignment.Status status, String reason,
+                             Instant validFrom, Instant validTo, RoleAssignment.Status status,
+                             RoleAssignment.Source source, UUID delegatedFrom, String reason,
                              ActorDto assignedBy, Instant assignedAt, ActorDto revokedBy, Instant revokedAt,
                              String revocationReason) {
         static RoleAssignmentDto of(RoleAssignment a) {
             return new RoleAssignmentDto(a.id(), a.subjectId(), a.subjectUsername(), a.roleCode(),
-                    ScopesDto.of(a.scopes()), a.validFrom(), a.validTo(), a.status(), a.reason(),
-                    ActorDto.of(a.assignedBy()), a.assignedAt(), ActorDto.of(a.revokedBy()), a.revokedAt(),
-                    a.revocationReason());
+                    ScopesDto.of(a.scopes()), a.validFrom(), a.validTo(), a.status(), a.source(), a.delegatedFrom(),
+                    a.reason(), ActorDto.of(a.assignedBy()), a.assignedAt(), ActorDto.of(a.revokedBy()),
+                    a.revokedAt(), a.revocationReason());
         }
+    }
+
+    record CreateDelegationRequest(
+            @NotNull UUID sourceAssignmentId,
+            @NotNull @Pattern(regexp = Codes.SUBJECT_ID) String delegateSubjectId,
+            @Size(min = 1, max = 200) String delegateUsername,
+            Instant validFrom,
+            @NotNull Instant validTo,
+            @NotNull @Size(min = 3, max = 500) String reason) {
+    }
+
+    record ApprovalLimitDto(
+            @NotNull @Pattern(regexp = ApprovalLimit.LIMIT_TYPE) String limitType,
+            @NotNull @Min(0) Long maxAmountMinor,
+            @NotNull @Pattern(regexp = ApprovalLimit.CURRENCY) String currency) {
+        static ApprovalLimitDto of(ApprovalLimit l) {
+            return new ApprovalLimitDto(l.limitType(), l.maxAmountMinor(), l.currency());
+        }
+
+        static ApprovalLimitDto of(Authorisation.ApprovalLimit l) {
+            return new ApprovalLimitDto(l.limitType(), l.maxAmountMinor(), l.currency());
+        }
+
+        ApprovalLimit toDomain() {
+            return new ApprovalLimit(limitType, maxAmountMinor, currency);
+        }
+    }
+
+    record RoleApprovalLimitsDto(String roleCode, long version, List<ApprovalLimitDto> items) {
+        static RoleApprovalLimitsDto of(RoleApprovalLimits l) {
+            return new RoleApprovalLimitsDto(l.roleCode(), l.version(),
+                    l.limits().stream().map(ApprovalLimitDto::of).toList());
+        }
+    }
+
+    record ReplaceApprovalLimitsRequest(
+            @NotNull @Size(max = 100) List<@NotNull @Valid ApprovalLimitDto> limits,
+            @NotNull @Min(1) Long version,
+            @NotNull @Size(min = 3, max = 500) String reason) {
     }
 
     record CreateRoleAssignmentRequest(
@@ -129,10 +171,11 @@ final class ApiModels {
     record ReasonRequest(@NotNull @Size(min = 3, max = 500) String reason) {
     }
 
-    record GrantDto(String roleCode, List<String> permissions, ScopesDto scopes, Instant validTo) {
+    record GrantDto(String roleCode, List<String> permissions, ScopesDto scopes, Instant validTo,
+                    List<ApprovalLimitDto> approvalLimits) {
         static GrantDto of(Authorisation.Grant g) {
             return new GrantDto(g.roleCode(), g.permissions().stream().sorted().toList(), ScopesDto.of(g.scopes()),
-                    g.validTo());
+                    g.validTo(), g.approvalLimits().stream().map(ApprovalLimitDto::of).toList());
         }
     }
 

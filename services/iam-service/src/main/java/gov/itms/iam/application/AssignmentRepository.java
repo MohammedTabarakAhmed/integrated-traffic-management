@@ -19,4 +19,10 @@ public interface AssignmentRepository {
 
     /** Newest first. Every filter is optional ({@code null} = any). */
     List<RoleAssignment> search(String subjectId, String roleCode, RoleAssignment.Status status);
+
+    /**
+     * Delegations (CC-004) in which {@code partyId} is the delegate, the delegator or the holder of the source;
+     * newest first. {@code null} = all delegations.
+     */
+    List<RoleAssignment> delegations(String partyId);
 }

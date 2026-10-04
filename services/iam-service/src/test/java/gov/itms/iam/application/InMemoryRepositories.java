@@ -1,5 +1,6 @@
 package gov.itms.iam.application;
 
+import gov.itms.iam.domain.ApprovalLimit;
 import gov.itms.iam.domain.Permission;
 import gov.itms.iam.domain.Role;
 import gov.itms.iam.domain.RoleAssignment;
@@ -117,6 +118,33 @@ final class InMemoryRepositories {
                     .filter(a -> status == null || a.status() == status)
                     .sorted(Comparator.comparing(RoleAssignment::assignedAt).reversed())
                     .toList();
+        }
+
+        @Override
+        public List<RoleAssignment> delegations(String partyId) {
+            return rows.values().stream()
+                    .filter(RoleAssignment::isDelegation)
+                    .filter(d -> partyId == null || d.subjectId().equals(partyId)
+                            || d.assignedBy().id().equals(partyId)
+                            || rows.get(d.delegatedFrom()).subjectId().equals(partyId))
+                    .sorted(Comparator.comparing(RoleAssignment::assignedAt).reversed())
+                    .toList();
+        }
+    }
+
+    static final class ApprovalLimits implements ApprovalLimitRepository {
+        final Map<String, List<ApprovalLimit>> rows = new LinkedHashMap<>();
+        final List<String> history = new ArrayList<>();
+
+        @Override
+        public List<ApprovalLimit> forRole(String roleCode) {
+            return rows.getOrDefault(roleCode, List.of());
+        }
+
+        @Override
+        public void replace(String roleCode, List<ApprovalLimit> limits, String actorId, Instant at) {
+            rows.put(roleCode, List.copyOf(limits));
+            history.add(roleCode + " by " + actorId + ": " + limits);
         }
     }
 

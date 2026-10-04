@@ -145,6 +145,129 @@ class DomainModelTest {
         assertThatThrownBy(() -> Codes.reason("x".repeat(501))).satisfies(code("REASON_TOO_LONG"));
         assertThatThrownBy(() -> new Actor(" ", null)).isInstanceOf(IllegalArgumentException.class);
         assertThat(new Permission("iam.role.read", "iam-service", NAME).code()).isEqualTo("iam.role.read");
-        assertThat(Set.of(DomainException.Kind.values())).hasSize(5);
+        assertThat(Set.of(DomainException.Kind.values())).hasSize(6);
+        assertThat(DomainException.notPermitted("X", "x", "CC-004").requirementRefs()).containsExactly("CC-004");
+    }
+
+    // ------------------------------------------------------------------ approval limits (CC-003)
+
+    @Test
+    @Tag("CC-003")
+    @DisplayName("CC-003: an approval limit has a coded type, an ISO 4217 currency and a non-negative amount")
+    void approvalLimitRules() {
+        assertThat(new ApprovalLimit("REFUND_AMOUNT", 0, "XTS").maxAmountMinor()).isZero();
+        assertThat(new ApprovalLimit("FINE_REDUCTION_AMOUNT", Long.MAX_VALUE, "EUR").currency()).isEqualTo("EUR");
+        assertThatThrownBy(() -> new ApprovalLimit("refund", 1, "XTS")).satisfies(code("LIMIT_TYPE_INVALID"));
+        assertThatThrownBy(() -> new ApprovalLimit(null, 1, "XTS")).satisfies(code("LIMIT_TYPE_INVALID"));
+        assertThatThrownBy(() -> new ApprovalLimit("A".repeat(41), 1, "XTS")).satisfies(code("LIMIT_TYPE_INVALID"));
+        assertThatThrownBy(() -> new ApprovalLimit("REFUND_AMOUNT", 1, "xts")).satisfies(code("CURRENCY_INVALID"));
+        assertThatThrownBy(() -> new ApprovalLimit("REFUND_AMOUNT", 1, null)).satisfies(code("CURRENCY_INVALID"));
+        assertThatThrownBy(() -> new ApprovalLimit("REFUND_AMOUNT", -1, "XTS"))
+                .satisfies(code("LIMIT_AMOUNT_NEGATIVE"));
+    }
+
+    @Test
+    @Tag("CC-003")
+    @DisplayName("CC-003: a role's limit set lists each type and currency once, at most 100, in a stable order")
+    void approvalLimitSet() {
+        ApprovalLimit refundXts = new ApprovalLimit("REFUND_AMOUNT", 100, "XTS");
+        ApprovalLimit refundEur = new ApprovalLimit("REFUND_AMOUNT", 100, "EUR");
+        ApprovalLimit fine = new ApprovalLimit("FINE_REDUCTION_AMOUNT", 5, "XTS");
+
+        assertThat(ApprovalLimit.validSet(List.of(refundXts, fine, refundEur)))
+                .containsExactly(fine, refundEur, refundXts);
+        assertThat(ApprovalLimit.validSet(List.of())).isEmpty();
+        assertThatThrownBy(() -> ApprovalLimit.validSet(List.of(refundXts, new ApprovalLimit("REFUND_AMOUNT", 9,
+                "XTS")))).satisfies(code("LIMIT_DUPLICATE"));
+        assertThatThrownBy(() -> ApprovalLimit.validSet(null)).satisfies(code("LIMITS_REQUIRED"));
+        List<ApprovalLimit> tooMany = IntStream.rangeClosed(0, ApprovalLimit.MAX_PER_ROLE)
+                .mapToObj(i -> new ApprovalLimit("T" + i, i, "XTS")).toList();
+        assertThatThrownBy(() -> ApprovalLimit.validSet(tooMany)).satisfies(code("TOO_MANY_LIMITS"));
+    }
+
+    // ------------------------------------------------------------------ delegation (CC-004)
+
+    private static final Actor HOLDER = new Actor("u-holder", "holder");
+
+    @Test
+    @Tag("CC-004")
+    @DisplayName("CC-004: a delegation copies the source's role and scopes for a set period and points at the source")
+    void delegationCopiesSource() {
+        RoleAssignment source = assignment("u-holder", null, NOW.plusSeconds(86_400));
+        RoleAssignment d = RoleAssignment.delegate(source, "u-deputy", "deputy", null, NOW.plusSeconds(3600),
+                "annual leave", HOLDER, NOW);
+
+        assertThat(d.isDelegation()).isTrue();
+        assertThat(d.source()).isEqualTo(RoleAssignment.Source.DELEGATION);
+        assertThat(d.delegatedFrom()).isEqualTo(source.id());
+        assertThat(d.roleCode()).isEqualTo(source.roleCode());
+        assertThat(d.scopes()).isEqualTo(source.scopes());
+        assertThat(d.subjectId()).isEqualTo("u-deputy");
+        assertThat(d.assignedBy()).isEqualTo(HOLDER);
+        assertThat(d.validFrom()).isEqualTo(NOW);
+        assertThat(source.isDelegation()).isFalse();
+        assertThat(source.delegatedFrom()).isNull();
+        // The delegation may end exactly when the source ends.
+        assertThat(RoleAssignment.delegate(source, "u-deputy", null, null, source.validTo(), "cover", HOLDER, NOW)
+                .validTo()).isEqualTo(source.validTo());
+    }
+
+    @Test
+    @Tag("CC-004")
+    @Tag("CC-002")
+    @DisplayName("CC-004: no re-delegation, no self- or holder-delegation, an end is required and bounded by the source")
+    void delegationRules() {
+        RoleAssignment open = assignment("u-holder", null, null);
+        RoleAssignment bounded = assignment("u-holder", null, NOW.plusSeconds(3600));
+        Instant hour = NOW.plusSeconds(3600);
+        RoleAssignment delegation = RoleAssignment.delegate(open, "u-deputy", null, null, hour, "cover", HOLDER, NOW);
+
+        assertThatThrownBy(() -> RoleAssignment.delegate(delegation, "u-third", null, null, hour, "again",
+                new Actor("u-deputy", null), NOW)).satisfies(code("REDELEGATION"));
+        assertThatThrownBy(() -> RoleAssignment.delegate(open, "u-holder", null, null, hour, "self", HOLDER, NOW))
+                .satisfies(code("SELF_DELEGATION"))
+                .satisfies(t -> assertThat(((DomainException) t).kind())
+                        .isEqualTo(DomainException.Kind.SEGREGATION_OF_DUTIES));
+        assertThatThrownBy(() -> RoleAssignment.delegate(open, "u-holder", null, null, hour, "to holder", ADMIN, NOW))
+                .satisfies(code("DELEGATE_IS_HOLDER"));
+        assertThatThrownBy(() -> RoleAssignment.delegate(open, "u-deputy", null, null, null, "open-ended", HOLDER,
+                NOW)).satisfies(code("DELEGATION_END_REQUIRED"));
+        assertThatThrownBy(() -> RoleAssignment.delegate(bounded, "u-deputy", null, null, hour.plusSeconds(1),
+                "too long", HOLDER, NOW)).satisfies(code("DELEGATION_EXCEEDS_SOURCE"));
+        assertThatThrownBy(() -> RoleAssignment.delegate(open, "u-deputy", null, NOW.minusSeconds(60),
+                NOW.minusSeconds(1), "past", HOLDER, NOW)).satisfies(code("VALIDITY_IN_PAST"));
+        assertThatThrownBy(() -> RoleAssignment.delegate(open, "bad id!", null, null, hour, "x y z", HOLDER, NOW))
+                .satisfies(code("INVALID_SUBJECT"));
+    }
+
+    @Test
+    @Tag("CC-004")
+    @DisplayName("CC-004: revoked or expired assignments cannot be delegated; future ones can")
+    void delegationNeedsLiveSource() {
+        RoleAssignment revoked = assignment("u-holder", null, null);
+        revoked.revoke(ADMIN, "left", NOW);
+        RoleAssignment expiring = assignment("u-holder", null, NOW.plusSeconds(60));
+        RoleAssignment future = assignment("u-holder", NOW.plusSeconds(600), null);
+
+        assertThatThrownBy(() -> RoleAssignment.delegate(revoked, "u-deputy", null, null, NOW.plusSeconds(30),
+                "cover", HOLDER, NOW)).satisfies(code("SOURCE_NOT_ACTIVE"));
+        assertThatThrownBy(() -> RoleAssignment.delegate(expiring, "u-deputy", null, null, NOW.plusSeconds(120),
+                "cover", HOLDER, NOW.plusSeconds(60))).satisfies(code("SOURCE_NOT_ACTIVE"));
+        assertThat(future.isActiveOrUpcomingAt(NOW)).isTrue();
+        assertThat(RoleAssignment.delegate(future, "u-deputy", null, NOW.plusSeconds(600), NOW.plusSeconds(1200),
+                "cover", HOLDER, NOW).validFrom()).isEqualTo(NOW.plusSeconds(600));
+    }
+
+    @Test
+    @Tag("CC-004")
+    @DisplayName("CC-004: a rehydrated assignment has a source assignment exactly when it is a delegation")
+    void delegationShapeIsConsistent() {
+        java.util.UUID id = java.util.UUID.randomUUID();
+        assertThatThrownBy(() -> new RoleAssignment(id, "u-1", null, "REFDATA_MAKER", AssignmentScopes.national(),
+                NOW, null, "reason", ADMIN, NOW, RoleAssignment.Status.ACTIVE, null, null, null,
+                RoleAssignment.Source.DELEGATION, null)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new RoleAssignment(id, "u-1", null, "REFDATA_MAKER", AssignmentScopes.national(),
+                NOW, null, "reason", ADMIN, NOW, RoleAssignment.Status.ACTIVE, null, null, null,
+                RoleAssignment.Source.DIRECT, id)).isInstanceOf(IllegalArgumentException.class);
     }
 }

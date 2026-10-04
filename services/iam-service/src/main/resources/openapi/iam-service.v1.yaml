@@ -15,6 +15,13 @@ info:
     - Data scopes (CC-001): an administrator can only see, create or revoke assignments whose scopes lie within their
       own scope for that permission. Out-of-scope assignments are reported as not found.
 
+    - Approval limits (CC-003): each role carries configurable limits (limit type + currency + maximum amount in
+      minor units). A subject's limit for a target is the highest limit among their grants that reach it; no limit
+      means no authority to approve. Values are never hard-coded.
+    - Delegation (CC-004): the holder of an assignment (or an administrator whose `iam.delegation.create` scope
+      covers it) can delegate it to another subject for a set period. The delegation is a role assignment with
+      `source = DELEGATION`; it grants nothing once its source is revoked or expired, and cannot be re-delegated.
+
     Scope values: `*` means "all" for that dimension and must then be the only value. Otherwise values are codes
     (`^[A-Z0-9_]{1,40}$`) owned by geo-service (regions, centres) and reference data (modules); see Q-027.
     Only GET/POST/PUT are used (INT-003); business actions are POSTs to sub-resources.
@@ -26,6 +33,8 @@ tags:
   - name: Permissions
   - name: Roles
   - name: Role assignments
+  - name: Approval limits
+  - name: Delegations
   - name: Effective authorisation
 
 paths:
@@ -148,6 +157,53 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
 
+  /v1/roles/{roleCode}/approval-limits:
+    get:
+      tags: [Approval limits]
+      operationId: getRoleApprovalLimits
+      summary: Approval limits of a role (CC-003)
+      x-itms-permission: iam.role.read
+      parameters:
+        - $ref: '#/components/parameters/RoleCode'
+      responses:
+        '200':
+          description: The role's limits and its current version
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoleApprovalLimits' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+    put:
+      tags: [Approval limits]
+      operationId: replaceRoleApprovalLimits
+      summary: Replace all approval limits of a role (CC-003)
+      description: |
+        Full replacement: limits left out are removed. `version` must be the role version the administrator saw;
+        the change creates a new role version (409 if stale). Each (limitType, currency) may appear once. The caller
+        cannot change limits of a role they hold (CC-002). Audited with the old and new limits (CC-120); every
+        limit keeps a history (DAT-002).
+      x-itms-permission: iam.role.manage
+      parameters:
+        - $ref: '#/components/parameters/RoleCode'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReplaceApprovalLimitsRequest' }
+      responses:
+        '200':
+          description: Limits replaced
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoleApprovalLimits' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
   /v1/role-assignments:
     get:
       tags: [Role assignments]
@@ -250,13 +306,102 @@ paths:
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
 
+  /v1/delegations:
+    get:
+      tags: [Delegations]
+      operationId: listDelegations
+      summary: Delegations where a subject is the delegate, the delegator or the holder of the source (CC-004)
+      description: |
+        `subjectId` defaults to the caller. A caller always sees delegations they are party to (delegate,
+        delegator or holder of the source); others are returned only within the caller's `iam.delegation.read`
+        scope. A listed ACTIVE delegation grants nothing outside its period or once its source has ended.
+      x-itms-permission: authenticated
+      x-itms-scope: assignment-scopes
+      parameters:
+        - name: subjectId
+          in: query
+          schema: { $ref: '#/components/schemas/SubjectId' }
+      responses:
+        '200':
+          description: Delegations, newest first
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoleAssignmentCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [Delegations]
+      operationId: createDelegation
+      summary: Delegate an assignment to another subject for a set period (CC-004)
+      description: |
+        Allowed for the holder of the source assignment, or for a caller whose `iam.delegation.create` scope covers
+        the source's scopes (on behalf of an absent holder). The delegation copies the source's role and scopes.
+        Rules: `validTo` is required and cannot be later than the source's `validTo`; the source must be ACTIVE,
+        not expired and not itself a delegation; nobody delegates to themselves (CC-002) or to the holder. Which
+        roles may be delegated is open (Q-033; interim: all). Audited as `IAM_DELEGATION_CREATED`.
+      x-itms-permission: authenticated
+      x-itms-scope: assignment-scopes
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateDelegationRequest' }
+      responses:
+        '201':
+          description: Delegation created
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoleAssignment' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/delegations/{delegationId}/revocations:
+    post:
+      tags: [Delegations]
+      operationId: revokeDelegation
+      summary: Revoke an active delegation, with a reason (CC-004)
+      description: |
+        Allowed for the delegator, the holder of the source, or a caller whose `iam.delegation.create` scope covers
+        the delegation. Audited as `IAM_DELEGATION_REVOKED`. 404 if the id is not a delegation visible to the caller.
+      x-itms-permission: authenticated
+      x-itms-scope: assignment-scopes
+      parameters:
+        - name: delegationId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReasonRequest' }
+      responses:
+        '200':
+          description: Delegation revoked
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoleAssignment' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+
   /v1/me/authorisation:
     get:
       tags: [Effective authorisation]
       operationId: getMyAuthorisation
       summary: The caller's effective authorisation now (CC-001)
       description: |
-        Grants from every assignment that is active now (status ACTIVE, inside its validity period, role active).
+        Grants from every assignment that is active now (status ACTIVE, inside its validity period, role active;
+        for a delegation, its source must be active now too). Each grant carries its role's approval limits (CC-003).
         Each grant keeps its own scopes; grants are never merged across assignments, so a permission held in one
         scope is not widened by another assignment. Every ITMS service resolves its callers' permissions from this
         endpoint by forwarding the caller's bearer token (ADR-022). Any authenticated subject may read their own.
@@ -428,15 +573,75 @@ components:
       properties:
         items: { type: array, items: { $ref: '#/components/schemas/RoleVersion' } }
 
+    LimitType:
+      type: string
+      description: Kind of approval, for example `REFUND_AMOUNT` or `FINE_REDUCTION_AMOUNT` (CC-003).
+      pattern: '^[A-Z0-9_]{1,40}$'
+    CurrencyCode:
+      type: string
+      description: ISO 4217 alphabetic code (Q-006; `XTS` in tests).
+      pattern: '^[A-Z]{3}$'
+    ApprovalLimit:
+      type: object
+      additionalProperties: false
+      required: [limitType, maxAmountMinor, currency]
+      properties:
+        limitType: { $ref: '#/components/schemas/LimitType' }
+        maxAmountMinor:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Highest amount the holder may approve, in minor units of `currency`.
+        currency: { $ref: '#/components/schemas/CurrencyCode' }
+    RoleApprovalLimits:
+      type: object
+      additionalProperties: false
+      required: [roleCode, version, items]
+      properties:
+        roleCode: { $ref: '#/components/schemas/RoleCode' }
+        version: { type: integer, format: int64, description: Current role version }
+        items: { type: array, items: { $ref: '#/components/schemas/ApprovalLimit' } }
+    ReplaceApprovalLimitsRequest:
+      type: object
+      additionalProperties: false
+      required: [limits, version, reason]
+      properties:
+        limits:
+          type: array
+          maxItems: 100
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/ApprovalLimit' }
+        version: { type: integer, format: int64, minimum: 1 }
+        reason: { $ref: '#/components/schemas/Reason' }
+
     AssignmentStatus:
       type: string
       enum: [ACTIVE, REVOKED]
+    AssignmentSource:
+      type: string
+      description: DIRECT = assigned by an administrator; DELEGATION = delegated from `delegatedFrom` (CC-004).
+      enum: [DIRECT, DELEGATION]
+    CreateDelegationRequest:
+      type: object
+      additionalProperties: false
+      required: [sourceAssignmentId, delegateSubjectId, validTo, reason]
+      properties:
+        sourceAssignmentId: { type: string, format: uuid }
+        delegateSubjectId: { $ref: '#/components/schemas/SubjectId' }
+        delegateUsername: { type: string, minLength: 1, maxLength: 200 }
+        validFrom: { type: string, format: date-time, description: Defaults to now }
+        validTo: { type: string, format: date-time }
+        reason: { $ref: '#/components/schemas/Reason' }
     RoleAssignment:
       type: object
       additionalProperties: false
-      required: [id, subjectId, roleCode, scopes, validFrom, status, reason, assignedBy, assignedAt]
+      required: [id, subjectId, roleCode, scopes, validFrom, status, source, reason, assignedBy, assignedAt]
       properties:
         id: { type: string, format: uuid }
+        source: { $ref: '#/components/schemas/AssignmentSource' }
+        delegatedFrom:
+          oneOf: [ { type: string, format: uuid }, { type: 'null' } ]
+          description: Source assignment of a delegation; null for DIRECT.
         subjectId: { $ref: '#/components/schemas/SubjectId' }
         subjectUsername: { oneOf: [ { type: string }, { type: 'null' } ] }
         roleCode: { $ref: '#/components/schemas/RoleCode' }
@@ -478,11 +683,15 @@ components:
     Grant:
       type: object
       additionalProperties: false
-      required: [roleCode, permissions, scopes]
+      required: [roleCode, permissions, scopes, approvalLimits]
       properties:
         roleCode: { $ref: '#/components/schemas/RoleCode' }
         permissions: { type: array, items: { $ref: '#/components/schemas/PermissionCode' } }
         scopes: { $ref: '#/components/schemas/Scopes' }
+        approvalLimits:
+          type: array
+          description: The role's approval limits (CC-003); they apply within this grant's scopes only.
+          items: { $ref: '#/components/schemas/ApprovalLimit' }
         validTo: { oneOf: [ { type: string, format: date-time }, { type: 'null' } ] }
     EffectiveAuthorisation:
       type: object

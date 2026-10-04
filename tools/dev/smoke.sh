@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # End-to-end smoke test against the running local stack, with real Keycloak tokens:
 # grants come from iam-service, not the token (ADR-022) -> maker submits a change -> maker cannot approve ->
-# checker approves (CC-114) -> item readable.
+# checker approves (CC-114) -> item readable -> maker delegates their role to the checker and revokes it (CC-004).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 set -a; source infra/local/.env; set +a
@@ -58,5 +58,27 @@ name=$(curl -sf -H "Authorization: Bearer $MAKER" "$API/v1/reference-lists/HOLD_
 [[ "$name" == "Smoke test" ]] || { echo "FAIL: unexpected name $name"; exit 1; }
 versions=$(curl -sf -H "Authorization: Bearer $CHECKER" "$API/v1/reference-lists/HOLD_TYPE/items/$CODE/history" | json_field "['items'].__len__()")
 [[ "$versions" == 1 ]] || { echo "FAIL: expected 1 version, got $versions"; exit 1; }
+
+echo "7. Grants carry approval limits (CC-003); the maker delegates their role to the checker for an hour (CC-004)"
+ADMIN_TOKEN=$(token dev.iam-admin "$DEV_IAM_ADMIN_PASSWORD")
+sub() { printf '%s' "$1" | "$PY" -c "import base64,json,sys; p=sys.stdin.read().split('.')[1]; print(json.loads(base64.urlsafe_b64decode(p+'='*(-len(p)%4)))['sub'])"; }
+MAKER_SUB=$(sub "$MAKER"); CHECKER_SUB=$(sub "$CHECKER")
+has_limits=$(curl -sf -H "Authorization: Bearer $MAKER" "$IAM/v1/me/authorisation" | json_field "['grants'][0].__contains__('approvalLimits')")
+[[ "$has_limits" == True ]] || { echo "FAIL: grants have no approvalLimits field"; exit 1; }
+source_id=$(curl -sf -H "Authorization: Bearer $ADMIN_TOKEN" \
+  "$IAM/v1/role-assignments?subjectId=$MAKER_SUB&roleCode=REFDATA_MAKER&status=ACTIVE" | json_field "['items'][0]['id']")
+until=$("$PY" -c "import datetime as d; print((d.datetime.now(d.timezone.utc)+d.timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%SZ'))")
+delegation_id=$(curl -sf -H "Authorization: Bearer $MAKER" -H 'Content-Type: application/json' -H 'X-Channel: BACKOFFICE' \
+  "$IAM/v1/delegations" \
+  -d "{\"sourceAssignmentId\":\"$source_id\",\"delegateSubjectId\":\"$CHECKER_SUB\",\"validTo\":\"$until\",\"reason\":\"smoke test cover\"}" \
+  | json_field "['id']")
+roles=$(curl -sf -H "Authorization: Bearer $CHECKER" "$IAM/v1/me/authorisation" | "$PY" -c "import json,sys; print(sorted(g['roleCode'] for g in json.load(sys.stdin)['grants']))")
+[[ "$roles" == *REFDATA_MAKER* ]] || { echo "FAIL: delegate did not get the role: $roles"; exit 1; }
+
+echo "8. The maker revokes the delegation; the checker loses the delegated role"
+curl -sf -o /dev/null -H "Authorization: Bearer $MAKER" -H 'Content-Type: application/json' -H 'X-Channel: BACKOFFICE' \
+  "$IAM/v1/delegations/$delegation_id/revocations" -d '{"reason":"smoke test done"}'
+roles=$(curl -sf -H "Authorization: Bearer $CHECKER" "$IAM/v1/me/authorisation" | "$PY" -c "import json,sys; print(sorted(g['roleCode'] for g in json.load(sys.stdin)['grants']))")
+[[ "$roles" != *REFDATA_MAKER* ]] || { echo "FAIL: delegate still holds the role: $roles"; exit 1; }
 
 echo "SMOKE OK"

@@ -8,7 +8,7 @@ import java.util.List;
  */
 public class DomainException extends RuntimeException {
 
-    public enum Kind { VALIDATION, NOT_FOUND, CONFLICT, SEGREGATION_OF_DUTIES, OUT_OF_SCOPE }
+    public enum Kind { VALIDATION, NOT_FOUND, CONFLICT, SEGREGATION_OF_DUTIES, OUT_OF_SCOPE, NOT_PERMITTED }
 
     private final Kind kind;
     private final String code;
@@ -41,6 +41,11 @@ public class DomainException extends RuntimeException {
 
     public static DomainException outOfScope(String code, String message) {
         return new DomainException(Kind.OUT_OF_SCOPE, code, message, List.of("CC-001"));
+    }
+
+    /** The caller is not entitled to this action on this resource (for example not the holder of an assignment). */
+    public static DomainException notPermitted(String code, String message, String requirementRef) {
+        return new DomainException(Kind.NOT_PERMITTED, code, message, List.of(requirementRef));
     }
 
     public Kind kind() {

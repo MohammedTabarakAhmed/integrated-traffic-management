@@ -1,6 +1,7 @@
 package gov.itms.iam.application;
 
 import gov.itms.iam.domain.Actor;
+import gov.itms.iam.domain.ApprovalLimit;
 import gov.itms.iam.domain.AssignmentScopes;
 import gov.itms.iam.domain.BilingualName;
 import gov.itms.iam.domain.Codes;
@@ -26,31 +27,42 @@ import java.util.UUID;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Identity and access use cases (CC-001, CC-002, CC-005). Every change is audited in the same transaction as the data
- * it changes (CC-120, NFR-015). Data-scope rules for administrators:
+ * Identity and access use cases (CC-001…CC-005). Every change is audited in the same transaction as the data it
+ * changes (CC-120, NFR-015). Data-scope rules for administrators:
  * <ul>
  *   <li>assignments outside the caller's {@value #ASSIGNMENT_READ} scope are invisible (not found);</li>
- *   <li>creating or revoking an assignment needs {@value #ASSIGNMENT_MANAGE} covering all of its scopes.</li>
+ *   <li>creating or revoking an assignment needs {@value #ASSIGNMENT_MANAGE} covering all of its scopes;</li>
+ *   <li>delegations (CC-004) are made by the holder of the source, or by a caller whose {@value #DELEGATION_CREATE}
+ *       covers the source's scopes; parties to a delegation always see it, others need {@value #DELEGATION_READ}
+ *       in scope.</li>
  * </ul>
  */
 public class IamService {
 
     public static final String ASSIGNMENT_READ = "iam.assignment.read";
     public static final String ASSIGNMENT_MANAGE = "iam.assignment.manage";
+    public static final String DELEGATION_CREATE = "iam.delegation.create";
+    public static final String DELEGATION_READ = "iam.delegation.read";
     static final String BOOTSTRAP_ROLE = "IT_ADMINISTRATOR";
     static final String BOOTSTRAP_ACTOR = "SYSTEM_BOOTSTRAP";
 
     private final PermissionRepository permissions;
     private final RoleRepository roles;
     private final AssignmentRepository assignments;
+    private final ApprovalLimitRepository limits;
     private final AuditRecorder audit;
     private final Clock clock;
 
+    /** A role's approval limits together with the role version they belong to (CC-003). */
+    public record RoleApprovalLimits(String roleCode, long version, List<ApprovalLimit> limits) {
+    }
+
     public IamService(PermissionRepository permissions, RoleRepository roles, AssignmentRepository assignments,
-                      AuditRecorder audit, Clock clock) {
+                      ApprovalLimitRepository limits, AuditRecorder audit, Clock clock) {
         this.permissions = permissions;
         this.roles = roles;
         this.assignments = assignments;
+        this.limits = limits;
         this.audit = audit;
         this.clock = clock;
     }
@@ -105,14 +117,7 @@ public class IamService {
                            Collection<String> perms, long expectedVersion, String reason, Actor actor,
                            Authorisation caller) {
         String why = Codes.reason(reason);
-        Role current = role(code);
-        if (caller.roles().contains(current.code())) {
-            throw DomainException.segregationOfDuties("ROLE_HELD_BY_ACTOR",
-                    "you hold this role, so another administrator must change it");
-        }
-        if (current.version() != expectedVersion) {
-            throw DomainException.conflict("STALE_ROLE", "the role was changed by someone else; open it again");
-        }
+        Role current = changeableRole(code, expectedVersion, caller);
         Role updated = current.redefine(name, description, active, perms);
         requireCatalogue(updated.permissions());
         if (!roles.update(updated, expectedVersion, actor.id(), now())) {
@@ -120,6 +125,38 @@ public class IamService {
         }
         audit.record("IAM_ROLE_UPDATED", "Role", updated.code(), current, updated, why);
         return updated;
+    }
+
+    // ---------------------------------------------------------------- approval limits (CC-003)
+
+    @Transactional(readOnly = true)
+    public RoleApprovalLimits approvalLimits(String code) {
+        Role role = role(code);
+        return new RoleApprovalLimits(role.code(), role.version(), limits.forRole(role.code()));
+    }
+
+    /**
+     * Replaces all approval limits of a role (CC-003). The change creates a new role version, so a stale edit is
+     * refused, and the same rule as {@link #updateRole} applies: nobody changes the limits of a role they hold.
+     */
+    @Transactional
+    public RoleApprovalLimits replaceApprovalLimits(String code, Collection<ApprovalLimit> newLimits,
+                                                    long expectedVersion, String reason, Actor actor,
+                                                    Authorisation caller) {
+        String why = Codes.reason(reason);
+        List<ApprovalLimit> valid = ApprovalLimit.validSet(newLimits);
+        Role current = changeableRole(code, expectedVersion, caller);
+        Role next = current.redefine(current.name(), current.description(), current.active(), current.permissions());
+        Instant at = now();
+        if (!roles.update(next, expectedVersion, actor.id(), at)) {
+            throw DomainException.conflict("STALE_ROLE", "the role was changed by someone else; open it again");
+        }
+        RoleApprovalLimits before = new RoleApprovalLimits(current.code(), current.version(),
+                limits.forRole(current.code()));
+        limits.replace(current.code(), valid, actor.id(), at);
+        RoleApprovalLimits after = new RoleApprovalLimits(next.code(), next.version(), valid);
+        audit.record("IAM_APPROVAL_LIMITS_REPLACED", "Role", current.code(), before, after, why);
+        return after;
     }
 
     // ---------------------------------------------------------------- assignments
@@ -183,27 +220,120 @@ public class IamService {
         return assignment;
     }
 
+    // ---------------------------------------------------------------- delegation (CC-004)
+
+    /**
+     * Delegations in which {@code partyId} (default: the caller) is the delegate, the delegator or the holder of the
+     * source, limited to what the caller may see.
+     */
+    @Transactional(readOnly = true)
+    public List<RoleAssignment> delegations(String partyId, Authorisation caller) {
+        String party = partyId == null ? caller.subjectId() : Codes.subjectId(partyId);
+        return assignments.delegations(party).stream().filter(d -> canSeeDelegation(d, caller)).toList();
+    }
+
+    /**
+     * Delegates an assignment for a set period (CC-004). Allowed for the holder of the source, or for a caller whose
+     * {@value #DELEGATION_CREATE} scope covers the source (on behalf of an absent holder).
+     */
+    @Transactional
+    @SuppressWarnings("java:S107") // every field of the delegation request plus the caller
+    public RoleAssignment delegate(UUID sourceId, String delegateId, String delegateUsername, Instant validFrom,
+                                   Instant validTo, String reason, Actor actor, Authorisation caller) {
+        RoleAssignment source = assignments.find(sourceId).orElseThrow(() -> assignmentNotFound(sourceId));
+        Scopes sourceScopes = toScopes(source.scopes());
+        boolean holder = source.subjectId().equals(actor.id());
+        if (!holder && !caller.covers(DELEGATION_CREATE, sourceScopes)) {
+            if (caller.covers(ASSIGNMENT_READ, sourceScopes) || caller.covers(DELEGATION_READ, sourceScopes)) {
+                throw DomainException.notPermitted("DELEGATION_NOT_ALLOWED",
+                        "only the holder of the assignment or an administrator in scope can delegate it", "CC-004");
+            }
+            throw assignmentNotFound(sourceId);
+        }
+        RoleAssignment delegation = RoleAssignment.delegate(source, delegateId, delegateUsername, validFrom, validTo,
+                reason, actor, now());
+        Role role = roles.find(source.roleCode()).orElseThrow(() -> roleNotFound(source.roleCode()));
+        if (!role.active()) {
+            throw DomainException.validation("ROLE_INACTIVE", "role " + role.code() + " is inactive", role.code());
+        }
+        boolean duplicate = assignments.search(delegation.subjectId(), role.code(), RoleAssignment.Status.ACTIVE)
+                .stream().anyMatch(a -> a.scopes().equals(delegation.scopes()) && overlaps(a, delegation));
+        if (duplicate) {
+            throw DomainException.conflict("ASSIGNMENT_EXISTS",
+                    "the subject already holds this role with the same scopes for an overlapping period");
+        }
+        assignments.insert(delegation);
+        audit.record("IAM_DELEGATION_CREATED", "RoleAssignment", delegation.id().toString(), null,
+                snapshot(delegation), delegation.reason());
+        return delegation;
+    }
+
+    /** Revokes a delegation: by the delegator, the holder of the source, or an administrator in scope (CC-004). */
+    @Transactional
+    public RoleAssignment revokeDelegation(UUID id, String reason, Actor actor, Authorisation caller) {
+        RoleAssignment delegation = assignments.findForUpdate(id)
+                .filter(RoleAssignment::isDelegation)
+                .filter(d -> canSeeDelegation(d, caller))
+                .orElseThrow(() -> DomainException.notFound("DELEGATION_NOT_FOUND",
+                        "delegation " + id + " does not exist"));
+        boolean party = delegation.assignedBy().id().equals(actor.id()) || holderOfSource(delegation, actor.id());
+        if (!party && !caller.covers(DELEGATION_CREATE, toScopes(delegation.scopes()))) {
+            throw DomainException.notPermitted("DELEGATION_NOT_ALLOWED",
+                    "only the delegator, the holder or an administrator in scope can revoke this delegation",
+                    "CC-004");
+        }
+        Map<String, Object> before = snapshot(delegation);
+        delegation.revoke(actor, reason, now());
+        assignments.saveRevocation(delegation);
+        audit.record("IAM_DELEGATION_REVOKED", "RoleAssignment", id.toString(), before, snapshot(delegation),
+                delegation.revocationReason());
+        return delegation;
+    }
+
+    private boolean canSeeDelegation(RoleAssignment d, Authorisation caller) {
+        String me = caller.subjectId();
+        Scopes scopes = toScopes(d.scopes());
+        return d.subjectId().equals(me) || d.assignedBy().id().equals(me) || holderOfSource(d, me)
+                || caller.covers(DELEGATION_READ, scopes) || caller.covers(DELEGATION_CREATE, scopes);
+    }
+
+    private boolean holderOfSource(RoleAssignment delegation, String subjectId) {
+        return assignments.find(delegation.delegatedFrom()).map(s -> s.subjectId().equals(subjectId)).orElse(false);
+    }
+
     // ---------------------------------------------------------------- effective authorisation
 
     /**
-     * Grants of every assignment effective now whose role is active (CC-001). Grants keep their own scopes and are
-     * never merged.
+     * Grants of every assignment effective now whose role is active (CC-001), each with its role's approval limits
+     * (CC-003). A delegation grants nothing unless its source is effective now too (CC-004). Grants keep their own
+     * scopes and are never merged.
      */
     @Transactional(readOnly = true)
     public Authorisation effectiveAuthorisation(String subjectId) {
         Instant now = now();
         Map<String, Optional<Role>> roleCache = new LinkedHashMap<>();
+        Map<String, List<Authorisation.ApprovalLimit>> limitCache = new LinkedHashMap<>();
         List<Authorisation.Grant> grants = new ArrayList<>();
         for (RoleAssignment a : assignments.search(subjectId, null, RoleAssignment.Status.ACTIVE)) {
-            if (!a.isEffectiveAt(now)) {
+            if (!a.isEffectiveAt(now) || (a.isDelegation() && !sourceEffectiveAt(a, now))) {
                 continue;
             }
             roleCache.computeIfAbsent(a.roleCode(), roles::find)
                     .filter(Role::active)
                     .ifPresent(r -> grants.add(new Authorisation.Grant(r.code(), r.permissions(), toScopes(a.scopes()),
-                            a.validTo())));
+                            a.validTo(), limitCache.computeIfAbsent(r.code(), this::grantLimits))));
         }
         return new Authorisation(subjectId, grants, now);
+    }
+
+    private boolean sourceEffectiveAt(RoleAssignment delegation, Instant at) {
+        return assignments.find(delegation.delegatedFrom()).map(s -> s.isEffectiveAt(at)).orElse(false);
+    }
+
+    private List<Authorisation.ApprovalLimit> grantLimits(String roleCode) {
+        return limits.forRole(roleCode).stream()
+                .map(l -> new Authorisation.ApprovalLimit(l.limitType(), l.maxAmountMinor(), l.currency()))
+                .toList();
     }
 
     /**
@@ -231,6 +361,19 @@ public class IamService {
     }
 
     // ---------------------------------------------------------------- internals
+
+    /** The role, if the caller may change it: they do not hold it (CC-002) and saw its current version. */
+    private Role changeableRole(String code, long expectedVersion, Authorisation caller) {
+        Role current = role(code);
+        if (caller.roles().contains(current.code())) {
+            throw DomainException.segregationOfDuties("ROLE_HELD_BY_ACTOR",
+                    "you hold this role, so another administrator must change it");
+        }
+        if (current.version() != expectedVersion) {
+            throw DomainException.conflict("STALE_ROLE", "the role was changed by someone else; open it again");
+        }
+        return current;
+    }
 
     private void requireCatalogue(Set<String> requested) {
         Set<String> missing = new TreeSet<>(requested);
@@ -273,6 +416,8 @@ public class IamService {
         m.put("validFrom", a.validFrom().toString());
         m.put("validTo", a.validTo() == null ? null : a.validTo().toString());
         m.put("status", a.status().name());
+        m.put("source", a.source().name());
+        m.put("delegatedFrom", a.delegatedFrom() == null ? null : a.delegatedFrom().toString());
         m.put("assignedBy", a.assignedBy().id());
         m.put("revokedBy", a.revokedBy() == null ? null : a.revokedBy().id());
         m.put("revocationReason", a.revocationReason());

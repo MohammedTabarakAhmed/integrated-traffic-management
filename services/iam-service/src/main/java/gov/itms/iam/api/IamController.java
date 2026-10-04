@@ -1,11 +1,15 @@
 package gov.itms.iam.api;
 
+import gov.itms.iam.api.ApiModels.ApprovalLimitDto;
 import gov.itms.iam.api.ApiModels.Collection;
+import gov.itms.iam.api.ApiModels.CreateDelegationRequest;
 import gov.itms.iam.api.ApiModels.CreateRoleAssignmentRequest;
 import gov.itms.iam.api.ApiModels.CreateRoleRequest;
 import gov.itms.iam.api.ApiModels.EffectiveAuthorisationDto;
 import gov.itms.iam.api.ApiModels.PermissionDto;
 import gov.itms.iam.api.ApiModels.ReasonRequest;
+import gov.itms.iam.api.ApiModels.ReplaceApprovalLimitsRequest;
+import gov.itms.iam.api.ApiModels.RoleApprovalLimitsDto;
 import gov.itms.iam.api.ApiModels.RoleAssignmentDto;
 import gov.itms.iam.api.ApiModels.RoleDto;
 import gov.itms.iam.api.ApiModels.RoleVersionDto;
@@ -82,6 +86,21 @@ class IamController {
         return new Collection<>(service.roleHistory(roleCode).stream().map(RoleVersionDto::of).toList());
     }
 
+    @GetMapping("/roles/{roleCode}/approval-limits")
+    @PreAuthorize("hasAuthority('iam.role.read')")
+    RoleApprovalLimitsDto approvalLimits(@PathVariable String roleCode) {
+        return RoleApprovalLimitsDto.of(service.approvalLimits(roleCode));
+    }
+
+    @PutMapping("/roles/{roleCode}/approval-limits")
+    @PreAuthorize("hasAuthority('iam.role.manage')")
+    RoleApprovalLimitsDto replaceApprovalLimits(@PathVariable String roleCode,
+                                                @Valid @RequestBody ReplaceApprovalLimitsRequest body) {
+        return RoleApprovalLimitsDto.of(service.replaceApprovalLimits(roleCode,
+                body.limits().stream().map(ApprovalLimitDto::toDomain).toList(), body.version(), body.reason(),
+                actor(), actors.authorisation()));
+    }
+
     @GetMapping("/role-assignments")
     @PreAuthorize("hasAuthority('iam.assignment.read')")
     Collection<RoleAssignmentDto> assignments(@RequestParam(required = false) String subjectId,
@@ -110,6 +129,28 @@ class IamController {
     @PreAuthorize("hasAuthority('iam.assignment.manage')")
     RoleAssignmentDto revoke(@PathVariable UUID assignmentId, @Valid @RequestBody ReasonRequest body) {
         return RoleAssignmentDto.of(service.revoke(assignmentId, body.reason(), actor(), actors.authorisation()));
+    }
+
+    /** Any authenticated subject; the service decides visibility (parties, or iam.delegation.read in scope). */
+    @GetMapping("/delegations")
+    Collection<RoleAssignmentDto> delegations(@RequestParam(required = false) String subjectId) {
+        return new Collection<>(service.delegations(subjectId, actors.authorisation()).stream()
+                .map(RoleAssignmentDto::of).toList());
+    }
+
+    /** Any authenticated subject; the service allows the holder or iam.delegation.create in scope (CC-004). */
+    @PostMapping("/delegations")
+    ResponseEntity<RoleAssignmentDto> delegate(@Valid @RequestBody CreateDelegationRequest body) {
+        RoleAssignment d = service.delegate(body.sourceAssignmentId(), body.delegateSubjectId(),
+                body.delegateUsername(), body.validFrom(), body.validTo(), body.reason(), actor(),
+                actors.authorisation());
+        return ResponseEntity.created(URI.create("/v1/role-assignments/" + d.id())).body(RoleAssignmentDto.of(d));
+    }
+
+    @PostMapping("/delegations/{delegationId}/revocations")
+    RoleAssignmentDto revokeDelegation(@PathVariable UUID delegationId, @Valid @RequestBody ReasonRequest body) {
+        return RoleAssignmentDto.of(service.revokeDelegation(delegationId, body.reason(), actor(),
+                actors.authorisation()));
     }
 
     /** Any authenticated subject may read their own grants; every ITMS service calls this (ADR-022). */

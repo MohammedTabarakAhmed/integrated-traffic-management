@@ -9,12 +9,17 @@ import java.util.UUID;
  * <ul>
  *   <li>nobody assigns a role to themselves (CC-002);</li>
  *   <li>the validity period must end after it starts and must not already be over;</li>
- *   <li>assignments are never deleted; they end by date or by revocation, which happens once and needs a reason.</li>
+ *   <li>assignments are never deleted; they end by date or by revocation, which happens once and needs a reason;</li>
+ *   <li>a delegation (CC-004) copies a DIRECT assignment's role and scopes to another subject for a set period that
+ *       ends no later than the source; it is never delegated again.</li>
  * </ul>
  */
 public final class RoleAssignment {
 
     public enum Status { ACTIVE, REVOKED }
+
+    /** DIRECT = assigned by an administrator; DELEGATION = delegated from another assignment (CC-004). */
+    public enum Source { DIRECT, DELEGATION }
 
     private final UUID id;
     private final String subjectId;
@@ -26,6 +31,8 @@ public final class RoleAssignment {
     private final String reason;
     private final Actor assignedBy;
     private final Instant assignedAt;
+    private final Source source;
+    private final UUID delegatedFrom;
     private Status status;
     private Actor revokedBy;
     private Instant revokedAt;
@@ -34,7 +41,8 @@ public final class RoleAssignment {
     @SuppressWarnings("java:S107") // full rehydration constructor used by the repository
     public RoleAssignment(UUID id, String subjectId, String subjectUsername, String roleCode, AssignmentScopes scopes,
                           Instant validFrom, Instant validTo, String reason, Actor assignedBy, Instant assignedAt,
-                          Status status, Actor revokedBy, Instant revokedAt, String revocationReason) {
+                          Status status, Actor revokedBy, Instant revokedAt, String revocationReason,
+                          Source source, UUID delegatedFrom) {
         this.id = Objects.requireNonNull(id);
         this.subjectId = Codes.subjectId(subjectId);
         this.subjectUsername = subjectUsername == null || subjectUsername.isBlank() ? null : subjectUsername.strip();
@@ -49,6 +57,11 @@ public final class RoleAssignment {
         this.revokedBy = revokedBy;
         this.revokedAt = revokedAt;
         this.revocationReason = revocationReason;
+        this.source = Objects.requireNonNull(source);
+        this.delegatedFrom = delegatedFrom;
+        if ((source == Source.DELEGATION) != (delegatedFrom != null)) {
+            throw new IllegalArgumentException("a delegation, and only a delegation, has a source assignment");
+        }
         if (validTo != null && !validTo.isAfter(validFrom)) {
             throw DomainException.validation("VALIDITY_INVALID", "the end of the validity period must be after its start");
         }
@@ -62,6 +75,46 @@ public final class RoleAssignment {
             throw DomainException.segregationOfDuties("SELF_ASSIGNMENT",
                     "nobody can assign a role to themselves; another administrator must do it");
         }
+        Instant from = checkWindow(validFrom, validTo, now);
+        return new RoleAssignment(UUID.randomUUID(), subjectId, subjectUsername, roleCode, scopes, from, validTo,
+                reason, assignedBy, now, Status.ACTIVE, null, null, null, Source.DIRECT, null);
+    }
+
+    /**
+     * Delegates {@code source} to {@code delegateId} until {@code validTo} (CC-004). Who may delegate (the holder or
+     * an in-scope administrator) is decided by the caller of this method; the rules on the delegation itself are
+     * enforced here. {@code validFrom} defaults to {@code now}.
+     */
+    @SuppressWarnings("java:S107") // every field of the delegation request
+    public static RoleAssignment delegate(RoleAssignment source, String delegateId, String delegateUsername,
+                                          Instant validFrom, Instant validTo, String reason, Actor delegator,
+                                          Instant now) {
+        String delegate = Codes.subjectId(delegateId);
+        if (source.source == Source.DELEGATION) {
+            throw DomainException.validation("REDELEGATION", "a delegated role cannot be delegated again");
+        }
+        if (!source.isActiveOrUpcomingAt(now)) {
+            throw DomainException.conflict("SOURCE_NOT_ACTIVE", "the assignment to delegate has ended or was revoked");
+        }
+        if (delegate.equals(delegator.id())) {
+            throw DomainException.segregationOfDuties("SELF_DELEGATION", "nobody can delegate a role to themselves");
+        }
+        if (delegate.equals(source.subjectId)) {
+            throw DomainException.validation("DELEGATE_IS_HOLDER", "the delegate already holds this assignment");
+        }
+        if (validTo == null) {
+            throw DomainException.validation("DELEGATION_END_REQUIRED", "a delegation needs an end date and time");
+        }
+        if (source.validTo != null && validTo.isAfter(source.validTo)) {
+            throw DomainException.validation("DELEGATION_EXCEEDS_SOURCE",
+                    "a delegation cannot end after the assignment it delegates");
+        }
+        Instant from = checkWindow(validFrom, validTo, now);
+        return new RoleAssignment(UUID.randomUUID(), delegate, delegateUsername, source.roleCode, source.scopes, from,
+                validTo, reason, delegator, now, Status.ACTIVE, null, null, null, Source.DELEGATION, source.id);
+    }
+
+    private static Instant checkWindow(Instant validFrom, Instant validTo, Instant now) {
         Instant from = validFrom != null ? validFrom : now;
         if (validTo != null && !validTo.isAfter(from)) {
             throw DomainException.validation("VALIDITY_INVALID", "the end of the validity period must be after its start");
@@ -69,8 +122,7 @@ public final class RoleAssignment {
         if (validTo != null && !validTo.isAfter(now)) {
             throw DomainException.validation("VALIDITY_IN_PAST", "the validity period would already be over");
         }
-        return new RoleAssignment(UUID.randomUUID(), subjectId, subjectUsername, roleCode, scopes, from, validTo,
-                reason, assignedBy, now, Status.ACTIVE, null, null, null);
+        return from;
     }
 
     /** Ends the assignment now, with a reason. */
@@ -90,6 +142,15 @@ public final class RoleAssignment {
         return status == Status.ACTIVE && !at.isBefore(validFrom) && (validTo == null || at.isBefore(validTo));
     }
 
+    /** Active and not yet ended at {@code at} (it may start later). */
+    public boolean isActiveOrUpcomingAt(Instant at) {
+        return status == Status.ACTIVE && (validTo == null || at.isBefore(validTo));
+    }
+
+    public boolean isDelegation() {
+        return source == Source.DELEGATION;
+    }
+
     public UUID id() { return id; }
     public String subjectId() { return subjectId; }
     public String subjectUsername() { return subjectUsername; }
@@ -104,4 +165,6 @@ public final class RoleAssignment {
     public Actor revokedBy() { return revokedBy; }
     public Instant revokedAt() { return revokedAt; }
     public String revocationReason() { return revocationReason; }
+    public Source source() { return source; }
+    public UUID delegatedFrom() { return delegatedFrom; }
 }

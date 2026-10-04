@@ -21,7 +21,7 @@ public class IamConfiguration {
     @Bean
     IamService iamService(JdbcClient jdbc, AuditRecorder audit, Clock clock) {
         return new IamService(new JdbcPermissionRepository(jdbc), new JdbcRoleRepository(jdbc),
-                new JdbcAssignmentRepository(jdbc), audit, clock);
+                new JdbcAssignmentRepository(jdbc), new JdbcApprovalLimitRepository(jdbc), audit, clock);
     }
 
     /** Replaces the platform's remote resolver: iam-service is the source of grants (ADR-022). */

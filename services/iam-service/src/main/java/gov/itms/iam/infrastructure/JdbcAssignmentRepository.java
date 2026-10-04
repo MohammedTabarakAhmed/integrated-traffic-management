@@ -18,7 +18,7 @@ class JdbcAssignmentRepository implements AssignmentRepository {
     private static final String SELECT = """
             select id, subject_id, subject_username, role_code, regions, centres, modules, valid_from, valid_to,
                    status, reason, assigned_by, assigned_by_username, assigned_at, revoked_by, revoked_by_username,
-                   revoked_at, revocation_reason
+                   revoked_at, revocation_reason, source, delegated_from
               from role_assignment""";
 
     private final JdbcClient jdbc;
@@ -32,10 +32,10 @@ class JdbcAssignmentRepository implements AssignmentRepository {
         jdbc.sql("""
                         insert into role_assignment (id, subject_id, subject_username, role_code, regions, centres,
                             modules, valid_from, valid_to, status, reason, assigned_by, assigned_by_username,
-                            assigned_at)
+                            assigned_at, source, delegated_from)
                         values (:id, :subject, :subjectName, :role, string_to_array(:regions, ','),
                             string_to_array(:centres, ','), string_to_array(:modules, ','), :from, :to, :status,
-                            :reason, :by, :byName, :at)""")
+                            :reason, :by, :byName, :at, :source, :delegatedFrom)""")
                 .param("id", a.id())
                 .param("subject", a.subjectId())
                 .param("subjectName", a.subjectUsername())
@@ -50,6 +50,8 @@ class JdbcAssignmentRepository implements AssignmentRepository {
                 .param("by", a.assignedBy().id())
                 .param("byName", a.assignedBy().username())
                 .param("at", Timestamp.from(a.assignedAt()))
+                .param("source", a.source().name())
+                .param("delegatedFrom", a.delegatedFrom())
                 .update();
     }
 
@@ -92,6 +94,18 @@ class JdbcAssignmentRepository implements AssignmentRepository {
                 .query((rs, n) -> map(rs)).list();
     }
 
+    @Override
+    public List<RoleAssignment> delegations(String partyId) {
+        return jdbc.sql(SELECT + " d " + """
+                         where d.source = 'DELEGATION'
+                           and (cast(:party as varchar) is null or d.subject_id = :party or d.assigned_by = :party
+                                or exists (select 1 from role_assignment s
+                                            where s.id = d.delegated_from and s.subject_id = :party))
+                         order by d.assigned_at desc, d.id""")
+                .param("party", partyId)
+                .query((rs, n) -> map(rs)).list();
+    }
+
     private static RoleAssignment map(ResultSet rs) throws SQLException {
         String revokedBy = rs.getString("revoked_by");
         return new RoleAssignment(
@@ -103,7 +117,8 @@ class JdbcAssignmentRepository implements AssignmentRepository {
                 new Actor(rs.getString("assigned_by"), rs.getString("assigned_by_username")),
                 instant(rs, "assigned_at"), RoleAssignment.Status.valueOf(rs.getString("status")),
                 revokedBy == null ? null : new Actor(revokedBy, rs.getString("revoked_by_username")),
-                instant(rs, "revoked_at"), rs.getString("revocation_reason"));
+                instant(rs, "revoked_at"), rs.getString("revocation_reason"),
+                RoleAssignment.Source.valueOf(rs.getString("source")), rs.getObject("delegated_from", UUID.class));
     }
 
     private static Instant instant(ResultSet rs, String column) throws SQLException {

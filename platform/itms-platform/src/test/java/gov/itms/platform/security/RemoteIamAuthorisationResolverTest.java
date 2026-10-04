@@ -64,7 +64,25 @@ class RemoteIamAuthorisationResolverTest {
         assertThat(a.permissions()).containsExactly("refdata.change.submit", "refdata.read");
         assertThat(a.allows("refdata.read", ScopeTarget.region("R1"))).isTrue();
         assertThat(a.allows("refdata.read", ScopeTarget.region("R2"))).isFalse();
+        assertThat(a.grants().get(0).approvalLimits()).as("absent field = no limits").isEmpty();
         server.verify();
+    }
+
+    @Test
+    @Tag("CC-003")
+    @DisplayName("CC-003: approval limits from iam-service are read per grant and apply within its scopes")
+    void readsApprovalLimits() {
+        server.expect(requestTo("http://iam/v1/me/authorisation")).andRespond(withSuccess("""
+                {"subjectId":"u1","evaluatedAt":"2026-10-04T08:00:00Z","grants":[
+                  {"roleCode":"FINANCE_OFFICER","permissions":["fin.refund.approve"],
+                   "scopes":{"regions":["R1"],"centres":["*"],"modules":["*"]},"validTo":null,
+                   "approvalLimits":[{"limitType":"REFUND_AMOUNT","maxAmountMinor":250000,"currency":"XTS"}]}]}""",
+                MediaType.APPLICATION_JSON));
+
+        Authorisation a = resolver.resolve(jwt("tok-limits", "u1"));
+
+        assertThat(a.approvalLimit("REFUND_AMOUNT", "XTS", ScopeTarget.region("R1"))).hasValue(250_000);
+        assertThat(a.approvalLimit("REFUND_AMOUNT", "XTS", ScopeTarget.region("R2"))).isEmpty();
     }
 
     @Test

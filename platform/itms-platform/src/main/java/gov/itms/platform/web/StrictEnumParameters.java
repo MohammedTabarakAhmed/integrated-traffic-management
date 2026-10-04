@@ -1,4 +1,4 @@
-package gov.itms.iam.api;
+package gov.itms.platform.web;
 
 import java.beans.PropertyEditorSupport;
 import org.springframework.web.bind.WebDataBinder;
@@ -7,13 +7,14 @@ import org.springframework.web.bind.annotation.InitBinder;
 
 /**
  * Query and path parameters bound to an enum (for example {@code ?status=OPEN}) must be exactly a constant's name
- * (SEC-022). Spring's own enum binding trims the value first, so {@code "OPEN "} or {@code "OPEN\0"} would be accepted.
- * This editor, registered for every enum type, refuses surrounding whitespace and control characters; the exact,
- * case-sensitive name lookup that follows refuses everything else. A refused value is answered 400
- * {@code VALIDATION_FAILED}. An empty parameter still means "not given".
+ * (SEC-022). When its conversion service fails, Spring falls back to its own enum binding, which trims the value first,
+ * so {@code "OPEN "} or {@code "OPEN\0"} would be accepted. This editor, registered for every enum type, takes
+ * precedence over both: it refuses surrounding whitespace and control characters, and the exact, case-sensitive name
+ * lookup that follows refuses everything else. A refused value is answered 400 {@code VALIDATION_FAILED}. An empty
+ * parameter still means "not given". Registered by {@code ItmsPlatformAutoConfiguration}.
  */
-@ControllerAdvice(basePackageClasses = StrictEnumParameters.class)
-class StrictEnumParameters {
+@ControllerAdvice
+public class StrictEnumParameters {
 
     @InitBinder
     void strictEnums(WebDataBinder binder) {

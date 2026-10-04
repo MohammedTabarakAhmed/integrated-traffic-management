@@ -354,4 +354,45 @@ class ReferenceDataApiIT {
         assertThat(listInRegion.valueStream().filter(n -> n.get("code").asString().equals("DECEASED")))
                 .singleElement().satisfies(n -> assertThat(n.get("regionCode").asString()).isEqualTo("R2"));
     }
+
+    @Test
+    @Tag("SEC-022")
+    @DisplayName("SEC-022: request bodies are never silently coerced; a wrong JSON type or NUL is refused with 400")
+    void requestBodiesAreNotCoerced() throws Exception {
+        Map<String, Object> bad = new java.util.LinkedHashMap<>();
+        bad.put("changeType as a number (enum position)", 1);
+        bad.put("changeType padded", "CREATE_ITEM ");
+        bad.put("changeType with NUL", "CREATE_ITEM\0");
+        bad.put("reason as a number", 12345);
+        bad.put("reason with NUL", "integration\0test");
+        bad.put("sortOrder as a fraction", 5.9);
+        bad.put("sortOrder as a string", "7");
+        bad.put("effectiveFrom as a number", 20000);
+        bad.put("effectiveFrom beyond year 9999", "+10000-01-01");
+        int n = 0;
+        for (Map.Entry<String, Object> e : bad.entrySet()) {
+            Map<String, Object> change = new java.util.HashMap<>(createItem("IT_COERCE_" + n++, "Coerce"));
+            String field = e.getKey().substring(0, e.getKey().indexOf(' '));
+            change.put(field, e.getValue());
+            MvcResult r = postAs("/v1/reference-data-changes", change, maker());
+            assertThat(r.getResponse().getStatus()).as(e.getKey() + " -> " + r.getResponse().getContentAsString())
+                    .isEqualTo(400);
+            assertThat(body(r).get("code").asString()).isEqualTo("VALIDATION_FAILED");
+        }
+    }
+
+    @Test
+    @Tag("SEC-022")
+    @DisplayName("SEC-022: an enum query parameter must be exactly the name; padding or a control character is 400")
+    void enumQueryParameterIsExact() throws Exception {
+        for (String status : List.of("PENDING_APPROVAL ", " PENDING_APPROVAL", "pending_approval",
+                "PENDING_APPROVAL\0", "PENDING_APPROVAL\t")) {
+            MvcResult r = mvc.perform(get("/v1/reference-data-changes").param("status", status).with(maker())
+                    .header("X-Channel", "BACKOFFICE")
+                    .accept(MediaType.APPLICATION_JSON, MediaType.APPLICATION_PROBLEM_JSON)).andReturn();
+            assertThat(r.getResponse().getStatus()).as("status [" + status.replace('\0', '0') + "]").isEqualTo(400);
+        }
+        assertThat(getAs("/v1/reference-data-changes?status=PENDING_APPROVAL", maker()).getResponse().getStatus())
+                .isEqualTo(200);
+    }
 }

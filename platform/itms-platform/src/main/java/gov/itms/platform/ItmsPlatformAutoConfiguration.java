@@ -5,12 +5,16 @@ import gov.itms.platform.audit.JdbcAuditRecorder;
 import gov.itms.platform.security.CurrentActorProvider;
 import gov.itms.platform.security.ItmsSecurityAutoConfiguration;
 import gov.itms.platform.web.CorrelationIdFilter;
+import gov.itms.platform.web.JsonInputHardening;
 import gov.itms.platform.web.ProblemHandler;
+import gov.itms.platform.web.StrictEnumParameters;
 import java.time.Clock;
+import java.time.Duration;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.jackson.autoconfigure.JsonMapperBuilderCustomizer;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.MessageSource;
 import org.springframework.context.annotation.Bean;
@@ -35,10 +39,26 @@ public class ItmsPlatformAutoConfiguration {
         return new ProblemHandler(messageSource);
     }
 
+    /** Request bodies are never silently coerced (SEC-022); see {@link JsonInputHardening}. */
+    @Bean
+    JsonMapperBuilderCustomizer itmsJsonInputHardening() {
+        return JsonInputHardening.customizer();
+    }
+
+    /** Enum query and path parameters must be the exact name (SEC-022). */
+    @Bean
+    StrictEnumParameters itmsStrictEnumParameters() {
+        return new StrictEnumParameters();
+    }
+
+    /**
+     * UTC, ticking in microseconds: the precision PostgreSQL {@code timestamptz} stores. A server-generated time in a
+     * response or an audit record (CC-120) therefore always equals the stored value.
+     */
     @Bean
     @ConditionalOnMissingBean
     Clock itmsClock() {
-        return Clock.systemUTC();
+        return Clock.tick(Clock.systemUTC(), Duration.ofNanos(1_000));
     }
 
     @Bean

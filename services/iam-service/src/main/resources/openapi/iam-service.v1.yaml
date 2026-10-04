@@ -37,10 +37,12 @@ info:
     (`^[A-Z0-9_]{1,40}$`) owned by geo-service (regions, centres) and reference data (modules); see Q-027.
     Only GET/POST/PUT are used (INT-003); business actions are POSTs to sub-resources.
 
-    Request bodies (SEC-022), all endpoints: enum values are their names as JSON strings (a number is refused, never
-    read as a position); text must not contain the NUL character (U+0000); every `date-time` must be an RFC 3339
-    instant with a four-digit year, between `0001-01-01T00:00:00Z` and `9999-12-31T23:59:59.999999Z`. A body that
-    breaks one of these rules is refused with 400 `VALIDATION_FAILED`.
+    Request input (SEC-022), all endpoints, enforced once in itms-platform: enum values are exactly their names as
+    JSON strings (a number, padding or a control character is refused), also in query parameters; integers are
+    JSON integers (a fraction, exponent form, string or boolean is refused, never truncated); text is a JSON
+    string without the NUL character (U+0000); every `date-time` / `date` is an RFC 3339 string with a
+    four-digit year (`0001-01-01T00:00:00Z` .. `9999-12-31T23:59:59.999999Z`; dates `0001-01-01` .. `9999-12-31`).
+    A request that breaks one of these rules is refused with 400 `VALIDATION_FAILED`.
 servers:
   - url: /
 security:

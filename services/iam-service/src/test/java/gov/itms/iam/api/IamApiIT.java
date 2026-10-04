@@ -1331,4 +1331,27 @@ class IamApiIT {
         }
         assertThat(stripped).isEqualTo(java).contains(0x09, 0x2003).doesNotContain(0xA0, 0x2007, 0x202F);
     }
+
+    @Test
+    @Tag("INT-003")
+    @Tag("CH-053")
+    @DisplayName("INT-003/CH-053: an unsupported method is 405 with Allow, a non-JSON body 415; never 500")
+    void unsupportedMethodAndMediaType() throws Exception {
+        MvcResult delete = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                .delete("/v1/roles").with(ADMIN).accept(MediaType.APPLICATION_JSON, MediaType.APPLICATION_PROBLEM_JSON))
+                .andReturn();
+        assertThat(delete.getResponse().getStatus()).isEqualTo(405);
+        assertThat(delete.getResponse().getHeader("Allow")).contains("GET").contains("POST");
+        assertThat(body(delete).get("code").asString()).isEqualTo("METHOD_NOT_ALLOWED");
+
+        MvcResult arabic = mvc.perform(put("/v1/roles").with(ADMIN).header("Accept-Language", "ar")
+                .accept(MediaType.APPLICATION_JSON, MediaType.APPLICATION_PROBLEM_JSON)).andReturn();
+        assertThat(arabic.getResponse().getStatus()).isEqualTo(405);
+        assertThat(body(arabic).get("detail").asString()).isEqualTo("هذا الإجراء غير متاح لهذا المورد.");
+
+        MvcResult text = mvc.perform(post("/v1/roles").with(ADMIN).contentType(MediaType.TEXT_PLAIN).content("x")
+                .accept(MediaType.APPLICATION_JSON, MediaType.APPLICATION_PROBLEM_JSON)).andReturn();
+        assertThat(text.getResponse().getStatus()).isEqualTo(415);
+        assertThat(body(text).get("code").asString()).isEqualTo("UNSUPPORTED_MEDIA_TYPE");
+    }
 }

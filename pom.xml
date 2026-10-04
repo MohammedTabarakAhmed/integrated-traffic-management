@@ -25,6 +25,7 @@
     <module>platform/itms-platform</module>
     <module>services/reference-data-service</module>
     <module>services/iam-service</module>
+    <module>services/transaction-service</module>
   </modules>
 
   <properties>

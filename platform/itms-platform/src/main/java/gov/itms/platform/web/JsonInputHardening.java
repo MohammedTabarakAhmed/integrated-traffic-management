@@ -31,6 +31,8 @@ import tools.jackson.databind.type.LogicalType;
  * rules fails JSON binding and is answered 400 {@code VALIDATION_FAILED} by {@link ProblemHandler}, instead of reaching
  * the domain or the database. No value is silently coerced into something the caller did not send:
  * <ul>
+ *   <li>a request body may contain only the fields its contract defines ({@code additionalProperties: false});
+ *       an unknown field is refused, never silently ignored;</li>
  *   <li>an enum value must be exactly its name as a JSON string; a number (enum position), padding or any other
  *       character is refused (query parameters: {@link StrictEnumParameters});</li>
  *   <li>an integer (for example an approval limit's amount, CC-003) must be a JSON integer; a fraction, an exponent
@@ -71,6 +73,7 @@ public final class JsonInputHardening {
         });
         return builder -> builder
                 .enable(EnumFeature.FAIL_ON_NUMBERS_FOR_ENUMS)
+                .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
                 .disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT)
                 .withCoercionConfig(LogicalType.Integer, cfg -> cfg
                         .setCoercion(CoercionInputShape.Float, CoercionAction.Fail)

@@ -33,6 +33,20 @@ services:
       timeout: 3s
       retries: 20
 
+  transaction-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: transaction
+      POSTGRES_USER: ${TXN_DB_USER:?run tools/dev/up.sh}
+      POSTGRES_PASSWORD: ${TXN_DB_PASSWORD:?run tools/dev/up.sh}
+    volumes:
+      - transaction-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d transaction"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   keycloak:
     image: quay.io/keycloak/keycloak:26.8.0
     command: ["start-dev", "--import-realm"]
@@ -101,6 +115,32 @@ services:
       timeout: 3s
       retries: 30
 
+  transaction-service:
+    build: ../../services/transaction-service
+    environment:
+      TXN_DB_URL: jdbc:postgresql://transaction-postgres:5432/transaction
+      TXN_DB_USER: ${TXN_DB_USER}
+      TXN_DB_PASSWORD: ${TXN_DB_PASSWORD}
+      ITMS_OIDC_ISSUER: http://localhost:8180/realms/itms
+      ITMS_OIDC_JWKS_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/certs
+      ITMS_AUTHORISATION_SOURCE: iam
+      ITMS_IAM_URL: http://iam-service:8080
+    ports:
+      - "127.0.0.1:8083:8080"
+    depends_on:
+      transaction-postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      iam-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/actuator/health/readiness | grep -q UP"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
 volumes:
   refdata-db:
   iam-db:
+  transaction-db:

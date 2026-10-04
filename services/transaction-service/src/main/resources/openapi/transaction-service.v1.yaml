@@ -1,0 +1,511 @@
+openapi: 3.1.0
+info:
+  title: ITMS Transaction Service
+  version: 1.0.0
+  description: |
+    The service catalogue (CC-020): every service the Authority offers, with its code, names in both languages,
+    module, eligible customer types, channels, required documents, fee, rule and workflow references, SLA and the
+    regions where it is offered. Administrators enable or disable a service per region and per channel with
+    effective dates (CC-026). Every catalogue change goes through maker-checker approval and is audited (CC-114,
+    CC-002, CC-120); definitions keep a full version history (DAT-002, CC-121). Transactions (CC-021 to CC-027) come
+    in a later slice.
+
+    Availability of a service for (region, channel, date): the service must be offered in that region and on that
+    channel by its definition; then the availability rule in force with the most specific match decides
+    (region and channel, then region only, then channel only, then all regions and channels). With no rule in
+    force the service is available (ADR-028).
+
+    Only GET/POST are used (INT-003); business actions are POSTs to sub-resources.
+    Request input (SEC-022), all endpoints, enforced once in itms-platform: enum values are exactly their names as
+    JSON strings (a number, padding or a control character is refused), also in query parameters; integers are
+    JSON integers (a fraction, exponent form, string or boolean is refused, never truncated); text is a JSON
+    string without the NUL character (U+0000); every `date-time` / `date` is an RFC 3339 string with a
+    four-digit year (`0001-01-01T00:00:00Z` .. `9999-12-31T23:59:59.999999Z`; dates `0001-01-01` .. `9999-12-31`).
+    A request that breaks one of these rules is refused with 400 `VALIDATION_FAILED`.
+servers:
+  - url: /
+security:
+  - bearerAuth: []
+tags:
+  - name: Service catalogue
+  - name: Catalogue changes (maker-checker)
+
+paths:
+  /v1/services:
+    get:
+      tags: [Service catalogue]
+      operationId: listServices
+      summary: List service definitions; with region and channel, only the services available there
+      description: |
+        Without filters, every service definition. With both `region` and `channel`, only the services available in
+        that region on that channel on `date` (default today, in UTC). Giving only one of the two is refused.
+      x-itms-permission: authenticated
+      parameters:
+        - name: region
+          in: query
+          schema: { $ref: '#/components/schemas/Code' }
+        - name: channel
+          in: query
+          schema: { $ref: '#/components/schemas/Channel' }
+        - name: date
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: Service definitions, by code
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServiceDefinitionCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/services/{serviceCode}:
+    get:
+      tags: [Service catalogue]
+      operationId: getService
+      x-itms-permission: authenticated
+      parameters:
+        - $ref: '#/components/parameters/ServiceCode'
+      responses:
+        '200':
+          description: Service definition
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServiceDefinition' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/services/{serviceCode}/history:
+    get:
+      tags: [Service catalogue]
+      operationId: getServiceHistory
+      summary: Every version of a service definition, oldest first (DAT-002, CC-121)
+      x-itms-permission: catalogue.history.read
+      parameters:
+        - $ref: '#/components/parameters/ServiceCode'
+      responses:
+        '200':
+          description: Versions
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServiceVersionCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/services/{serviceCode}/availability-rules:
+    get:
+      tags: [Service catalogue]
+      operationId: listAvailabilityRules
+      summary: Availability rules of a service, including ended ones (CC-026)
+      x-itms-permission: authenticated
+      parameters:
+        - $ref: '#/components/parameters/ServiceCode'
+      responses:
+        '200':
+          description: Rules, by effective start
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AvailabilityRuleCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/services/{serviceCode}/availability:
+    get:
+      tags: [Service catalogue]
+      operationId: getAvailability
+      summary: Whether a service is available in a region on a channel on a date (CC-026)
+      x-itms-permission: authenticated
+      parameters:
+        - $ref: '#/components/parameters/ServiceCode'
+        - name: region
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/Code' }
+        - name: channel
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/Channel' }
+        - name: date
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: Availability and the reason for it
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Availability' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/catalogue-changes:
+    post:
+      tags: [Catalogue changes (maker-checker)]
+      operationId: submitCatalogueChange
+      summary: Submit a catalogue change for approval (maker)
+      x-itms-permission: catalogue.change.submit
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SubmitCatalogueChangeRequest' }
+      responses:
+        '201':
+          description: Change submitted, pending approval
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CatalogueChange' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [Catalogue changes (maker-checker)]
+      operationId: listCatalogueChanges
+      summary: List catalogue changes, optionally by status
+      x-itms-permission: catalogue.change.read
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/ChangeStatus' }
+      responses:
+        '200':
+          description: Changes, newest first
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CatalogueChangeCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+
+  /v1/catalogue-changes/{changeId}:
+    get:
+      tags: [Catalogue changes (maker-checker)]
+      operationId: getCatalogueChange
+      x-itms-permission: catalogue.change.read
+      parameters:
+        - $ref: '#/components/parameters/ChangeId'
+      responses:
+        '200':
+          description: Change
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CatalogueChange' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/catalogue-changes/{changeId}/approvals:
+    post:
+      tags: [Catalogue changes (maker-checker)]
+      operationId: approveCatalogueChange
+      summary: Approve and apply a pending change (checker; must not be the maker, CC-002)
+      x-itms-permission: catalogue.change.approve
+      parameters:
+        - $ref: '#/components/parameters/ChangeId'
+      responses:
+        '200':
+          description: Change approved and applied
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CatalogueChange' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/catalogue-changes/{changeId}/rejections:
+    post:
+      tags: [Catalogue changes (maker-checker)]
+      operationId: rejectCatalogueChange
+      summary: Reject a pending change (checker; must not be the maker)
+      x-itms-permission: catalogue.change.approve
+      parameters:
+        - $ref: '#/components/parameters/ChangeId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RejectCatalogueChangeRequest' }
+      responses:
+        '200':
+          description: Change rejected
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CatalogueChange' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    ServiceCode:
+      name: serviceCode
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/ServiceCode' }
+    ChangeId:
+      name: changeId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid bearer token
+    Problem:
+      description: Problem details (RFC 9457, API_SPECIFICATION §3)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+
+  schemas:
+    Code:
+      type: string
+      pattern: '^[A-Z0-9_]{1,40}$'
+    ServiceCode:
+      type: string
+      description: Part of every transaction reference `<ServiceCode>-<Region>-<YYYY>-<Sequence>` (CC-021), so no hyphen.
+      pattern: '^[A-Z][A-Z0-9_]{1,19}$'
+    RegionOrAll:
+      type: string
+      description: A region code, or `*` for every region
+      pattern: '^(\*|[A-Z0-9_]{1,40})$'
+    Channel:
+      type: string
+      description: Channels of API_SPECIFICATION §2 (`X-Channel`)
+      enum: [PORTAL, APP, BACKOFFICE, PARTNER, KIOSK, CALLCENTRE, FIELD, ASSISTANT, AGENT]
+    ChannelOrAll:
+      type: string
+      enum: [PORTAL, APP, BACKOFFICE, PARTNER, KIOSK, CALLCENTRE, FIELD, ASSISTANT, AGENT, '*']
+    Sla:
+      type: string
+      description: Standard completion time as an ISO 8601 duration in days, hours or minutes (for example `P5D`, `PT4H`)
+      pattern: '^P(?!$)(\d{1,4}D)?(T(?=\d)(\d{1,5}H)?(\d{1,6}M)?)?$'
+    BilingualName:
+      type: object
+      additionalProperties: false
+      required: [nl, en]
+      properties:
+        nl: { type: string, minLength: 1, maxLength: 200, description: National language (RTL) }
+        en: { type: string, minLength: 1, maxLength: 200 }
+    CodeSet:
+      type: array
+      uniqueItems: true
+      maxItems: 50
+      items: { $ref: '#/components/schemas/Code' }
+    ServiceSpec:
+      type: object
+      additionalProperties: false
+      description: |
+        What a service definition records (CC-020). `regions` lists the regions where the service is offered, or `["*"]`
+        for every region (CC-112). `anyRegion` false means a customer may use the service only in their file's home
+        region (CC-113 exception). `allowsConcurrentOpen` true lets one subject hold several open transactions of this
+        service (CC-027, Q-005). `feeCode`, `ruleSetCode` and `workflowCode` refer to the fee, rule and workflow
+        services, which are built later (Q-044).
+      required: [code, name, module, customerTypes, channels, requiredDocuments, sla, regions, anyRegion,
+                 allowsConcurrentOpen]
+      properties:
+        code: { $ref: '#/components/schemas/ServiceCode' }
+        name: { $ref: '#/components/schemas/BilingualName' }
+        module: { $ref: '#/components/schemas/Code' }
+        customerTypes:
+          type: array
+          uniqueItems: true
+          minItems: 1
+          maxItems: 50
+          items: { $ref: '#/components/schemas/Code' }
+        channels:
+          type: array
+          uniqueItems: true
+          minItems: 1
+          items: { $ref: '#/components/schemas/Channel' }
+        requiredDocuments: { $ref: '#/components/schemas/CodeSet' }
+        feeCode: { oneOf: [ { $ref: '#/components/schemas/Code' }, { type: 'null' } ] }
+        ruleSetCode: { oneOf: [ { $ref: '#/components/schemas/Code' }, { type: 'null' } ] }
+        workflowCode: { oneOf: [ { $ref: '#/components/schemas/Code' }, { type: 'null' } ] }
+        sla: { $ref: '#/components/schemas/Sla' }
+        regions:
+          type: array
+          uniqueItems: true
+          minItems: 1
+          maxItems: 100
+          items: { $ref: '#/components/schemas/RegionOrAll' }
+        anyRegion: { type: boolean }
+        allowsConcurrentOpen: { type: boolean }
+    ServiceDefinition:
+      type: object
+      additionalProperties: false
+      description: The definition in force and its version.
+      required: [definition, version, updatedAt]
+      properties:
+        definition: { $ref: '#/components/schemas/ServiceSpec' }
+        version: { type: integer, format: int64 }
+        updatedAt: { type: string, format: date-time }
+    ServiceDefinitionCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/ServiceDefinition' } }
+    ServiceVersion:
+      type: object
+      additionalProperties: false
+      description: One historical version and the period during which it was current (DAT-002).
+      required: [definition, version, validFrom, changedBy]
+      properties:
+        definition: { $ref: '#/components/schemas/ServiceSpec' }
+        version: { type: integer, format: int64 }
+        validFrom: { type: string, format: date-time }
+        validTo: { oneOf: [ { type: string, format: date-time }, { type: 'null' } ] }
+        changedBy: { type: string }
+        changeId: { oneOf: [ { type: string, format: uuid }, { type: 'null' } ] }
+    ServiceVersionCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/ServiceVersion' } }
+    AvailabilityRuleSpec:
+      type: object
+      additionalProperties: false
+      description: |
+        Enables or disables the service for a region (or `*`) and a channel (or `*`) from `effectiveFrom` to
+        `effectiveTo` (inclusive; open-ended when absent). A rule may only enable regions and channels the definition
+        offers. Rules with the same region and channel may not overlap in time.
+      required: [region, channel, enabled, effectiveFrom]
+      properties:
+        region: { $ref: '#/components/schemas/RegionOrAll' }
+        channel: { $ref: '#/components/schemas/ChannelOrAll' }
+        enabled: { type: boolean }
+        effectiveFrom: { type: string, format: date }
+        effectiveTo: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
+    AvailabilityRule:
+      type: object
+      additionalProperties: false
+      required: [id, serviceCode, region, channel, enabled, effectiveFrom, changeId]
+      properties:
+        id: { type: string, format: uuid }
+        serviceCode: { $ref: '#/components/schemas/ServiceCode' }
+        region: { $ref: '#/components/schemas/RegionOrAll' }
+        channel: { $ref: '#/components/schemas/ChannelOrAll' }
+        enabled: { type: boolean }
+        effectiveFrom: { type: string, format: date }
+        effectiveTo: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
+        changeId: { type: string, format: uuid }
+    AvailabilityRuleCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/AvailabilityRule' } }
+    Availability:
+      type: object
+      additionalProperties: false
+      required: [serviceCode, region, channel, date, available, reason]
+      properties:
+        serviceCode: { $ref: '#/components/schemas/ServiceCode' }
+        region: { $ref: '#/components/schemas/Code' }
+        channel: { $ref: '#/components/schemas/Channel' }
+        date: { type: string, format: date }
+        available: { type: boolean }
+        reason:
+          type: string
+          enum: [OFFERED, NOT_OFFERED_IN_REGION, NOT_OFFERED_ON_CHANNEL, ENABLED_BY_RULE, DISABLED_BY_RULE]
+        ruleId: { oneOf: [ { type: string, format: uuid }, { type: 'null' } ] }
+    ChangeType:
+      type: string
+      enum: [CREATE_SERVICE, UPDATE_SERVICE, ADD_AVAILABILITY_RULE, END_AVAILABILITY_RULE]
+    ChangeStatus:
+      type: string
+      enum: [PENDING_APPROVAL, APPROVED, REJECTED]
+    SubmitCatalogueChangeRequest:
+      type: object
+      additionalProperties: false
+      required: [changeType, serviceCode, reason]
+      description: |
+        CREATE_SERVICE: `service` (its code equal to `serviceCode`).
+        UPDATE_SERVICE: `service` and `baseVersion` (the version the maker saw).
+        ADD_AVAILABILITY_RULE: `rule`.
+        END_AVAILABILITY_RULE: `ruleId` and `endDate` (the rule's last day in force).
+      properties:
+        changeType: { $ref: '#/components/schemas/ChangeType' }
+        serviceCode: { $ref: '#/components/schemas/ServiceCode' }
+        service: { $ref: '#/components/schemas/ServiceSpec' }
+        baseVersion: { type: integer, format: int64, minimum: 1 }
+        rule: { $ref: '#/components/schemas/AvailabilityRuleSpec' }
+        ruleId: { type: string, format: uuid }
+        endDate: { type: string, format: date }
+        reason: { type: string, minLength: 3, maxLength: 500 }
+    RejectCatalogueChangeRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 3, maxLength: 500 }
+    Actor:
+      type: object
+      additionalProperties: false
+      required: [id]
+      properties:
+        id: { type: string }
+        username: { oneOf: [ { type: string }, { type: 'null' } ] }
+    CatalogueChange:
+      type: object
+      additionalProperties: false
+      required: [id, changeType, status, serviceCode, reason, maker, submittedAt]
+      properties:
+        id: { type: string, format: uuid }
+        changeType: { $ref: '#/components/schemas/ChangeType' }
+        status: { $ref: '#/components/schemas/ChangeStatus' }
+        serviceCode: { $ref: '#/components/schemas/ServiceCode' }
+        service: { oneOf: [ { $ref: '#/components/schemas/ServiceSpec' }, { type: 'null' } ] }
+        baseVersion: { oneOf: [ { type: integer, format: int64 }, { type: 'null' } ] }
+        rule: { oneOf: [ { $ref: '#/components/schemas/AvailabilityRuleSpec' }, { type: 'null' } ] }
+        ruleId: { oneOf: [ { type: string, format: uuid }, { type: 'null' } ] }
+        endDate: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
+        reason: { type: string }
+        maker: { $ref: '#/components/schemas/Actor' }
+        submittedAt: { type: string, format: date-time }
+        checker: { oneOf: [ { $ref: '#/components/schemas/Actor' }, { type: 'null' } ] }
+        decidedAt: { oneOf: [ { type: string, format: date-time }, { type: 'null' } ] }
+        decisionReason: { oneOf: [ { type: string }, { type: 'null' } ] }
+    CatalogueChangeCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/CatalogueChange' } }
+    Problem:
+      type: object
+      required: [status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        code: { type: string }
+        detail: { type: string }
+        instance: { type: string }
+        correlationId: { type: string }
+        requirementRefs: { type: array, items: { type: string } }
+        errors: { type: array, items: { type: object } }

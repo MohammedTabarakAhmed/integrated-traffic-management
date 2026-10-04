@@ -2,7 +2,8 @@
 # End-to-end smoke test against the running local stack, with real Keycloak tokens:
 # grants come from iam-service, not the token (ADR-022) -> maker submits a change -> maker cannot approve ->
 # checker approves (CC-114) -> item readable -> maker delegates their role to the checker and revokes it (CC-004)
-# -> the directory feed deactivates a throw-away leaver (SEC-007) -> a manager reviews and revokes access (SEC-007).
+# -> the directory feed deactivates a throw-away leaver (SEC-007) -> a manager reviews and revokes access (SEC-007)
+# -> a service is defined and disabled per region and channel through catalogue maker-checker (CC-020, CC-026).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 set -a; source infra/local/.env; set +a
@@ -27,7 +28,7 @@ claims=$(printf '%s' "$MAKER" | "$PY" -c "import base64,json,sys; p=sys.stdin.re
 [[ "$claims" != *permissions* ]] || { echo "FAIL: token still carries permissions: $claims"; exit 1; }
 
 echo "0b. iam-service holds the maker's grants"
-perms=$(curl -sf -H "Authorization: Bearer $MAKER" "$IAM/v1/me/authorisation" | json_field "['grants'][0]['permissions']")
+perms=$(curl -sf -H "Authorization: Bearer $MAKER" "$IAM/v1/me/authorisation" | json_field "['grants']")
 [[ "$perms" == *refdata.change.submit* ]] || { echo "FAIL: unexpected grants $perms"; exit 1; }
 
 echo "1. Unauthenticated call is refused"
@@ -137,5 +138,36 @@ revoked=$(curl -sf -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: app
 period=$(curl -sf -H "Authorization: Bearer $ADMIN_TOKEN" "$IAM/v1/access-reviews/overdue-assignments" | json_field "['reviewPeriod']")
 [[ -n "$period" ]] || { echo "FAIL: the overdue listing has no review period"; exit 1; }
 echo "   review period: $period"
+
+echo "11. Service catalogue (CC-020, CC-026, CC-114): maker defines a service, checker approves, then disables it on the portal in one region"
+# A fresh service code per run; a failed run leaves at most one pending change for that throw-away code (harmless).
+TXN=http://localhost:8083
+SVC="SMK_$(date +%s)"
+post_txn() { # token path body -> prints "<status> <body>"
+  curl -s -w '\n%{http_code}' -H "Authorization: Bearer $1" -H 'Content-Type: application/json' -H 'X-Channel: BACKOFFICE' \
+    "$TXN$2" -d "$3"
+}
+status_of() { printf '%s' "$1" | tail -n 1; }
+body_of() { printf '%s' "$1" | sed '$d'; }
+spec="{\"code\":\"$SVC\",\"name\":{\"nl\":\"خدمة تجريبية\",\"en\":\"Smoke test service\"},\"module\":\"VEHICLE\",\"customerTypes\":[\"INDIVIDUAL\"],\"channels\":[\"PORTAL\",\"BACKOFFICE\"],\"requiredDocuments\":[],\"sla\":\"P5D\",\"regions\":[\"*\"],\"anyRegion\":true,\"allowsConcurrentOpen\":false}"
+res=$(post_txn "$MAKER" /v1/catalogue-changes "{\"changeType\":\"CREATE_SERVICE\",\"serviceCode\":\"$SVC\",\"service\":$spec,\"reason\":\"smoke test service\"}")
+[[ "$(status_of "$res")" == 201 ]] || { echo "FAIL: catalogue change returned $(status_of "$res"): $(body_of "$res")"; exit 1; }
+change=$(body_of "$res" | json_field "['id']")
+res=$(post_txn "$MAKER" "/v1/catalogue-changes/$change/approvals" "")
+[[ "$(status_of "$res")" == 403 ]] || { echo "FAIL: the maker should not approve, got $(status_of "$res")"; exit 1; }
+res=$(post_txn "$CHECKER" "/v1/catalogue-changes/$change/approvals" "")
+[[ "$(status_of "$res")" == 200 ]] || { echo "FAIL: checker approval returned $(status_of "$res")"; exit 1; }
+version=$(curl -sf -H "Authorization: Bearer $MAKER" "$TXN/v1/services/$SVC" | json_field "['version']")
+[[ "$version" == 1 ]] || { echo "FAIL: expected version 1, got $version"; exit 1; }
+today=$(date -u +%Y-%m-%d)
+res=$(post_txn "$MAKER" /v1/catalogue-changes "{\"changeType\":\"ADD_AVAILABILITY_RULE\",\"serviceCode\":\"$SVC\",\"rule\":{\"region\":\"R1\",\"channel\":\"PORTAL\",\"enabled\":false,\"effectiveFrom\":\"$today\"},\"reason\":\"smoke test rule\"}")
+[[ "$(status_of "$res")" == 201 ]] || { echo "FAIL: rule change returned $(status_of "$res"): $(body_of "$res")"; exit 1; }
+change=$(body_of "$res" | json_field "['id']")
+res=$(post_txn "$CHECKER" "/v1/catalogue-changes/$change/approvals" "")
+[[ "$(status_of "$res")" == 200 ]] || { echo "FAIL: rule approval returned $(status_of "$res")"; exit 1; }
+off=$(curl -sf -H "Authorization: Bearer $MAKER" "$TXN/v1/services/$SVC/availability?region=R1&channel=PORTAL" | json_field "['reason']")
+on=$(curl -sf -H "Authorization: Bearer $MAKER" "$TXN/v1/services/$SVC/availability?region=R2&channel=PORTAL" | json_field "['reason']")
+[[ "$off" == DISABLED_BY_RULE && "$on" == OFFERED ]] || { echo "FAIL: availability R1=$off R2=$on"; exit 1; }
+echo "   $SVC: R1/PORTAL $off, R2/PORTAL $on"
 
 echo "SMOKE OK"

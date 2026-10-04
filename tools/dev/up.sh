@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # One-command local startup (BRD reader's guide: "README that starts the whole system with one command").
-#   tools/dev/up.sh          build + start PostgreSQL (one per service), Keycloak (realm "itms"), iam-service and
-#                            reference-data-service, then grant the development roles through iam-service
+#   tools/dev/up.sh          build + start PostgreSQL (one per service), Keycloak (realm "itms"), iam-service,
+#                            reference-data-service and transaction-service, then grant the development roles
+#                            through iam-service
 #   tools/dev/up.sh down     stop the stack (data volumes kept)
 # First run generates infra/local/.env with random development secrets (git-ignored; SEC-004). Missing keys are
 # added to an existing .env.
@@ -21,6 +22,8 @@ wanted = {
     "REFDATA_DB_PASSWORD": lambda: secrets.token_urlsafe(24),
     "IAM_DB_USER": lambda: "iam",
     "IAM_DB_PASSWORD": lambda: secrets.token_urlsafe(24),
+    "TXN_DB_USER": lambda: "transaction",
+    "TXN_DB_PASSWORD": lambda: secrets.token_urlsafe(24),
     "KC_ADMIN_USER": lambda: "kc-admin",
     "KC_ADMIN_PASSWORD": lambda: secrets.token_urlsafe(24),
     "DEV_IAM_ADMIN_PASSWORD": lambda: secrets.token_urlsafe(16),
@@ -48,7 +51,7 @@ if [[ "${1:-}" == "down" ]]; then
 fi
 
 echo "== Building service jars"
-mvn -B -ntp -q package -DskipTests -pl services/iam-service,services/reference-data-service -am
+mvn -B -ntp -q package -DskipTests -pl services/iam-service,services/reference-data-service,services/transaction-service -am
 
 echo "== Starting stack (this waits until every container is healthy)"
 "${COMPOSE[@]}" up -d --build --wait
@@ -83,6 +86,9 @@ grant() { # subject username role
 }
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker REFDATA_MAKER
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker REFDATA_CHECKER
+# Service catalogue maker-checker (CC-020, CC-026, CC-114; ADR-028).
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker CATALOGUE_MAKER
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker CATALOGUE_CHECKER
 # dev.checker is also the development access reviewer ("manager", SEC-007, ADR-026); dev.iam-admin, the IT
 # administrator, opens and closes reviews.
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker ACCESS_REVIEWER
@@ -94,6 +100,7 @@ cat <<EOF
 ITMS local stack is up:
   iam-service             http://localhost:8082/v1/roles             (bearer token required)
   reference-data-service  http://localhost:8081/v1/reference-lists   (bearer token required)
+  transaction-service     http://localhost:8083/v1/services          (bearer token required)
   Keycloak                http://localhost:8180   (realm: itms; users dev.iam-admin / dev.maker / dev.checker;
                                                    passwords in $ENV_FILE; client itms-directory-feed uses
                                                    DEV_DIRECTORY_FEED_SECRET)

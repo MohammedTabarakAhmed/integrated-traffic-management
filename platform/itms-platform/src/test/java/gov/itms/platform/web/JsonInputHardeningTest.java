@@ -46,6 +46,14 @@ class JsonInputHardeningTest {
 
     @Test
     @Tag("SEC-022")
+    @DisplayName("SEC-022: an unknown field is refused, not silently ignored")
+    void unknownFieldsAreRefused() {
+        assertThatThrownBy(() -> read("{\"text\":\"a\",\"approvedBy\":\"me\"}"))
+                .isInstanceOf(JacksonException.class);
+    }
+
+    @Test
+    @Tag("SEC-022")
     @DisplayName("SEC-022: an enum must be exactly its name as a JSON string")
     void enumsAreExact() {
         for (String value : List.of("1", "0", "true", "\"GREEN \"", "\" GREEN\"", "\"green\"", "\"GREEN\\u0000\"",

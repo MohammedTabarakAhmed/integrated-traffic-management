@@ -395,4 +395,23 @@ class ReferenceDataApiIT {
         assertThat(getAs("/v1/reference-data-changes?status=PENDING_APPROVAL", maker()).getResponse().getStatus())
                 .isEqualTo(200);
     }
+
+    @Test
+    @Tag("INT-003")
+    @Tag("CH-053")
+    @DisplayName("INT-003/CH-053: an unsupported method is 405 with Allow, a non-JSON body 415; never 500")
+    void unsupportedMethodAndMediaType() throws Exception {
+        MvcResult delete = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                .delete("/v1/reference-data-changes").with(maker())
+                .accept(MediaType.APPLICATION_JSON, MediaType.APPLICATION_PROBLEM_JSON)).andReturn();
+        assertThat(delete.getResponse().getStatus()).isEqualTo(405);
+        assertThat(delete.getResponse().getHeader("Allow")).contains("GET").contains("POST");
+        assertThat(body(delete).get("code").asString()).isEqualTo("METHOD_NOT_ALLOWED");
+
+        MvcResult text = mvc.perform(post("/v1/reference-data-changes").with(maker())
+                .contentType(MediaType.TEXT_PLAIN).content("x")
+                .accept(MediaType.APPLICATION_JSON, MediaType.APPLICATION_PROBLEM_JSON)).andReturn();
+        assertThat(text.getResponse().getStatus()).isEqualTo(415);
+        assertThat(body(text).get("code").asString()).isEqualTo("UNSUPPORTED_MEDIA_TYPE");
+    }
 }

@@ -1,9 +1,14 @@
 package gov.itms.platform.security;
 
+import java.time.Clock;
 import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.MessageSource;
 import org.springframework.context.annotation.Bean;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -17,36 +22,63 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
+import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Stateless bearer-token security for every ITMS service (SEC-001, CC-001, INT-004). Deny by default: every request
- * except health probes needs a valid token; endpoint permissions are enforced with {@code @PreAuthorize}.
+ * except health probes needs a valid token. The token only authenticates; the {@link AuthorisationFilter} then
+ * attaches the subject's grants from the configured {@link AuthorisationResolver} (ADR-022). Endpoint permissions
+ * are enforced with {@code @PreAuthorize}, data scopes with {@link Authorisation}.
  */
 @AutoConfiguration
 @EnableConfigurationProperties(ItmsSecurityProperties.class)
 @EnableMethodSecurity
 public class ItmsSecurityAutoConfiguration {
 
+    private static final Logger log = LoggerFactory.getLogger(ItmsSecurityAutoConfiguration.class);
+
     @Bean
     @ConditionalOnMissingBean(SecurityFilterChain.class)
-    SecurityFilterChain itmsApiSecurity(HttpSecurity http, JwtAuthenticationConverter converter) throws Exception {
+    SecurityFilterChain itmsApiSecurity(HttpSecurity http, JwtAuthenticationConverter converter,
+                                        AuthorisationResolver resolver, MessageSource messages, ObjectMapper json)
+            throws Exception {
         http
                 .csrf(csrf -> csrf.disable()) // stateless bearer-token API; no cookies are used
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(a -> a
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                         .anyRequest().authenticated())
-                .oauth2ResourceServer(o -> o.jwt(j -> j.jwtAuthenticationConverter(converter)));
+                .oauth2ResourceServer(o -> o.jwt(j -> j.jwtAuthenticationConverter(converter)))
+                .addFilterAfter(new AuthorisationFilter(resolver, messages, json), BearerTokenAuthenticationFilter.class);
         return http.build();
+    }
+
+    /** Authentication only: no authorities come from the token itself; the {@link AuthorisationFilter} adds them. */
+    @Bean
+    @ConditionalOnMissingBean
+    JwtAuthenticationConverter itmsJwtAuthenticationConverter() {
+        JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
+        converter.setJwtGrantedAuthoritiesConverter(jwt -> List.of());
+        converter.setPrincipalClaimName("sub");
+        return converter;
     }
 
     @Bean
     @ConditionalOnMissingBean
-    JwtAuthenticationConverter itmsJwtAuthenticationConverter(ItmsSecurityProperties properties) {
-        JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
-        converter.setJwtGrantedAuthoritiesConverter(new PermissionsAuthoritiesConverter(properties.permissionsClaim()));
-        return converter;
+    AuthorisationResolver itmsAuthorisationResolver(ItmsSecurityProperties properties, ObjectProvider<Clock> clock) {
+        if (properties.authorisationSource() == ItmsSecurityProperties.AuthorisationSource.TOKEN_CLAIMS) {
+            log.warn("itms.security.authorisation-source=token-claims: permissions are read from the token (interim "
+                    + "ADR-018 mode, national scope only). Production must use iam (ADR-022).");
+            return new ClaimsAuthorisationResolver(properties.permissionsClaim(), properties.rolesClaim());
+        }
+        ItmsSecurityProperties.Iam iam = properties.iam();
+        if (iam.baseUrl() == null || iam.baseUrl().isBlank()) {
+            throw new IllegalStateException("itms.security.iam.base-url must be configured (authorisation-source=iam)");
+        }
+        return new RemoteIamAuthorisationResolver(iam.baseUrl(), iam.timeout(), iam.cacheTtl(), iam.cacheMaxEntries(),
+                clock.getIfAvailable(Clock::systemUTC));
     }
 
     @Bean
@@ -74,7 +106,7 @@ public class ItmsSecurityAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    CurrentActorProvider currentActorProvider(ItmsSecurityProperties properties) {
-        return new CurrentActorProvider(properties);
+    CurrentActorProvider currentActorProvider() {
+        return new CurrentActorProvider();
     }
 }

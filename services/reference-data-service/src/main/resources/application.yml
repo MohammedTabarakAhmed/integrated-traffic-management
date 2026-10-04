@@ -21,6 +21,11 @@ itms:
     issuer: ${ITMS_OIDC_ISSUER}
     jwk-set-uri: ${ITMS_OIDC_JWKS_URI}
     audience: itms-api
+    # Grants come from iam-service (ADR-022). token-claims is the interim ADR-018 mode, for tests only.
+    authorisation-source: ${ITMS_AUTHORISATION_SOURCE:iam}
+    iam:
+      base-url: ${ITMS_IAM_URL:}
+      cache-ttl: ${ITMS_IAM_CACHE_TTL:60s}
 
 management:
   endpoints:

@@ -32,7 +32,12 @@ public class JdbcAuditRecorder implements AuditRecorder {
     @Override
     public void record(String action, String entityType, String entityId, Object oldValue, Object newValue,
                        String reason) {
-        CurrentActor actor = actors.current();
+        recordAs(actors.current(), action, entityType, entityId, oldValue, newValue, reason);
+    }
+
+    @Override
+    public void recordAs(CurrentActor actor, String action, String entityType, String entityId, Object oldValue,
+                         Object newValue, String reason) {
         jdbc.sql("""
                         insert into audit_outbox (id, occurred_at, service, action, entity_type, entity_id,
                             actor_id, actor_username, actor_roles, channel, ip_address, correlation_id,

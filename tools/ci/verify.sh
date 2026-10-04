@@ -9,6 +9,9 @@ PY=${PYTHON:-python3}; command -v "$PY" >/dev/null || PY=python
 echo "== [1/3] Traceability verifier tests + ledger check (DLV-001)"
 "$PY" -m unittest discover -s tools/traceability
 "$PY" tools/traceability/verify_ledger.py
+echo "== [1b/3] Permission catalogue consistency (CC-001, CC-005, ADR-022)"
+"$PY" -m unittest discover -s tools/ci -p 'test_*.py'
+"$PY" tools/ci/check_permissions.py
 
 echo "== [2/3] Maven build: enforcer, unit (Surefire), integration (Failsafe), JaCoCo >= 80% (NFR-050)"
 mvn -B -ntp verify

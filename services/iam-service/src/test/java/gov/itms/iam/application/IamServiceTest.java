@@ -1,0 +1,282 @@
+package gov.itms.iam.application;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import gov.itms.iam.domain.Actor;
+import gov.itms.iam.domain.AssignmentScopes;
+import gov.itms.iam.domain.BilingualName;
+import gov.itms.iam.domain.DomainException;
+import gov.itms.iam.domain.Permission;
+import gov.itms.iam.domain.Role;
+import gov.itms.iam.domain.RoleAssignment;
+import gov.itms.platform.security.Authorisation;
+import gov.itms.platform.security.ScopeTarget;
+import gov.itms.platform.security.Scopes;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+
+class IamServiceTest {
+
+    private static final Instant NOW = Instant.parse("2026-10-04T08:00:00Z");
+    private static final Actor ADMIN = new Actor("u-admin", "admin");
+    private static final BilingualName NAME = new BilingualName("دور", "Role");
+    private static final Set<String> IAM_PERMISSIONS = Set.of("iam.role.read", "iam.role.manage",
+            "iam.assignment.read", "iam.assignment.manage");
+
+    private final AtomicReference<Instant> now = new AtomicReference<>(NOW);
+    private InMemoryRepositories.Permissions permissions;
+    private InMemoryRepositories.Roles roles;
+    private InMemoryRepositories.Assignments assignments;
+    private InMemoryRepositories.Audit audit;
+    private IamService service;
+
+    @BeforeEach
+    void setUp() {
+        permissions = new InMemoryRepositories.Permissions();
+        roles = new InMemoryRepositories.Roles();
+        assignments = new InMemoryRepositories.Assignments();
+        audit = new InMemoryRepositories.Audit();
+        Clock clock = new Clock() {
+            @Override public ZoneOffset getZone() { return ZoneOffset.UTC; }
+            @Override public Clock withZone(ZoneId zone) { return this; }
+            @Override public Instant instant() { return now.get(); }
+        };
+        service = new IamService(permissions, roles, assignments, audit, clock);
+        for (String p : List.of("iam.role.read", "iam.role.manage", "iam.assignment.read", "iam.assignment.manage",
+                "refdata.read", "refdata.change.submit", "txn.create")) {
+            permissions.rows.put(p, new Permission(p, "svc", NAME));
+        }
+        roles.insert(Role.create("IT_ADMINISTRATOR", NAME, null, IAM_PERMISSIONS), "seed", NOW);
+        roles.insert(Role.create("REFDATA_MAKER", NAME, null, List.of("refdata.read", "refdata.change.submit")),
+                "seed", NOW);
+    }
+
+    private static Consumer<Throwable> code(String expected) {
+        return t -> assertThat(((DomainException) t).code()).isEqualTo(expected);
+    }
+
+    /** An administrator whose grants carry the given scopes. */
+    private static Authorisation admin(Scopes scopes, String... roleCodes) {
+        List<Authorisation.Grant> grants = roleCodes.length == 0
+                ? List.of(new Authorisation.Grant("IT_ADMINISTRATOR", IAM_PERMISSIONS, scopes, null))
+                : List.of(roleCodes).stream()
+                        .map(r -> new Authorisation.Grant(r, IAM_PERMISSIONS, scopes, null)).toList();
+        return new Authorisation("u-admin", grants, NOW);
+    }
+
+    private static Scopes regions(String... regions) {
+        return new Scopes(Set.of(regions), Set.of("*"), Set.of("*"));
+    }
+
+    private static AssignmentScopes assignmentScopes(String... regions) {
+        return AssignmentScopes.of(List.of(regions), List.of("*"), List.of("*"));
+    }
+
+    private RoleAssignment assign(String subject, AssignmentScopes scopes, Authorisation caller) {
+        return service.assign(subject, subject + ".name", "REFDATA_MAKER", scopes, null, null, "new joiner", ADMIN,
+                caller);
+    }
+
+    // ------------------------------------------------------------------ roles (CC-005)
+
+    @Test
+    @Tag("CC-005")
+    @DisplayName("CC-005: an administrator creates a role and changes its permissions without code; both are audited")
+    void createAndRedefineRole() {
+        Role created = service.createRole("CENTRE_AGENT", NAME, "Front counter", List.of("txn.create"),
+                "new BRD role", ADMIN);
+        Role updated = service.updateRole("CENTRE_AGENT", NAME, "Front counter", true,
+                List.of("txn.create", "refdata.read"), 1, "agents need reference data", ADMIN,
+                admin(Scopes.NATIONAL));
+
+        assertThat(created.version()).isEqualTo(1);
+        assertThat(updated.version()).isEqualTo(2);
+        assertThat(service.role("CENTRE_AGENT").permissions()).containsExactly("refdata.read", "txn.create");
+        assertThat(service.roleHistory("CENTRE_AGENT")).hasSize(2)
+                .first().satisfies(v -> assertThat(v.validTo()).isEqualTo(NOW));
+        assertThat(audit.actions()).containsExactly("IAM_ROLE_CREATED", "IAM_ROLE_UPDATED");
+        assertThat(audit.entries.get(1).oldValue()).isEqualTo(created);
+        assertThat(audit.entries.get(1).reason()).isEqualTo("agents need reference data");
+        assertThat(service.roles()).extracting(Role::code)
+                .containsExactly("CENTRE_AGENT", "IT_ADMINISTRATOR", "REFDATA_MAKER");
+        assertThat(service.permissions()).hasSize(7);
+    }
+
+    @Test
+    @Tag("CC-005")
+    @DisplayName("CC-005: roles may only contain catalogue permissions; duplicates and stale versions are refused")
+    void roleRules() {
+        assertThatThrownBy(() -> service.createRole("NEW_ROLE", NAME, null, List.of("made.up"), "reason", ADMIN))
+                .satisfies(code("UNKNOWN_PERMISSION"));
+        assertThatThrownBy(() -> service.createRole("REFDATA_MAKER", NAME, null, List.of(), "reason", ADMIN))
+                .satisfies(code("ROLE_EXISTS"));
+        assertThatThrownBy(() -> service.updateRole("REFDATA_MAKER", NAME, null, true, List.of(), 7, "reason", ADMIN,
+                admin(Scopes.NATIONAL))).satisfies(code("STALE_ROLE"));
+        assertThatThrownBy(() -> service.role("NO_SUCH_ROLE")).satisfies(code("ROLE_NOT_FOUND"));
+        assertThatThrownBy(() -> service.roleHistory("NO_SUCH_ROLE")).satisfies(code("ROLE_NOT_FOUND"));
+        assertThatThrownBy(() -> service.createRole("NEW_ROLE", NAME, null, List.of(), "x", ADMIN))
+                .satisfies(code("REASON_REQUIRED"));
+    }
+
+    @Test
+    @Tag("CC-002")
+    @DisplayName("CC-002: an administrator cannot change a role they hold (no self-widening of rights)")
+    void cannotChangeOwnRole() {
+        assertThatThrownBy(() -> service.updateRole("IT_ADMINISTRATOR", NAME, null, true,
+                List.of("iam.role.read", "refdata.read"), 1, "widen my rights", ADMIN, admin(Scopes.NATIONAL)))
+                .satisfies(code("ROLE_HELD_BY_ACTOR"))
+                .satisfies(t -> assertThat(((DomainException) t).requirementRefs()).contains("CC-002"));
+        assertThat(audit.entries).isEmpty();
+    }
+
+    // ------------------------------------------------------------------ assignments and data scopes (CC-001)
+
+    @Test
+    @Tag("CC-001")
+    @DisplayName("CC-001: assignments carry data scopes; the effective authorisation keeps them per grant")
+    void effectiveAuthorisationKeepsScopes() {
+        assign("u-1", assignmentScopes("R1"), admin(Scopes.NATIONAL));
+
+        Authorisation a = service.effectiveAuthorisation("u-1");
+        assertThat(a.roles()).containsExactly("REFDATA_MAKER");
+        assertThat(a.permissions()).containsExactly("refdata.change.submit", "refdata.read");
+        assertThat(a.allows("refdata.read", ScopeTarget.region("R1"))).isTrue();
+        assertThat(a.allows("refdata.read", ScopeTarget.region("R2"))).isFalse();
+        assertThat(audit.actions()).containsExactly("IAM_ROLE_ASSIGNED");
+    }
+
+    @Test
+    @Tag("CC-001")
+    @DisplayName("CC-001: future, expired, revoked assignments and inactive roles grant nothing")
+    void onlyEffectiveGrantsCount() {
+        service.assign("u-1", null, "REFDATA_MAKER", assignmentScopes("R1"), NOW.plusSeconds(3600), null,
+                "starts later", ADMIN, admin(Scopes.NATIONAL));
+        RoleAssignment temporary = service.assign("u-2", null, "REFDATA_MAKER", assignmentScopes("R1"), null,
+                NOW.plusSeconds(60), "short cover", ADMIN, admin(Scopes.NATIONAL));
+        RoleAssignment revoked = assign("u-3", assignmentScopes("R1"), admin(Scopes.NATIONAL));
+        service.revoke(revoked.id(), "left the unit", ADMIN, admin(Scopes.NATIONAL));
+
+        assertThat(service.effectiveAuthorisation("u-1").grants()).isEmpty();
+        assertThat(service.effectiveAuthorisation("u-2").grants()).singleElement()
+                .satisfies(g -> assertThat(g.validTo()).isEqualTo(temporary.validTo()));
+        assertThat(service.effectiveAuthorisation("u-3").grants()).isEmpty();
+
+        now.set(NOW.plusSeconds(3600));
+        assertThat(service.effectiveAuthorisation("u-1").grants()).hasSize(1);
+        assertThat(service.effectiveAuthorisation("u-2").grants()).as("expired").isEmpty();
+
+        service.updateRole("REFDATA_MAKER", NAME, null, false, List.of("refdata.read"), 1, "retire role", ADMIN,
+                admin(Scopes.NATIONAL));
+        assertThat(service.effectiveAuthorisation("u-1").grants()).as("inactive role").isEmpty();
+    }
+
+    @Test
+    @Tag("CC-001")
+    @DisplayName("CC-001: an administrator cannot grant beyond their own regions")
+    void cannotGrantBeyondOwnScope() {
+        Authorisation regionalAdmin = admin(regions("R1"));
+
+        assertThat(assign("u-1", assignmentScopes("R1"), regionalAdmin).scopes().regions()).containsExactly("R1");
+        assertThatThrownBy(() -> assign("u-2", assignmentScopes("R2"), regionalAdmin))
+                .satisfies(code("SCOPE_EXCEEDED"))
+                .satisfies(t -> assertThat(((DomainException) t).kind()).isEqualTo(DomainException.Kind.OUT_OF_SCOPE));
+        assertThatThrownBy(() -> assign("u-3", AssignmentScopes.national(), regionalAdmin))
+                .satisfies(code("SCOPE_EXCEEDED"));
+    }
+
+    @Test
+    @Tag("CC-001")
+    @DisplayName("CC-001: assignments outside the caller's scope are invisible and cannot be revoked")
+    void outOfScopeAssignmentsAreInvisible() {
+        RoleAssignment inR1 = assign("u-1", assignmentScopes("R1"), admin(Scopes.NATIONAL));
+        RoleAssignment inR2 = assign("u-2", assignmentScopes("R2"), admin(Scopes.NATIONAL));
+        Authorisation r1Admin = admin(regions("R1"));
+
+        assertThat(service.assignments(null, null, null, r1Admin)).extracting(RoleAssignment::id)
+                .containsExactly(inR1.id());
+        assertThat(service.assignments(null, null, null, admin(Scopes.NATIONAL))).hasSize(2);
+        assertThat(service.assignment(inR1.id(), r1Admin).subjectId()).isEqualTo("u-1");
+        assertThatThrownBy(() -> service.assignment(inR2.id(), r1Admin)).satisfies(code("ASSIGNMENT_NOT_FOUND"));
+        assertThatThrownBy(() -> service.revoke(inR2.id(), "not mine", ADMIN, r1Admin))
+                .satisfies(code("ASSIGNMENT_NOT_FOUND"));
+
+        // Can read (national read) but cannot manage outside R1: refused as out of scope.
+        Authorisation readAllManageR1 = new Authorisation("u-admin", List.of(
+                new Authorisation.Grant("AUDITOR", Set.of("iam.assignment.read"), Scopes.NATIONAL, null),
+                new Authorisation.Grant("IT_ADMINISTRATOR", Set.of("iam.assignment.manage"), regions("R1"), null)),
+                NOW);
+        assertThatThrownBy(() -> service.revoke(inR2.id(), "not mine", ADMIN, readAllManageR1))
+                .satisfies(code("SCOPE_EXCEEDED"));
+        assertThat(service.revoke(inR1.id(), "moved region", ADMIN, readAllManageR1).status())
+                .isEqualTo(RoleAssignment.Status.REVOKED);
+    }
+
+    @Test
+    @Tag("CC-002")
+    @DisplayName("CC-002: self-assignment is refused before anything is stored")
+    void selfAssignmentRefused() {
+        assertThatThrownBy(() -> assign("u-admin", assignmentScopes("R1"), admin(Scopes.NATIONAL)))
+                .satisfies(code("SELF_ASSIGNMENT"));
+        assertThat(assignments.rows).isEmpty();
+    }
+
+    @Test
+    @Tag("CC-001")
+    @DisplayName("CC-001: duplicate overlapping assignments and inactive or unknown roles are refused")
+    void assignmentConflicts() {
+        assign("u-1", assignmentScopes("R1"), admin(Scopes.NATIONAL));
+        assertThatThrownBy(() -> assign("u-1", assignmentScopes("R1"), admin(Scopes.NATIONAL)))
+                .satisfies(code("ASSIGNMENT_EXISTS"));
+        assertThat(assign("u-1", assignmentScopes("R2"), admin(Scopes.NATIONAL)).status())
+                .as("same role in another region is a separate grant").isEqualTo(RoleAssignment.Status.ACTIVE);
+
+        assertThatThrownBy(() -> service.assign("u-9", null, "NO_SUCH_ROLE", assignmentScopes("R1"), null, null,
+                "reason", ADMIN, admin(Scopes.NATIONAL))).satisfies(code("ROLE_NOT_FOUND"));
+        service.updateRole("REFDATA_MAKER", NAME, null, false, List.of(), 1, "retire", ADMIN, admin(Scopes.NATIONAL));
+        assertThatThrownBy(() -> assign("u-9", assignmentScopes("R1"), admin(Scopes.NATIONAL)))
+                .satisfies(code("ROLE_INACTIVE"));
+        assertThatThrownBy(() -> service.assignment(UUID.randomUUID(), admin(Scopes.NATIONAL)))
+                .satisfies(code("ASSIGNMENT_NOT_FOUND"));
+    }
+
+    @Test
+    @Tag("CC-120")
+    @DisplayName("CC-120: revocation is audited with the before and after state and the reason")
+    void revocationAudited() {
+        RoleAssignment a = assign("u-1", assignmentScopes("R1"), admin(Scopes.NATIONAL));
+        service.revoke(a.id(), "left the Authority", ADMIN, admin(Scopes.NATIONAL));
+
+        InMemoryRepositories.AuditEntry entry = audit.entries.get(1);
+        assertThat(entry.action()).isEqualTo("IAM_ROLE_REVOKED");
+        assertThat(entry.reason()).isEqualTo("left the Authority");
+        assertThat(entry.oldValue().toString()).contains("status=ACTIVE");
+        assertThat(entry.newValue().toString()).contains("status=REVOKED");
+    }
+
+    // ------------------------------------------------------------------ bootstrap
+
+    @Test
+    @Tag("SEC-004")
+    @DisplayName("SEC-004: bootstrap assigns the first administrator only while nobody can manage assignments")
+    void bootstrapOnlyWhenNoAdministrator() {
+        assertThat(service.bootstrapAdministrator("u-first", "first.admin")).isTrue();
+        assertThat(service.effectiveAuthorisation("u-first").permissions()).contains("iam.assignment.manage");
+        assertThat(audit.entries).singleElement()
+                .satisfies(e -> assertThat(e.actorId()).isEqualTo("SYSTEM_BOOTSTRAP"));
+
+        assertThat(service.bootstrapAdministrator("u-other", null)).isFalse();
+        assertThat(service.effectiveAuthorisation("u-other").grants()).isEmpty();
+    }
+}

@@ -1,0 +1,508 @@
+openapi: 3.1.0
+info:
+  title: ITMS Identity and Access Management Service
+  version: 1.0.0
+  description: |
+    Owns ITMS authorisation (ADR-004, ADR-022): the permission catalogue, roles, role assignments with data scopes
+    (region, service centre, module) and the effective authorisation of a signed-in subject (CC-001).
+    Authentication stays with the identity provider; this service decides what an authenticated subject may do.
+
+    - Administrators create roles and change their permissions at runtime, without code changes (CC-005).
+    - Every change is audited with old and new values (CC-120); role definitions keep a full version history
+      (DAT-002, CC-121). Assignments are never deleted: they end by validity date or by revocation.
+    - Segregation of duties (CC-002): nobody can assign a role to themselves, and nobody can change the definition
+      of a role they currently hold.
+    - Data scopes (CC-001): an administrator can only see, create or revoke assignments whose scopes lie within their
+      own scope for that permission. Out-of-scope assignments are reported as not found.
+
+    Scope values: `*` means "all" for that dimension and must then be the only value. Otherwise values are codes
+    (`^[A-Z0-9_]{1,40}$`) owned by geo-service (regions, centres) and reference data (modules); see Q-027.
+    Only GET/POST/PUT are used (INT-003); business actions are POSTs to sub-resources.
+servers:
+  - url: /
+security:
+  - bearerAuth: []
+tags:
+  - name: Permissions
+  - name: Roles
+  - name: Role assignments
+  - name: Effective authorisation
+
+paths:
+  /v1/permissions:
+    get:
+      tags: [Permissions]
+      operationId: listPermissions
+      summary: The permission catalogue
+      description: |
+        Permissions are declared by each service's API (`x-itms-permission`) and registered here by migration.
+        Roles may only contain catalogue permissions.
+      x-itms-permission: iam.permission.read
+      responses:
+        '200':
+          description: Permissions
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PermissionCollection' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+
+  /v1/roles:
+    get:
+      tags: [Roles]
+      operationId: listRoles
+      summary: All roles
+      x-itms-permission: iam.role.read
+      responses:
+        '200':
+          description: Roles
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoleCollection' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [Roles]
+      operationId: createRole
+      summary: Create a role (CC-005)
+      x-itms-permission: iam.role.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateRoleRequest' }
+      responses:
+        '201':
+          description: Role created
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Role' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/roles/{roleCode}:
+    get:
+      tags: [Roles]
+      operationId: getRole
+      summary: One role
+      x-itms-permission: iam.role.read
+      parameters:
+        - $ref: '#/components/parameters/RoleCode'
+      responses:
+        '200':
+          description: Role
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Role' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+    put:
+      tags: [Roles]
+      operationId: updateRole
+      summary: Replace a role's names, description, active flag and permissions (CC-005)
+      description: |
+        Full replacement of the role definition. `version` must be the version the administrator saw; a stale version
+        is refused with 409. Takes effect for every holder of the role at their next authorisation refresh.
+      x-itms-permission: iam.role.manage
+      parameters:
+        - $ref: '#/components/parameters/RoleCode'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateRoleRequest' }
+      responses:
+        '200':
+          description: Role updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Role' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/roles/{roleCode}/history:
+    get:
+      tags: [Roles]
+      operationId: getRoleHistory
+      summary: Every version of a role definition (DAT-002, CC-121)
+      x-itms-permission: iam.history.read
+      parameters:
+        - $ref: '#/components/parameters/RoleCode'
+      responses:
+        '200':
+          description: Versions, oldest first
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoleVersionCollection' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/role-assignments:
+    get:
+      tags: [Role assignments]
+      operationId: listRoleAssignments
+      summary: Role assignments within the caller's scope
+      description: Only assignments whose scopes lie within the caller's `iam.assignment.read` scope are returned.
+      x-itms-permission: iam.assignment.read
+      x-itms-scope: assignment-scopes
+      parameters:
+        - name: subjectId
+          in: query
+          schema: { $ref: '#/components/schemas/SubjectId' }
+        - name: roleCode
+          in: query
+          schema: { $ref: '#/components/schemas/RoleCode' }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/AssignmentStatus' }
+      responses:
+        '200':
+          description: Assignments, newest first
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoleAssignmentCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [Role assignments]
+      operationId: createRoleAssignment
+      summary: Assign a role to a subject with data scopes and a validity period (CC-001)
+      description: |
+        The requested scopes must lie within the caller's own `iam.assignment.manage` scope, and the caller cannot
+        assign a role to themselves (CC-002). `validFrom` defaults to now; `validTo` is optional.
+      x-itms-permission: iam.assignment.manage
+      x-itms-scope: assignment-scopes
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateRoleAssignmentRequest' }
+      responses:
+        '201':
+          description: Assignment created
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoleAssignment' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/role-assignments/{assignmentId}:
+    get:
+      tags: [Role assignments]
+      operationId: getRoleAssignment
+      summary: One assignment (404 if outside the caller's scope)
+      x-itms-permission: iam.assignment.read
+      x-itms-scope: assignment-scopes
+      parameters:
+        - $ref: '#/components/parameters/AssignmentId'
+      responses:
+        '200':
+          description: Assignment
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoleAssignment' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/role-assignments/{assignmentId}/revocations:
+    post:
+      tags: [Role assignments]
+      operationId: revokeRoleAssignment
+      summary: Revoke an active assignment, with a reason
+      x-itms-permission: iam.assignment.manage
+      x-itms-scope: assignment-scopes
+      parameters:
+        - $ref: '#/components/parameters/AssignmentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReasonRequest' }
+      responses:
+        '200':
+          description: Assignment revoked
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoleAssignment' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+
+  /v1/me/authorisation:
+    get:
+      tags: [Effective authorisation]
+      operationId: getMyAuthorisation
+      summary: The caller's effective authorisation now (CC-001)
+      description: |
+        Grants from every assignment that is active now (status ACTIVE, inside its validity period, role active).
+        Each grant keeps its own scopes; grants are never merged across assignments, so a permission held in one
+        scope is not widened by another assignment. Every ITMS service resolves its callers' permissions from this
+        endpoint by forwarding the caller's bearer token (ADR-022). Any authenticated subject may read their own.
+      x-itms-permission: authenticated
+      responses:
+        '200':
+          description: Effective authorisation
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EffectiveAuthorisation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    RoleCode:
+      name: roleCode
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/RoleCode' }
+    AssignmentId:
+      name: assignmentId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid bearer token
+    Problem:
+      description: Problem details (RFC 9457, API_SPECIFICATION §3)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+
+  schemas:
+    RoleCode:
+      type: string
+      pattern: '^[A-Z][A-Z0-9_]{1,59}$'
+    PermissionCode:
+      type: string
+      pattern: '^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*){1,4}$'
+    SubjectId:
+      type: string
+      description: Stable subject identifier issued by the identity provider (`sub`).
+      pattern: '^[A-Za-z0-9._@:-]{1,100}$'
+    ScopeValue:
+      type: string
+      pattern: '^(\*|[A-Z0-9_]{1,40})$'
+    ScopeValues:
+      type: array
+      minItems: 1
+      maxItems: 100
+      uniqueItems: true
+      items: { $ref: '#/components/schemas/ScopeValue' }
+    Scopes:
+      type: object
+      additionalProperties: false
+      description: Data scopes of an assignment (CC-001). `["*"]` means all values of that dimension.
+      required: [regions, centres, modules]
+      properties:
+        regions: { $ref: '#/components/schemas/ScopeValues' }
+        centres: { $ref: '#/components/schemas/ScopeValues' }
+        modules: { $ref: '#/components/schemas/ScopeValues' }
+    BilingualName:
+      type: object
+      additionalProperties: false
+      required: [nl, en]
+      properties:
+        nl: { type: string, minLength: 1, maxLength: 200, description: National language (RTL) }
+        en: { type: string, minLength: 1, maxLength: 200 }
+    Reason:
+      type: string
+      minLength: 3
+      maxLength: 500
+    Actor:
+      type: object
+      additionalProperties: false
+      required: [id]
+      properties:
+        id: { type: string }
+        username: { oneOf: [ { type: string }, { type: 'null' } ] }
+
+    Permission:
+      type: object
+      additionalProperties: false
+      required: [code, service, description]
+      properties:
+        code: { $ref: '#/components/schemas/PermissionCode' }
+        service: { type: string }
+        description: { $ref: '#/components/schemas/BilingualName' }
+    PermissionCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Permission' } }
+
+    Role:
+      type: object
+      additionalProperties: false
+      required: [code, name, active, permissions, version]
+      properties:
+        code: { $ref: '#/components/schemas/RoleCode' }
+        name: { $ref: '#/components/schemas/BilingualName' }
+        description: { oneOf: [ { type: string }, { type: 'null' } ] }
+        active: { type: boolean }
+        permissions: { type: array, items: { $ref: '#/components/schemas/PermissionCode' } }
+        version: { type: integer, format: int64 }
+    RoleCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Role' } }
+    CreateRoleRequest:
+      type: object
+      additionalProperties: false
+      required: [code, name, permissions, reason]
+      properties:
+        code: { $ref: '#/components/schemas/RoleCode' }
+        name: { $ref: '#/components/schemas/BilingualName' }
+        description: { type: string, maxLength: 1000 }
+        permissions:
+          type: array
+          maxItems: 500
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/PermissionCode' }
+        reason: { $ref: '#/components/schemas/Reason' }
+    UpdateRoleRequest:
+      type: object
+      additionalProperties: false
+      required: [name, active, permissions, version, reason]
+      properties:
+        name: { $ref: '#/components/schemas/BilingualName' }
+        description: { type: string, maxLength: 1000 }
+        active: { type: boolean }
+        permissions:
+          type: array
+          maxItems: 500
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/PermissionCode' }
+        version: { type: integer, format: int64, minimum: 1 }
+        reason: { $ref: '#/components/schemas/Reason' }
+    RoleVersion:
+      type: object
+      additionalProperties: false
+      description: One historical version of a role and the period during which it was current (DAT-002).
+      required: [code, name, active, permissions, version, validFrom, changedBy]
+      properties:
+        code: { $ref: '#/components/schemas/RoleCode' }
+        name: { $ref: '#/components/schemas/BilingualName' }
+        description: { oneOf: [ { type: string }, { type: 'null' } ] }
+        active: { type: boolean }
+        permissions: { type: array, items: { $ref: '#/components/schemas/PermissionCode' } }
+        version: { type: integer, format: int64 }
+        validFrom: { type: string, format: date-time }
+        validTo: { oneOf: [ { type: string, format: date-time }, { type: 'null' } ] }
+        changedBy: { type: string }
+    RoleVersionCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/RoleVersion' } }
+
+    AssignmentStatus:
+      type: string
+      enum: [ACTIVE, REVOKED]
+    RoleAssignment:
+      type: object
+      additionalProperties: false
+      required: [id, subjectId, roleCode, scopes, validFrom, status, reason, assignedBy, assignedAt]
+      properties:
+        id: { type: string, format: uuid }
+        subjectId: { $ref: '#/components/schemas/SubjectId' }
+        subjectUsername: { oneOf: [ { type: string }, { type: 'null' } ] }
+        roleCode: { $ref: '#/components/schemas/RoleCode' }
+        scopes: { $ref: '#/components/schemas/Scopes' }
+        validFrom: { type: string, format: date-time }
+        validTo: { oneOf: [ { type: string, format: date-time }, { type: 'null' } ] }
+        status: { $ref: '#/components/schemas/AssignmentStatus' }
+        reason: { type: string }
+        assignedBy: { $ref: '#/components/schemas/Actor' }
+        assignedAt: { type: string, format: date-time }
+        revokedBy: { oneOf: [ { $ref: '#/components/schemas/Actor' }, { type: 'null' } ] }
+        revokedAt: { oneOf: [ { type: string, format: date-time }, { type: 'null' } ] }
+        revocationReason: { oneOf: [ { type: string }, { type: 'null' } ] }
+    RoleAssignmentCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/RoleAssignment' } }
+    CreateRoleAssignmentRequest:
+      type: object
+      additionalProperties: false
+      required: [subjectId, roleCode, scopes, reason]
+      properties:
+        subjectId: { $ref: '#/components/schemas/SubjectId' }
+        subjectUsername: { type: string, minLength: 1, maxLength: 200 }
+        roleCode: { $ref: '#/components/schemas/RoleCode' }
+        scopes: { $ref: '#/components/schemas/Scopes' }
+        validFrom: { type: string, format: date-time }
+        validTo: { type: string, format: date-time }
+        reason: { $ref: '#/components/schemas/Reason' }
+    ReasonRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: { $ref: '#/components/schemas/Reason' }
+
+    Grant:
+      type: object
+      additionalProperties: false
+      required: [roleCode, permissions, scopes]
+      properties:
+        roleCode: { $ref: '#/components/schemas/RoleCode' }
+        permissions: { type: array, items: { $ref: '#/components/schemas/PermissionCode' } }
+        scopes: { $ref: '#/components/schemas/Scopes' }
+        validTo: { oneOf: [ { type: string, format: date-time }, { type: 'null' } ] }
+    EffectiveAuthorisation:
+      type: object
+      additionalProperties: false
+      required: [subjectId, evaluatedAt, grants]
+      properties:
+        subjectId: { $ref: '#/components/schemas/SubjectId' }
+        evaluatedAt: { type: string, format: date-time }
+        grants: { type: array, items: { $ref: '#/components/schemas/Grant' } }
+
+    Problem:
+      type: object
+      required: [status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        code: { type: string }
+        detail: { type: string }
+        instance: { type: string }
+        correlationId: { type: string }
+        requirementRefs: { type: array, items: { type: string } }
+        errors: { type: array, items: { type: object } }

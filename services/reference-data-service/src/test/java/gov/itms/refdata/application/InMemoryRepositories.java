@@ -146,6 +146,12 @@ final class InMemoryRepositories {
             entries.add(new AuditEntry(action, entityType, entityId, oldValue, newValue, reason));
         }
 
+        @Override
+        public void recordAs(gov.itms.platform.security.CurrentActor actor, String action, String entityType,
+                             String entityId, Object oldValue, Object newValue, String reason) {
+            record(action, entityType, entityId, oldValue, newValue, reason);
+        }
+
         List<String> actions() {
             return entries.stream().map(AuditEntry::action).toList();
         }

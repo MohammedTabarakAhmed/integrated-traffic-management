@@ -33,15 +33,16 @@ tools/ci/security.sh   # secret scanning + SCA (needs gitleaks and an NVD mirror
 Prerequisites: Docker running, plus the build prerequisites above. In Git Bash or any bash shell:
 
 ```
-tools/dev/up.sh          # builds, starts PostgreSQL + Keycloak (realm "itms") + reference-data-service
+tools/dev/up.sh          # builds, starts PostgreSQL (one per service) + Keycloak (realm "itms") + iam-service + reference-data-service
 tools/dev/smoke.sh       # end-to-end maker-checker check with real tokens
 tools/dev/up.sh down     # stop
 ```
 
 - First run generates `infra/local/.env` with random development secrets. It is git-ignored; never commit it.
-- Development users are `dev.maker` (REFDATA_MAKER) and `dev.checker` (REFDATA_CHECKER).
+- Development users are `dev.iam-admin` (bootstrap IT_ADMINISTRATOR), `dev.maker` (REFDATA_MAKER) and `dev.checker` (REFDATA_CHECKER). Keycloak only authenticates them; `up.sh` grants their roles through the iam-service API (ADR-022).
 - Services:
-  - API: http://localhost:8081/v1/reference-lists
+  - Reference data API: http://localhost:8081/v1/reference-lists
+  - IAM API: http://localhost:8082/v1/roles
   - Keycloak: http://localhost:8180
 - This local stack is **not** a production topology (see `docs/HLD.md` §8).
 
@@ -49,5 +50,6 @@ tools/dev/up.sh down     # stop
 
 | Component | Status |
 |---|---|
-| `platform/itms-platform` | Correlation IDs, problem+json, OIDC resource server, audit outbox |
+| `platform/itms-platform` | Correlation IDs, problem+json, OIDC resource server, authorisation filter with grants from iam-service (fail closed), audit outbox |
+| `services/iam-service` | Roles, permission catalogue, role assignments with region/centre/module scopes, effective authorisation (CC-001, CC-002, CC-005) |
 | `services/reference-data-service` | Bilingual code lists with maker-checker, history and audit (CC-110, CC-114) |

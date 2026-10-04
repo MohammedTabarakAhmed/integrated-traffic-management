@@ -26,8 +26,6 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.dao.DataAccessException;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.security.core.GrantedAuthority;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -44,7 +42,10 @@ import tools.jackson.databind.ObjectMapper;
  */
 @SpringBootTest(properties = {
         "itms.security.issuer=https://idp.test/realms/itms",
-        "itms.security.jwk-set-uri=https://idp.test/realms/itms/protocol/openid-connect/certs"})
+        "itms.security.jwk-set-uri=https://idp.test/realms/itms/protocol/openid-connect/certs",
+        // Grants from token claims: this test covers reference data, not where grants come from (ADR-022 is
+        // covered by the platform tests and by iam-service).
+        "itms.security.authorisation-source=token-claims"})
 @AutoConfigureMockMvc
 @Testcontainers
 class ReferenceDataApiIT {
@@ -80,8 +81,8 @@ class ReferenceDataApiIT {
 
     private static RequestPostProcessor user(String sub, String username, String... permissions) {
         return jwt().jwt(j -> j.subject(sub).claim("preferred_username", username)
-                        .claim("roles", List.of(username.toUpperCase().replace('.', '_'))))
-                .authorities(Arrays.stream(permissions).<GrantedAuthority>map(SimpleGrantedAuthority::new).toList());
+                .claim("roles", List.of(username.toUpperCase().replace('.', '_')))
+                .claim("permissions", Arrays.asList(permissions)));
     }
 
     // ------------------------------------------------------------------ helpers with contract validation

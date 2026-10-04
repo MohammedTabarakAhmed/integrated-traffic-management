@@ -24,6 +24,7 @@
     <!-- Modules are added per increment (see docs/PROGRESS.md) -->
     <module>platform/itms-platform</module>
     <module>services/reference-data-service</module>
+    <module>services/iam-service</module>
   </modules>
 
   <properties>

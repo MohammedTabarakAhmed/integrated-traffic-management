@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # End-to-end smoke test against the running local stack, with real Keycloak tokens:
-# maker submits a change -> maker's self-approval is refused (CC-002) -> checker approves (CC-114) -> item readable.
+# grants come from iam-service, not the token (ADR-022) -> maker submits a change -> maker cannot approve ->
+# checker approves (CC-114) -> item readable.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 set -a; source infra/local/.env; set +a
@@ -18,6 +19,15 @@ json_field() { "$PY" -c "import json,sys; d=json.load(sys.stdin); print(d$1)"; }
 MAKER=$(token dev.maker "$DEV_MAKER_PASSWORD")
 CHECKER=$(token dev.checker "$DEV_CHECKER_PASSWORD")
 CODE="SMOKE_$(date +%s)"
+IAM=http://localhost:8082
+
+echo "0a. Tokens carry identity only: no permission claim (ADR-022)"
+claims=$(printf '%s' "$MAKER" | "$PY" -c "import base64,json,sys; p=sys.stdin.read().split('.')[1]; print(sorted(json.loads(base64.urlsafe_b64decode(p+'='*(-len(p)%4)))))")
+[[ "$claims" != *permissions* ]] || { echo "FAIL: token still carries permissions: $claims"; exit 1; }
+
+echo "0b. iam-service holds the maker's grants"
+perms=$(curl -sf -H "Authorization: Bearer $MAKER" "$IAM/v1/me/authorisation" | json_field "['grants'][0]['permissions']")
+[[ "$perms" == *refdata.change.submit* ]] || { echo "FAIL: unexpected grants $perms"; exit 1; }
 
 echo "1. Unauthenticated call is refused"
 status=$(curl -s -o /dev/null -w '%{http_code}' "$API/v1/reference-lists")

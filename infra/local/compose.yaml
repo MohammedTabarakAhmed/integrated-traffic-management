@@ -18,6 +18,21 @@ services:
       timeout: 3s
       retries: 20
 
+  iam-postgres:
+    # Separate database and credentials per service (ADR-001, ADR-016).
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: iam
+      POSTGRES_USER: ${IAM_DB_USER:?run tools/dev/up.sh}
+      POSTGRES_PASSWORD: ${IAM_DB_PASSWORD:?run tools/dev/up.sh}
+    volumes:
+      - iam-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d iam"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   keycloak:
     image: quay.io/keycloak/keycloak:26.8.0
     command: ["start-dev", "--import-realm"]
@@ -37,18 +52,21 @@ services:
       timeout: 5s
       retries: 40
 
-  reference-data-service:
-    build: ../../services/reference-data-service
+  iam-service:
+    build: ../../services/iam-service
     environment:
-      REFDATA_DB_URL: jdbc:postgresql://postgres:5432/refdata
-      REFDATA_DB_USER: ${REFDATA_DB_USER}
-      REFDATA_DB_PASSWORD: ${REFDATA_DB_PASSWORD}
+      IAM_DB_URL: jdbc:postgresql://iam-postgres:5432/iam
+      IAM_DB_USER: ${IAM_DB_USER}
+      IAM_DB_PASSWORD: ${IAM_DB_PASSWORD}
       ITMS_OIDC_ISSUER: http://localhost:8180/realms/itms
       ITMS_OIDC_JWKS_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/certs
+      # First administrator of this environment (fixed id of dev.iam-admin in the local realm).
+      ITMS_IAM_BOOTSTRAP_ADMIN_SUBJECT: 7d0c1a3e-5b2f-4c1d-9e8a-000000000001
+      ITMS_IAM_BOOTSTRAP_ADMIN_USERNAME: dev.iam-admin
     ports:
-      - "127.0.0.1:8081:8080"
+      - "127.0.0.1:8082:8080"
     depends_on:
-      postgres:
+      iam-postgres:
         condition: service_healthy
       keycloak:
         condition: service_healthy
@@ -58,5 +76,31 @@ services:
       timeout: 3s
       retries: 30
 
+  reference-data-service:
+    build: ../../services/reference-data-service
+    environment:
+      REFDATA_DB_URL: jdbc:postgresql://postgres:5432/refdata
+      REFDATA_DB_USER: ${REFDATA_DB_USER}
+      REFDATA_DB_PASSWORD: ${REFDATA_DB_PASSWORD}
+      ITMS_OIDC_ISSUER: http://localhost:8180/realms/itms
+      ITMS_OIDC_JWKS_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/certs
+      ITMS_AUTHORISATION_SOURCE: iam
+      ITMS_IAM_URL: http://iam-service:8080
+    ports:
+      - "127.0.0.1:8081:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      iam-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/actuator/health/readiness | grep -q UP"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
 volumes:
   refdata-db:
+  iam-db:

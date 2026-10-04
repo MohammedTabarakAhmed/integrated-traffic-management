@@ -11,25 +11,19 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
-/** Resolves the {@link CurrentActor} of the current request from the validated token and request metadata. */
+/**
+ * Resolves the {@link CurrentActor} and the {@link Authorisation} of the current request from the validated token,
+ * the resolved grants and request metadata.
+ */
 public class CurrentActorProvider {
 
     public static final String CHANNEL_HEADER = "X-Channel";
 
-    private final ItmsSecurityProperties properties;
-
-    public CurrentActorProvider(ItmsSecurityProperties properties) {
-        this.properties = properties;
-    }
-
     public CurrentActor current() {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (!(auth instanceof JwtAuthenticationToken token)) {
-            throw new IllegalStateException("No authenticated user in context");
-        }
+        JwtAuthenticationToken token = token();
         var jwt = token.getToken();
         String username = Objects.requireNonNullElse(jwt.getClaimAsString("preferred_username"), jwt.getSubject());
-        List<String> roles = Objects.requireNonNullElse(jwt.getClaimAsStringList(properties.rolesClaim()), List.of());
+        List<String> roles = token instanceof ItmsAuthentication itms ? itms.authorisation().roles() : List.of();
 
         HttpServletRequest request = currentRequest();
         String channel = "UNKNOWN";
@@ -46,6 +40,21 @@ public class CurrentActorProvider {
             correlationId = cid == null ? null : cid.toString();
         }
         return new CurrentActor(jwt.getSubject(), username, roles, channel, ip, correlationId);
+    }
+
+    /** Grants of the current subject (CC-001). Empty if the request was not authorised through ITMS. */
+    public Authorisation authorisation() {
+        JwtAuthenticationToken token = token();
+        return token instanceof ItmsAuthentication itms ? itms.authorisation()
+                : new Authorisation(token.getToken().getSubject(), List.of(), null);
+    }
+
+    private static JwtAuthenticationToken token() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (!(auth instanceof JwtAuthenticationToken token)) {
+            throw new IllegalStateException("No authenticated user in context");
+        }
+        return token;
     }
 
     private static HttpServletRequest currentRequest() {

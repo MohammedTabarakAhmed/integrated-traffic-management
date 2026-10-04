@@ -48,21 +48,21 @@ public final class RoleAssignment {
         this.subjectUsername = subjectUsername == null || subjectUsername.isBlank() ? null : subjectUsername.strip();
         this.roleCode = Codes.roleCode(roleCode);
         this.scopes = Objects.requireNonNull(scopes);
-        this.validFrom = Objects.requireNonNull(validFrom);
-        this.validTo = validTo;
+        this.validFrom = Instants.stored(Objects.requireNonNull(validFrom));
+        this.validTo = Instants.stored(validTo);
         this.reason = Codes.reason(reason);
         this.assignedBy = Objects.requireNonNull(assignedBy);
-        this.assignedAt = Objects.requireNonNull(assignedAt);
+        this.assignedAt = Instants.stored(Objects.requireNonNull(assignedAt));
         this.status = Objects.requireNonNull(status);
         this.revokedBy = revokedBy;
-        this.revokedAt = revokedAt;
+        this.revokedAt = Instants.stored(revokedAt);
         this.revocationReason = revocationReason;
         this.source = Objects.requireNonNull(source);
         this.delegatedFrom = delegatedFrom;
         if ((source == Source.DELEGATION) != (delegatedFrom != null)) {
             throw new IllegalArgumentException("a delegation, and only a delegation, has a source assignment");
         }
-        if (validTo != null && !validTo.isAfter(validFrom)) {
+        if (this.validTo != null && !this.validTo.isAfter(this.validFrom)) {
             throw DomainException.validation("VALIDITY_INVALID", "the end of the validity period must be after its start");
         }
     }
@@ -133,7 +133,7 @@ public final class RoleAssignment {
         }
         this.status = Status.REVOKED;
         this.revokedBy = Objects.requireNonNull(actor);
-        this.revokedAt = Objects.requireNonNull(now);
+        this.revokedAt = Instants.stored(Objects.requireNonNull(now));
         this.revocationReason = clean;
     }
 

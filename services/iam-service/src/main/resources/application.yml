@@ -27,6 +27,9 @@ itms:
     bootstrap-admin:
       subject: ${ITMS_IAM_BOOTSTRAP_ADMIN_SUBJECT:}
       username: ${ITMS_IAM_BOOTSTRAP_ADMIN_USERNAME:}
+    # How often access must be reviewed (SEC-007 "every quarter", ADR-026): ISO-8601 period, rolling on UTC.
+    access-review:
+      period: ${ITMS_IAM_ACCESS_REVIEW_PERIOD:P3M}
 
 management:
   endpoints:

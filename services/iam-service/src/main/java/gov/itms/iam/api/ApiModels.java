@@ -1,9 +1,12 @@
 package gov.itms.iam.api;
 
+import gov.itms.iam.application.AccessReviewService;
 import gov.itms.iam.application.IamService.RoleApprovalLimits;
 import gov.itms.iam.application.IamService.RoleConflictViolation;
 import gov.itms.iam.application.IamService.SubjectDeactivation;
 import gov.itms.iam.application.RoleRepository.RoleVersion;
+import gov.itms.iam.domain.AccessReviewCampaign;
+import gov.itms.iam.domain.AccessReviewItem;
 import gov.itms.iam.domain.Actor;
 import gov.itms.iam.domain.ApprovalLimit;
 import gov.itms.iam.domain.AssignmentScopes;
@@ -203,6 +206,66 @@ final class ApiModels {
         static SubjectDeactivationDto of(SubjectDeactivation d) {
             return new SubjectDeactivationDto(d.subjectId(), d.deactivatedAt(), d.revoked().size(),
                     d.revoked().stream().map(RoleAssignmentDto::of).toList());
+        }
+    }
+
+    record AccessReviewRequest(
+            @NotNull @Size(min = 3, max = 200) String title,
+            @NotNull @Valid ScopesDto scopes,
+            @NotNull Instant dueAt,
+            @NotNull @Size(min = 3, max = 500) String reason) {
+    }
+
+    record AccessReviewDecisionRequest(
+            @NotNull AccessReviewItem.Decision decision,
+            @Size(min = 3, max = 500) String reason) {
+    }
+
+    record AccessReviewCountsDto(int total, int pending, int overdue, int kept, int revoked, int notReviewed,
+                                 int ended) {
+        static AccessReviewCountsDto of(AccessReviewService.Counts c) {
+            return new AccessReviewCountsDto(c.total(), c.pending(), c.overdue(), c.kept(), c.revoked(),
+                    c.notReviewed(), c.ended());
+        }
+    }
+
+    record AccessReviewDto(UUID id, String title, ScopesDto scopes, Instant dueAt, String reason,
+                           AccessReviewCampaign.Status status, ActorDto createdBy, Instant createdAt,
+                           ActorDto closedBy, Instant closedAt, String closureReason, boolean overdue,
+                           AccessReviewCountsDto counts, Integer skippedUnderReview) {
+        static AccessReviewDto of(AccessReviewService.Review r) {
+            AccessReviewCampaign c = r.campaign();
+            return new AccessReviewDto(c.id(), c.title(), ScopesDto.of(c.scopes()), c.dueAt(), c.reason(),
+                    c.status(), ActorDto.of(c.createdBy()), c.createdAt(), ActorDto.of(c.closedBy()), c.closedAt(),
+                    c.closureReason(), r.overdue(), AccessReviewCountsDto.of(r.counts()), r.skippedUnderReview());
+        }
+    }
+
+    record AccessReviewItemDto(UUID id, UUID campaignId, Instant campaignDueAt, UUID assignmentId, String subjectId,
+                               String subjectUsername, String roleCode, ScopesDto scopes, ActorDto assignedBy,
+                               Instant validFrom, Instant validTo, AccessReviewItem.Status status, boolean overdue,
+                               ActorDto decidedBy, Instant decidedAt, String decisionReason, boolean decidedLate) {
+        static AccessReviewItemDto of(AccessReviewService.ReviewItem v) {
+            AccessReviewItem i = v.item();
+            return new AccessReviewItemDto(i.id(), i.campaignId(), i.campaignDueAt(), i.assignmentId(),
+                    i.subjectId(), i.subjectUsername(), i.roleCode(), ScopesDto.of(i.scopes()),
+                    ActorDto.of(i.assignedBy()), i.validFrom(), i.validTo(), i.status(), v.overdue(),
+                    ActorDto.of(i.decidedBy()), i.decidedAt(), i.decisionReason(), i.decidedLate());
+        }
+    }
+
+    record OverdueAssignmentDto(RoleAssignmentDto assignment, Instant lastReviewedAt, Instant reviewDueSince,
+                                UUID pendingItemId) {
+        static OverdueAssignmentDto of(AccessReviewService.OverdueAssignment o) {
+            return new OverdueAssignmentDto(RoleAssignmentDto.of(o.assignment()), o.lastReviewedAt(),
+                    o.reviewDueSince(), o.pendingItemId());
+        }
+    }
+
+    record OverdueAssignmentsDto(String reviewPeriod, Instant evaluatedAt, List<OverdueAssignmentDto> assignments) {
+        static OverdueAssignmentsDto of(AccessReviewService.OverdueAssignments o) {
+            return new OverdueAssignmentsDto(o.reviewPeriod().toString(), o.evaluatedAt(),
+                    o.assignments().stream().map(OverdueAssignmentDto::of).toList());
         }
     }
 

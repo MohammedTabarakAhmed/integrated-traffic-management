@@ -323,4 +323,213 @@ class DomainModelTest {
         assertThat(pair.retirementReason()).isEqualTo("policy withdrawn");
         assertThatThrownBy(() -> pair.retire(ADMIN, "again", NOW)).satisfies(code("ROLE_CONFLICT_NOT_ACTIVE"));
     }
+
+    // ------------------------------------------------------------------ access reviews (SEC-007)
+
+    private static final Actor REVIEWER = new Actor("u-reviewer", "reviewer");
+    private static final Instant DUE = NOW.plusSeconds(30L * 86_400);
+
+    private static AccessReviewCampaign campaign() {
+        return AccessReviewCampaign.open("Q4 review", AssignmentScopes.national(), DUE, "quarterly review", ADMIN,
+                NOW);
+    }
+
+    private static AccessReviewItem pendingItem() {
+        return AccessReviewItem.forAssignment(campaign(), assignment("u-holder", null, null));
+    }
+
+    @Test
+    @Tag("SEC-007")
+    @DisplayName("SEC-007: a review needs a title, scopes, a reason and a due date in the future")
+    void accessReviewOpenValidation() {
+        AccessReviewCampaign c = AccessReviewCampaign.open("  Q4 review  ", AssignmentScopes.national(), DUE,
+                " quarterly ", ADMIN, NOW);
+        assertThat(c.title()).isEqualTo("Q4 review");
+        assertThat(c.reason()).isEqualTo("quarterly");
+        assertThat(c.status()).isEqualTo(AccessReviewCampaign.Status.OPEN);
+        assertThat(c.createdBy()).isEqualTo(ADMIN);
+        assertThat(c.createdAt()).isEqualTo(NOW);
+        assertThat(c.dueAt()).isEqualTo(DUE);
+
+        AssignmentScopes all = AssignmentScopes.national();
+        assertThatThrownBy(() -> AccessReviewCampaign.open("Q4", all, DUE, "reason", ADMIN, NOW))
+                .satisfies(code("ACCESS_REVIEW_TITLE_INVALID"));
+        assertThatThrownBy(() -> AccessReviewCampaign.open(null, all, DUE, "reason", ADMIN, NOW))
+                .satisfies(code("ACCESS_REVIEW_TITLE_INVALID"));
+        assertThatThrownBy(() -> AccessReviewCampaign.open("x".repeat(201), all, DUE, "reason", ADMIN, NOW))
+                .satisfies(code("ACCESS_REVIEW_TITLE_INVALID"));
+        assertThatThrownBy(() -> AccessReviewCampaign.open("Q4 review", null, DUE, "reason", ADMIN, NOW))
+                .satisfies(code("SCOPE_REQUIRED"));
+        assertThatThrownBy(() -> AccessReviewCampaign.open("Q4 review", all, DUE, "x", ADMIN, NOW))
+                .satisfies(code("REASON_REQUIRED"));
+        assertThatThrownBy(() -> AccessReviewCampaign.open("Q4 review", all, null, "reason", ADMIN, NOW))
+                .satisfies(code("ACCESS_REVIEW_DUE_REQUIRED"));
+        assertThatThrownBy(() -> AccessReviewCampaign.open("Q4 review", all, NOW, "reason", ADMIN, NOW))
+                .satisfies(code("ACCESS_REVIEW_DUE_IN_PAST"));
+        assertThatThrownBy(() -> AccessReviewCampaign.open("Q4 review", all, NOW.minusSeconds(1), "reason", ADMIN,
+                NOW)).satisfies(code("ACCESS_REVIEW_DUE_IN_PAST"));
+    }
+
+    @Test
+    @Tag("SEC-007")
+    @DisplayName("SEC-007: an item is kept or revoked once; REVOKE needs a reason, KEEP does not")
+    void accessReviewItemDecisions() {
+        AccessReviewItem kept = pendingItem();
+        assertThat(kept.status()).isEqualTo(AccessReviewItem.Status.PENDING);
+        assertThat(kept.subjectId()).isEqualTo("u-holder");
+        assertThat(kept.assignedBy()).isEqualTo(ADMIN);
+        assertThat(kept.campaignDueAt()).isEqualTo(DUE);
+        kept.decide(AccessReviewItem.Decision.KEEP, REVIEWER, null, NOW);
+        assertThat(kept.status()).isEqualTo(AccessReviewItem.Status.KEPT);
+        assertThat(kept.decidedBy()).isEqualTo(REVIEWER);
+        assertThat(kept.decidedAt()).isEqualTo(NOW);
+        assertThat(kept.decisionReason()).isNull();
+        assertThatThrownBy(() -> kept.decide(AccessReviewItem.Decision.REVOKE, REVIEWER, "changed my mind", NOW))
+                .satisfies(code("ACCESS_REVIEW_ITEM_DECIDED"));
+
+        AccessReviewItem keptWithReason = pendingItem();
+        keptWithReason.decide(AccessReviewItem.Decision.KEEP, REVIEWER, "  still needed  ", NOW);
+        assertThat(keptWithReason.decisionReason()).isEqualTo("still needed");
+        assertThatThrownBy(() -> pendingItem().decide(AccessReviewItem.Decision.KEEP, REVIEWER, "ok", NOW))
+                .as("a KEEP reason, when given, follows the reason rules").satisfies(code("REASON_REQUIRED"));
+
+        AccessReviewItem revoked = pendingItem();
+        assertThatThrownBy(() -> revoked.decide(AccessReviewItem.Decision.REVOKE, REVIEWER, null, NOW))
+                .satisfies(code("REASON_REQUIRED"));
+        assertThatThrownBy(() -> revoked.decide(AccessReviewItem.Decision.REVOKE, REVIEWER, " ", NOW))
+                .satisfies(code("REASON_REQUIRED"));
+        assertThat(revoked.status()).isEqualTo(AccessReviewItem.Status.PENDING);
+        revoked.decide(AccessReviewItem.Decision.REVOKE, REVIEWER, "moved to another unit", NOW);
+        assertThat(revoked.status()).isEqualTo(AccessReviewItem.Status.REVOKED);
+        assertThat(revoked.decisionReason()).isEqualTo("moved to another unit");
+
+        RoleAssignment source = assignment("u-holder", null, null);
+        RoleAssignment delegation = RoleAssignment.delegate(source, "u-deputy", null, null, NOW.plusSeconds(60),
+                "cover", new Actor("u-holder", null), NOW);
+        assertThatThrownBy(() -> AccessReviewItem.forAssignment(campaign(), delegation))
+                .as("delegations are not reviewed").isInstanceOf(IllegalArgumentException.class);
+        source.revoke(ADMIN, "left", NOW);
+        assertThatThrownBy(() -> AccessReviewItem.forAssignment(campaign(), source))
+                .as("revoked assignments are not reviewed").isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @Tag("SEC-007")
+    @Tag("CC-002")
+    @DisplayName("SEC-007/CC-002: nobody reviews their own access or an assignment they granted")
+    void accessReviewSelfAndOwnGrant() {
+        AccessReviewItem item = pendingItem();
+        assertThatThrownBy(() -> item.decide(AccessReviewItem.Decision.KEEP, new Actor("u-holder", null), null, NOW))
+                .satisfies(code("ACCESS_REVIEW_SELF"))
+                .satisfies(t -> assertThat(((DomainException) t).kind())
+                        .isEqualTo(DomainException.Kind.SEGREGATION_OF_DUTIES))
+                .satisfies(t -> assertThat(((DomainException) t).requirementRefs()).contains("CC-002"));
+        assertThatThrownBy(() -> item.decide(AccessReviewItem.Decision.REVOKE, ADMIN, "granted by me", NOW))
+                .satisfies(code("ACCESS_REVIEW_OWN_GRANT"))
+                .satisfies(t -> assertThat(((DomainException) t).kind())
+                        .isEqualTo(DomainException.Kind.SEGREGATION_OF_DUTIES));
+        assertThat(item.status()).isEqualTo(AccessReviewItem.Status.PENDING);
+        assertThat(item.decidedBy()).isNull();
+    }
+
+    @Test
+    @Tag("SEC-007")
+    @DisplayName("SEC-007: closing records undecided items as NOT_REVIEWED or ENDED and happens once")
+    void accessReviewClosureOutcome() {
+        AccessReviewItem stillActive = pendingItem();
+        stillActive.closeUnreviewed(true);
+        assertThat(stillActive.status()).isEqualTo(AccessReviewItem.Status.NOT_REVIEWED);
+        assertThat(stillActive.decidedBy()).isNull();
+        AccessReviewItem ended = pendingItem();
+        ended.closeUnreviewed(false);
+        assertThat(ended.status()).isEqualTo(AccessReviewItem.Status.ENDED);
+        assertThatThrownBy(() -> ended.closeUnreviewed(true)).satisfies(code("ACCESS_REVIEW_ITEM_DECIDED"));
+
+        AccessReviewCampaign c = campaign();
+        assertThatThrownBy(() -> c.close(ADMIN, "", NOW)).satisfies(code("REASON_REQUIRED"));
+        c.requireOpen();
+        c.close(ADMIN, "quarter done", NOW.plusSeconds(60));
+        assertThat(c.status()).isEqualTo(AccessReviewCampaign.Status.CLOSED);
+        assertThat(c.closedBy()).isEqualTo(ADMIN);
+        assertThat(c.closedAt()).isEqualTo(NOW.plusSeconds(60));
+        assertThat(c.closureReason()).isEqualTo("quarter done");
+        assertThatThrownBy(() -> c.close(ADMIN, "again", NOW)).satisfies(code("ACCESS_REVIEW_CLOSED"));
+        assertThatThrownBy(c::requireOpen).satisfies(code("ACCESS_REVIEW_CLOSED"))
+                .satisfies(t -> assertThat(((DomainException) t).kind()).isEqualTo(DomainException.Kind.CONFLICT));
+    }
+
+    @Test
+    @Tag("SEC-007")
+    @DisplayName("SEC-007: items and reviews are overdue after the due date; late decisions are marked")
+    void accessReviewOverdueAndLate() {
+        AccessReviewCampaign c = campaign();
+        assertThat(c.isOverdue(DUE)).isFalse();
+        assertThat(c.isOverdue(DUE.plusSeconds(1))).isTrue();
+
+        AccessReviewItem onTime = pendingItem();
+        assertThat(onTime.isOverdue(DUE)).isFalse();
+        assertThat(onTime.isOverdue(DUE.plusSeconds(1))).isTrue();
+        onTime.decide(AccessReviewItem.Decision.KEEP, REVIEWER, null, DUE);
+        assertThat(onTime.decidedLate()).isFalse();
+        assertThat(onTime.isOverdue(DUE.plusSeconds(1))).as("decided items are never overdue").isFalse();
+
+        AccessReviewItem late = pendingItem();
+        assertThat(late.decidedLate()).isFalse();
+        late.decide(AccessReviewItem.Decision.KEEP, REVIEWER, null, DUE.plusSeconds(1));
+        assertThat(late.decidedLate()).isTrue();
+
+        c.close(ADMIN, "done", DUE.plusSeconds(5));
+        assertThat(c.isOverdue(DUE.plusSeconds(10))).as("a closed review is not overdue").isFalse();
+    }
+
+    @Test
+    @Tag("SEC-007")
+    @DisplayName("SEC-007: the review period is configuration (default P3M) and must be positive")
+    void accessReviewPolicyPeriod() {
+        AccessReviewPolicy quarterly = AccessReviewPolicy.parse(" P3M ");
+        assertThat(quarterly.period()).isEqualTo(java.time.Period.ofMonths(3));
+        assertThat(quarterly.reviewedSince(NOW)).isEqualTo(Instant.parse("2026-07-04T08:00:00Z"));
+        assertThat(quarterly.dueAfter(NOW)).isEqualTo(Instant.parse("2027-01-04T08:00:00Z"));
+        assertThat(AccessReviewPolicy.parse("P1M").reviewedSince(NOW)).isEqualTo(Instant.parse("2026-09-04T08:00:00Z"));
+
+        for (String bad : List.of("P0D", "P0M", "-P3M", "P1M-40D", "three months", "")) {
+            assertThatThrownBy(() -> AccessReviewPolicy.parse(bad)).as(bad)
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+        assertThatThrownBy(() -> AccessReviewPolicy.parse(null)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new AccessReviewPolicy(null)).isInstanceOf(NullPointerException.class);
+    }
+
+    @Test
+    @Tag("SEC-007")
+    @Tag("CC-120")
+    @DisplayName("SEC-007/CC-120: instants are held at the stored microsecond precision, so responses equal the row")
+    void instantsHeldAtMicroseconds() {
+        Instant due = Instant.parse("2099-01-01T00:00:00.123456789Z");
+        AccessReviewCampaign c = AccessReviewCampaign.open("Q4 review", AssignmentScopes.national(), due,
+                "quarterly review", ADMIN, NOW.plusNanos(999));
+        assertThat(c.dueAt()).isEqualTo(Instant.parse("2099-01-01T00:00:00.123456Z"));
+        assertThat(c.createdAt()).isEqualTo(NOW);
+        RoleAssignment a = assignment("u-micros", NOW.plusNanos(1_500), NOW.plusSeconds(60).plusNanos(7));
+        assertThat(a.validFrom()).isEqualTo(NOW.plusNanos(1_000));
+        assertThat(a.validTo()).isEqualTo(NOW.plusSeconds(60));
+        assertThat(Instants.stored(null)).isNull();
+        // A window that is empty at the stored precision is refused, not stored as start == end.
+        assertThatThrownBy(() -> assignment("u-micros", NOW.plusSeconds(5).plusNanos(100),
+                NOW.plusSeconds(5).plusNanos(900))).satisfies(code("VALIDITY_INVALID"));
+    }
+
+    @Test
+    @Tag("DAT-002")
+    @DisplayName("DAT-002: a reason or title needs 3 characters counted as code points, as the database counts")
+    void minimumLengthCountsCodePoints() {
+        String twoCodePoints = "\uD83D\uDE00a"; // one emoji (2 UTF-16 units) + 'a'
+        assertThatThrownBy(() -> Codes.reason(twoCodePoints)).satisfies(code("REASON_REQUIRED"));
+        assertThat(Codes.reason(" \uD83D\uDE00ab\t")).isEqualTo("\uD83D\uDE00ab");
+        assertThatThrownBy(() -> Codes.reason("\u2003ab\u2003")).satisfies(code("REASON_REQUIRED"));
+        // Java keeps a no-break space, and so does the database (iam_strip).
+        assertThat(Codes.reason("\u00A0ab")).isEqualTo("\u00A0ab");
+        assertThatThrownBy(() -> AccessReviewCampaign.open(twoCodePoints, AssignmentScopes.national(),
+                NOW.plusSeconds(60), "quarterly review", ADMIN, NOW)).satisfies(code("ACCESS_REVIEW_TITLE_INVALID"));
+    }
 }

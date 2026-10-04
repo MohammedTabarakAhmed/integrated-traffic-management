@@ -681,6 +681,380 @@ class IamApiIT {
                 .param("id", maker).query(String.class).single()).isEqualTo("svc-feed");
     }
 
+    // ------------------------------------------------------------------ access reviews (SEC-007 manager half)
+
+    private MvcResult openReview(List<String> regions, String dueAt, RequestPostProcessor who) throws Exception {
+        return postAs("/v1/access-reviews", Map.of("title", "Quarterly access review", "scopes", scopes(regions),
+                "dueAt", dueAt, "reason", "quarterly review (SEC-007)"), who);
+    }
+
+    private String openReview(List<String> regions) throws Exception {
+        MvcResult r = openReview(regions, inHours(48), ADMIN);
+        assertThat(r.getResponse().getStatus()).as(r.getResponse().getContentAsString()).isEqualTo(201);
+        return body(r).get("id").asString();
+    }
+
+    private JsonNode reviewItems(String query, RequestPostProcessor who) throws Exception {
+        MvcResult r = getAs("/v1/access-review-items?" + query, who);
+        assertThat(r.getResponse().getStatus()).as(r.getResponse().getContentAsString()).isEqualTo(200);
+        return body(r).get("items");
+    }
+
+    private String itemOf(String campaignId, String subject, RequestPostProcessor who) throws Exception {
+        return reviewItems("campaignId=" + campaignId + "&subjectId=" + subject, who).get(0).get("id").asString();
+    }
+
+    private MvcResult decideItem(String itemId, String decision, String reason, RequestPostProcessor who)
+            throws Exception {
+        Map<String, Object> request = reason == null ? Map.of("decision", decision)
+                : Map.of("decision", decision, "reason", reason);
+        return postAs("/v1/access-review-items/" + itemId + "/decisions", request, who);
+    }
+
+    private MvcResult closeReview(String campaignId, RequestPostProcessor who) throws Exception {
+        return postAs("/v1/access-reviews/" + campaignId + "/closures", Map.of("reason", "quarter done"), who);
+    }
+
+    @Test
+    @Tag("SEC-007")
+    @DisplayName("SEC-007: admin opens a review, a manager keeps one and revokes one, admin closes; access follows")
+    void accessReviewCampaignEndToEnd() throws Exception {
+        assertThat(body(getAs("/v1/roles/ACCESS_REVIEWER", ADMIN)).get("permissions").valueStream()
+                .map(JsonNode::asString)).containsExactlyInAnyOrder("iam.review.read", "iam.review.decide");
+        assertThat(body(getAs("/v1/roles/IT_ADMINISTRATOR", ADMIN)).get("permissions").valueStream()
+                .map(JsonNode::asString)).contains("iam.review.manage", "iam.review.read")
+                .doesNotContain("iam.review.decide");
+        assign("u-ar-rev", "ACCESS_REVIEWER", List.of("AR1", "AR9"), ADMIN);
+        RequestPostProcessor reviewer = as("u-ar-rev");
+        assign("u-ar-keep", "REFDATA_MAKER", List.of("AR1"), ADMIN);
+        String revokedAssignment = assign("u-ar-revoke", "REFDATA_MAKER", List.of("AR1"), ADMIN);
+        assign("u-ar-idle", "REFDATA_MAKER", List.of("AR1"), ADMIN);
+
+        MvcResult opened = openReview(List.of("AR1"), inHours(48), ADMIN);
+        assertThat(opened.getResponse().getStatus()).as(opened.getResponse().getContentAsString()).isEqualTo(201);
+        String id = body(opened).get("id").asString();
+        assertThat(opened.getResponse().getHeader("Location")).endsWith("/v1/access-reviews/" + id);
+        assertThat(body(opened).get("status").asString()).isEqualTo("OPEN");
+        assertThat(body(opened).get("counts").get("total").asInt()).isEqualTo(3);
+        assertThat(body(opened).get("skippedUnderReview").asInt()).isZero();
+
+        JsonNode queue = reviewItems("campaignId=" + id, reviewer);
+        assertThat(queue).hasSize(3).allSatisfy(i -> {
+            assertThat(i.get("status").asString()).isEqualTo("PENDING");
+            assertThat(i.get("assignedBy").get("id").asString()).isEqualTo("u-admin");
+            assertThat(i.get("overdue").asBoolean()).isFalse();
+        });
+
+        MvcResult kept = decideItem(itemOf(id, "u-ar-keep", reviewer), "KEEP", null, reviewer);
+        assertThat(kept.getResponse().getStatus()).as(kept.getResponse().getContentAsString()).isEqualTo(200);
+        assertThat(body(kept).get("status").asString()).isEqualTo("KEPT");
+        assertThat(body(kept).get("decidedBy").get("id").asString()).isEqualTo("u-ar-rev");
+        assertThat(body(kept).get("decidedLate").asBoolean()).isFalse();
+        assertThat(myGrants("u-ar-revoke")).hasSize(1);
+        MvcResult revoked = decideItem(itemOf(id, "u-ar-revoke", reviewer), "REVOKE", "left the unit", reviewer);
+        assertThat(revoked.getResponse().getStatus()).as(revoked.getResponse().getContentAsString()).isEqualTo(200);
+        assertThat(body(revoked).get("status").asString()).isEqualTo("REVOKED");
+        assertThat(myGrants("u-ar-revoke")).as("the revoked subject loses the grant at once").isEmpty();
+        JsonNode assignmentAfter = body(getAs("/v1/role-assignments/" + revokedAssignment, ADMIN));
+        assertThat(assignmentAfter.get("status").asString()).isEqualTo("REVOKED");
+        assertThat(assignmentAfter.get("revokedBy").get("id").asString()).isEqualTo("u-ar-rev");
+        assertThat(assignmentAfter.get("revocationReason").asString()).isEqualTo("left the unit");
+
+        JsonNode counts = body(getAs("/v1/access-reviews/" + id, ADMIN)).get("counts");
+        assertThat(counts.get("pending").asInt()).isEqualTo(1);
+        assertThat(counts.get("kept").asInt()).isEqualTo(1);
+        assertThat(counts.get("revoked").asInt()).isEqualTo(1);
+
+        MvcResult closed = closeReview(id, ADMIN);
+        assertThat(closed.getResponse().getStatus()).as(closed.getResponse().getContentAsString()).isEqualTo(200);
+        assertThat(body(closed).get("status").asString()).isEqualTo("CLOSED");
+        assertThat(body(closed).get("closedBy").get("id").asString()).isEqualTo("u-admin");
+        assertThat(body(closed).get("counts").get("notReviewed").asInt()).isEqualTo(1);
+        assertThat(body(closed).get("counts").get("pending").asInt()).isZero();
+        assertThat(myGrants("u-ar-idle")).as("closing revokes nothing").hasSize(1);
+        assertThat(body(getAs("/v1/access-reviews?status=CLOSED", ADMIN)).get("items").valueStream()
+                .map(n -> n.get("id").asString())).contains(id);
+        assertThat(reviewItems("campaignId=" + id + "&status=NOT_REVIEWED", reviewer)).singleElement()
+                .satisfies(i -> assertThat(i.get("subjectId").asString()).isEqualTo("u-ar-idle"));
+
+        assertThat(db.sql("select action from audit_outbox where entity_id = :id order by occurred_at")
+                .param("id", id).query(String.class).list())
+                .containsExactly("IAM_ACCESS_REVIEW_OPENED", "IAM_ACCESS_REVIEW_CLOSED");
+        assertThat(db.sql("select action from audit_outbox where entity_id = :id order by occurred_at")
+                .param("id", revokedAssignment).query(String.class).list())
+                .containsExactly("IAM_ROLE_ASSIGNED", "IAM_ROLE_REVOKED");
+    }
+
+    @Test
+    @Tag("SEC-007")
+    @Tag("CC-001")
+    @DisplayName("SEC-007/CC-001: managers decide but cannot open or close; admins cannot decide; scopes apply")
+    void accessReviewAuthorisationAndScope() throws Exception {
+        assign("u-az-rev", "ACCESS_REVIEWER", List.of("AZ1", "AZ9"), ADMIN);
+        RequestPostProcessor reviewer = as("u-az-rev");
+        assign("u-az-1", "REFDATA_MAKER", List.of("AZ1"), ADMIN);
+        assign("u-az-2", "REFDATA_MAKER", List.of("AZ2"), ADMIN);
+        assign("u-az-admin", "IT_ADMINISTRATOR", List.of("AZ1", "AZ7"), ADMIN); // not inside the review below
+
+        assertThat(mvc.perform(get("/v1/access-reviews")).andReturn().getResponse().getStatus()).isEqualTo(401);
+        MvcResult reviewerOpens = openReview(List.of("AZ1"), inHours(48), reviewer);
+        assertThat(reviewerOpens.getResponse().getStatus()).isEqualTo(403);
+        assertThat(body(reviewerOpens).get("code").asString()).isEqualTo("FORBIDDEN");
+        MvcResult beyond = openReview(List.of("AZ2"), inHours(48), as("u-az-admin"));
+        assertThat(beyond.getResponse().getStatus()).isEqualTo(403);
+        assertThat(body(beyond).get("code").asString()).isEqualTo("SCOPE_EXCEEDED");
+        assertThat(getAs("/v1/access-reviews", as("u-az-1")).getResponse().getStatus()).isEqualTo(403);
+
+        String id = openReview(List.of("AZ1", "AZ2"));
+        assertThat(getAs("/v1/access-reviews/" + id, reviewer).getResponse().getStatus())
+                .as("the header of a review wider than the reviewer's scope").isEqualTo(404);
+        assertThat(body(getAs("/v1/access-reviews", reviewer)).get("items").valueStream()
+                .map(n -> n.get("id").asString())).doesNotContain(id);
+        JsonNode visible = reviewItems("campaignId=" + id, reviewer);
+        assertThat(visible).singleElement()
+                .satisfies(i -> assertThat(i.get("subjectId").asString()).isEqualTo("u-az-1"));
+        String outside = itemOf(id, "u-az-2", ADMIN);
+        assertThat(decideItem(outside, "KEEP", null, reviewer).getResponse().getStatus()).isEqualTo(404);
+        MvcResult adminDecides = decideItem(visible.get(0).get("id").asString(), "KEEP", null, ADMIN);
+        assertThat(adminDecides.getResponse().getStatus()).as("administrators do not certify access").isEqualTo(403);
+        assertThat(body(adminDecides).get("code").asString()).isEqualTo("FORBIDDEN");
+        assertThat(closeReview(id, reviewer).getResponse().getStatus()).isEqualTo(403);
+        assertThat(closeReview(id, as("u-az-admin")).getResponse().getStatus())
+                .as("outside the regional admin's scope").isEqualTo(404);
+
+        assertThat(decideItem(visible.get(0).get("id").asString(), "KEEP", null, reviewer).getResponse()
+                .getStatus()).isEqualTo(200);
+        assertThat(reviewItems("campaignId=" + java.util.UUID.randomUUID(), reviewer)).isEmpty();
+        assertThat(getAs("/v1/access-review-items?status=MAYBE", reviewer).getResponse().getStatus()).isEqualTo(400);
+        assertThat(getAs("/v1/access-reviews/not-a-uuid", ADMIN).getResponse().getStatus()).isEqualTo(400);
+        assertThat(getAs("/v1/access-reviews/" + java.util.UUID.randomUUID(), ADMIN).getResponse().getStatus())
+                .isEqualTo(404);
+    }
+
+    @Test
+    @Tag("SEC-007")
+    @Tag("CC-002")
+    @DisplayName("SEC-007/CC-002: nobody reviews their own access or an assignment they granted")
+    void accessReviewSegregationOfDuties() throws Exception {
+        assign("u-sd-rev", "ACCESS_REVIEWER", List.of("SD1", "SD9"), ADMIN);
+        assign("u-sd-rev", "REFDATA_MAKER", List.of("SD1"), ADMIN);
+        assign("u-sd-boss", "IT_ADMINISTRATOR", List.of("SD1", "SD8"), ADMIN);
+        assign("u-sd-boss", "ACCESS_REVIEWER", List.of("SD1", "SD9"), ADMIN);
+        assign("u-sd-x", "REFDATA_MAKER", List.of("SD1"), as("u-sd-boss"));
+        RequestPostProcessor reviewer = as("u-sd-rev");
+        RequestPostProcessor boss = as("u-sd-boss");
+        String id = openReview(List.of("SD1"));
+
+        MvcResult self = decideItem(itemOf(id, "u-sd-rev", reviewer), "KEEP", null, reviewer);
+        assertThat(self.getResponse().getStatus()).isEqualTo(403);
+        assertThat(body(self).get("code").asString()).isEqualTo("ACCESS_REVIEW_SELF");
+        assertThat(body(self).get("requirementRefs").get(0).asString()).isEqualTo("CC-002");
+        MvcResult ownGrant = decideItem(itemOf(id, "u-sd-x", boss), "REVOKE", "granted it myself", boss);
+        assertThat(ownGrant.getResponse().getStatus()).isEqualTo(403);
+        assertThat(body(ownGrant).get("code").asString()).isEqualTo("ACCESS_REVIEW_OWN_GRANT");
+        assertThat(myGrants("u-sd-x")).as("nothing revoked").hasSize(1);
+
+        assertThat(decideItem(itemOf(id, "u-sd-x", reviewer), "KEEP", null, reviewer).getResponse().getStatus())
+                .isEqualTo(200);
+        assertThat(decideItem(itemOf(id, "u-sd-rev", boss), "KEEP", "still needed", boss).getResponse()
+                .getStatus()).isEqualTo(200);
+    }
+
+    @Test
+    @Tag("SEC-007")
+    @Tag("DAT-002")
+    @DisplayName("SEC-007/DAT-002: the database guards reviews: append-only, one transition, SoD, open, one pending")
+    void accessReviewDatabaseGuards() throws Exception {
+        assign("u-db-1", "REFDATA_MAKER", List.of("DB1"), ADMIN);
+        String second = assign("u-db-2", "REFDATA_MAKER", List.of("DB1"), ADMIN);
+        assign("u-db-rev", "ACCESS_REVIEWER", List.of("DB1", "DB9"), ADMIN);
+        String id = openReview(List.of("DB1"));
+        String item1 = itemOf(id, "u-db-1", ADMIN);
+        String item2 = itemOf(id, "u-db-2", ADMIN);
+
+        assertThatThrownBy(() -> db.sql("delete from access_review_item where id = cast(:id as uuid)")
+                .param("id", item1).update()).isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("cannot be deleted");
+        assertThatThrownBy(() -> db.sql("delete from access_review_campaign where id = cast(:id as uuid)")
+                .param("id", id).update()).isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("cannot be deleted");
+        assertThatThrownBy(() -> db.sql("update access_review_item set role_code = 'IT_ADMINISTRATOR' "
+                + "where id = cast(:id as uuid)").param("id", item1).update()).as("snapshot edit")
+                .isInstanceOf(DataAccessException.class).hasMessageContaining("can only be decided or closed once");
+        assertThatThrownBy(() -> db.sql("update access_review_campaign set title = 'Edited title' "
+                + "where id = cast(:id as uuid)").param("id", id).update())
+                .isInstanceOf(DataAccessException.class).hasMessageContaining("can only be closed once");
+        assertThatThrownBy(() -> db.sql("""
+                update access_review_item set status = 'KEPT', decided_by = subject_id, decided_at = now()
+                 where id = cast(:id as uuid)""").param("id", item1).update()).as("self-review")
+                .isInstanceOf(DataAccessException.class).hasMessageContaining("ck_item_no_self_review");
+        assertThatThrownBy(() -> db.sql("""
+                update access_review_item set status = 'KEPT', decided_by = 'u-admin', decided_at = now()
+                 where id = cast(:id as uuid)""").param("id", item1).update()).as("assigner reviews")
+                .isInstanceOf(DataAccessException.class).hasMessageContaining("ck_item_not_assigner");
+        assertThatThrownBy(() -> db.sql("""
+                update access_review_item set status = 'REVOKED', decided_by = 'u-db-rev', decided_at = now(),
+                       decision_reason = 'direct'
+                 where id = cast(:id as uuid)""").param("id", item1).update()).as("assignment still active")
+                .isInstanceOf(DataAccessException.class).hasMessageContaining("revoked first");
+        assertThatThrownBy(() -> db.sql("""
+                update access_review_item set status = 'REVOKED', decided_by = 'u-db-rev', decided_at = now()
+                 where id = cast(:id as uuid)""").param("id", item1).update()).as("revoke without reason")
+                .isInstanceOf(DataAccessException.class);
+
+        assertThat(decideItem(item1, "KEEP", null, as("u-db-rev")).getResponse().getStatus()).isEqualTo(200);
+        assertThatThrownBy(() -> db.sql("update access_review_item set status = 'NOT_REVIEWED' "
+                + "where id = cast(:id as uuid)").param("id", item1).update()).as("second transition")
+                .isInstanceOf(DataAccessException.class).hasMessageContaining("can only be decided or closed once");
+
+        String other = openReview(List.of("DB1"));
+        String duplicatePending = """
+                insert into access_review_item (id, campaign_id, assignment_id, subject_id, subject_username,
+                    role_code, regions, centres, modules, assigned_by, valid_from, valid_to, status)
+                select gen_random_uuid(), cast(:campaign as uuid), a.id, a.subject_id, a.subject_username,
+                       a.role_code, a.regions, a.centres, a.modules, a.assigned_by, a.valid_from, a.valid_to,
+                       'PENDING'
+                  from role_assignment a where a.id = cast(:assignment as uuid)""";
+        assertThatThrownBy(() -> db.sql(duplicatePending).param("campaign", other).param("assignment", second)
+                .update()).as("one pending item per assignment").isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("uq_item_pending");
+
+        assertThat(closeReview(id, ADMIN).getResponse().getStatus()).isEqualTo(200);
+        assertThat(closeReview(other, ADMIN).getResponse().getStatus()).isEqualTo(200);
+        assertThatThrownBy(() -> db.sql("""
+                update access_review_item set status = 'KEPT', decided_by = 'u-db-rev', decided_at = now()
+                 where id = cast(:id as uuid)""").param("id", item2).update()).as("decision on a closed review")
+                .isInstanceOf(DataAccessException.class).hasMessageContaining("only be decided while the review is open");
+        assertThatThrownBy(() -> db.sql(duplicatePending).param("campaign", other).param("assignment", second)
+                .update()).as("items only in an open review").isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("only be added to an open review");
+        assertThatThrownBy(() -> db.sql("""
+                insert into access_review_campaign (id, title, regions, centres, modules, due_at, reason, status,
+                    created_by, created_at)
+                values (gen_random_uuid(), 'Past review', '{DB1}', '{*}', '{*}', now() - interval '1 day', 'direct',
+                    'OPEN', 'u-admin', now())""").update()).isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("ck_campaign_due");
+    }
+
+    @Test
+    @Tag("SEC-007")
+    @DisplayName("SEC-007: repeated decisions and closures are refused; concurrent opens never review twice")
+    void accessReviewIdempotencyAndConflicts() throws Exception {
+        assign("u-id-1", "REFDATA_MAKER", List.of("ID1"), ADMIN);
+        assign("u-id-2", "REFDATA_MAKER", List.of("ID1"), ADMIN);
+        assign("u-id-rev", "ACCESS_REVIEWER", List.of("ID1", "ID3", "ID9"), ADMIN);
+        RequestPostProcessor reviewer = as("u-id-rev");
+        String first = openReview(List.of("ID1"));
+        String item1 = itemOf(first, "u-id-1", reviewer);
+        String item2 = itemOf(first, "u-id-2", reviewer);
+
+        assertThat(decideItem(item1, "KEEP", null, reviewer).getResponse().getStatus()).isEqualTo(200);
+        MvcResult again = decideItem(item1, "REVOKE", "changed my mind", reviewer);
+        assertThat(again.getResponse().getStatus()).isEqualTo(409);
+        assertThat(body(again).get("code").asString()).isEqualTo("ACCESS_REVIEW_ITEM_DECIDED");
+        MvcResult noReason = decideItem(item2, "REVOKE", null, reviewer);
+        assertThat(noReason.getResponse().getStatus()).isEqualTo(422);
+        assertThat(body(noReason).get("code").asString()).isEqualTo("REASON_REQUIRED");
+        MvcResult past = openReview(List.of("ID1"), "2020-01-01T00:00:00Z", ADMIN);
+        assertThat(past.getResponse().getStatus()).isEqualTo(422);
+        assertThat(body(past).get("code").asString()).isEqualTo("ACCESS_REVIEW_DUE_IN_PAST");
+
+        MvcResult overlapping = openReview(List.of("ID1"), inHours(24), ADMIN);
+        assertThat(body(overlapping).get("counts").get("total").asInt()).as("the kept one is reviewed again")
+                .isEqualTo(1);
+        assertThat(body(overlapping).get("skippedUnderReview").asInt()).as("the pending one is not").isEqualTo(1);
+
+        MvcResult closed = closeReview(first, ADMIN);
+        assertThat(closed.getResponse().getStatus()).isEqualTo(200);
+        MvcResult closedAgain = closeReview(first, ADMIN);
+        assertThat(closedAgain.getResponse().getStatus()).isEqualTo(409);
+        assertThat(body(closedAgain).get("code").asString()).isEqualTo("ACCESS_REVIEW_CLOSED");
+        MvcResult afterClosure = decideItem(item2, "KEEP", null, reviewer);
+        assertThat(afterClosure.getResponse().getStatus()).isEqualTo(409);
+        assertThat(body(afterClosure).get("code").asString()).isEqualTo("ACCESS_REVIEW_CLOSED");
+
+        // The assignment ended before anyone decided its item in the overlapping review.
+        String overlappingId = body(overlapping).get("id").asString();
+        String reReviewed = itemOf(overlappingId, "u-id-1", reviewer);
+        String assignment1 = body(getAs("/v1/access-review-items?campaignId=" + overlappingId, reviewer))
+                .get("items").get(0).get("assignmentId").asString();
+        postAs("/v1/role-assignments/" + assignment1 + "/revocations", Map.of("reason", "moved"), ADMIN);
+        MvcResult ended = decideItem(reReviewed, "KEEP", null, reviewer);
+        assertThat(ended.getResponse().getStatus()).isEqualTo(409);
+        assertThat(body(ended).get("code").asString()).isEqualTo("ACCESS_REVIEW_ASSIGNMENT_ENDED");
+
+        // Two administrators open the same review at the same moment: no 500, and the assignment is reviewed once.
+        assign("u-id-3", "REFDATA_MAKER", List.of("ID3"), ADMIN);
+        String payload = json.writeValueAsString(Map.of("title", "Concurrent review", "scopes",
+                scopes(List.of("ID3")), "dueAt", inHours(48), "reason", "concurrency test"));
+        java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            List<java.util.concurrent.Future<MvcResult>> futures = new java.util.ArrayList<>();
+            for (int i = 0; i < 2; i++) {
+                futures.add(pool.submit(() -> {
+                    start.await();
+                    return mvc.perform(post("/v1/access-reviews").with(ADMIN).header("X-Channel", "BACKOFFICE")
+                            .contentType(MediaType.APPLICATION_JSON).content(payload)).andReturn();
+                }));
+            }
+            start.countDown();
+            int total = 0;
+            int skipped = 0;
+            for (java.util.concurrent.Future<MvcResult> f : futures) {
+                MvcResult r = f.get(60, java.util.concurrent.TimeUnit.SECONDS);
+                assertThat(r.getResponse().getStatus()).as(r.getResponse().getContentAsString()).isEqualTo(201);
+                total += body(r).get("counts").get("total").asInt();
+                skipped += body(r).get("skippedUnderReview").asInt();
+            }
+            assertThat(total).isEqualTo(1);
+            assertThat(skipped).isEqualTo(1);
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    @Tag("SEC-007")
+    @DisplayName("SEC-007: the overdue listing shows the configured review period (default P3M)")
+    void overdueAssignmentsShowsConfiguredPeriod() throws Exception {
+        MvcResult r = getAs("/v1/access-reviews/overdue-assignments", ADMIN);
+        assertThat(r.getResponse().getStatus()).as(r.getResponse().getContentAsString()).isEqualTo(200);
+        assertThat(body(r).get("reviewPeriod").asString()).isEqualTo("P3M");
+        assertThat(body(r).get("evaluatedAt").asString()).isNotBlank();
+        assertThat(body(r).get("assignments").isArray()).isTrue();
+        assertThat(getAs("/v1/access-reviews/overdue-assignments", as("u-ov-nobody")).getResponse().getStatus())
+                .isEqualTo(403);
+
+        // An assignment granted four months ago and never reviewed is overdue; a KEEP decision takes it off the list.
+        String old = java.util.UUID.randomUUID().toString();
+        db.sql("""
+                insert into role_assignment (id, subject_id, subject_username, role_code, regions, centres, modules,
+                    valid_from, status, reason, assigned_by, assigned_at)
+                values (cast(:id as uuid), 'u-ov-old', 'u-ov-old.name', 'REFDATA_MAKER', '{OV1}', '{*}', '{*}',
+                    now() - interval '4 months', 'ACTIVE', 'granted long ago', 'u-admin', now() - interval '4 months')""")
+                .param("id", old).update();
+        assign("u-ov-rev", "ACCESS_REVIEWER", List.of("OV1", "OV9"), ADMIN);
+        RequestPostProcessor reviewer = as("u-ov-rev");
+        JsonNode overdue = overdueFor(old, reviewer);
+        assertThat(overdue.get("lastReviewedAt").isNull()).isTrue();
+        assertThat(overdue.get("pendingItemId").isNull()).isTrue();
+        assertThat(overdue.get("reviewDueSince").asString()).isNotBlank();
+
+        String id = openReview(List.of("OV1"));
+        String item = itemOf(id, "u-ov-old", reviewer);
+        assertThat(overdueFor(old, reviewer).get("pendingItemId").asString()).isEqualTo(item);
+        assertThat(decideItem(item, "KEEP", null, reviewer).getResponse().getStatus()).isEqualTo(200);
+        assertThat(body(getAs("/v1/access-reviews/overdue-assignments", reviewer)).get("assignments").valueStream()
+                .map(a -> a.get("assignment").get("id").asString())).doesNotContain(old);
+    }
+
+    private JsonNode overdueFor(String assignmentId, RequestPostProcessor who) throws Exception {
+        JsonNode list = body(getAs("/v1/access-reviews/overdue-assignments", who)).get("assignments");
+        return list.valueStream().filter(a -> a.get("assignment").get("id").asString().equals(assignmentId))
+                .findFirst().orElseThrow(() -> new AssertionError("not overdue: " + assignmentId));
+    }
+
     @Test
     @Tag("SEC-022")
     @Tag("CH-053")
@@ -706,5 +1080,255 @@ class IamApiIT {
         MvcResult missingRole = getAs("/v1/roles/NO_SUCH_ROLE", ADMIN);
         assertThat(missingRole.getResponse().getStatus()).isEqualTo(404);
         assertThat(body(missingRole).get("detail").asString()).isEqualTo("The role NO_SUCH_ROLE does not exist.");
+    }
+
+    // ------------------------------------------------------------------ tester regression tests (defects, round 1)
+
+    @Test
+    @Tag("SEC-007")
+    @Tag("defect")
+    @DisplayName("SEC-007 defect: an absurdly distant dueAt is refused with 4xx, not a 500")
+    void accessReviewAbsurdDueDateIsRefusedNotServerError() throws Exception {
+        MvcResult r = openReview(List.of("DF1"), "+999999999-01-01T00:00:00Z", ADMIN);
+        assertThat(r.getResponse().getStatus()).as(r.getResponse().getContentAsString()).isBetween(400, 422);
+    }
+
+    @Test
+    @Tag("SEC-022")
+    @Tag("SEC-007")
+    @Tag("defect")
+    @DisplayName("SEC-022 defect: a NUL character in a review title, reason or decision reason is a 4xx, not a 500")
+    void accessReviewNulCharacterIsRefusedNotServerError() throws Exception {
+        MvcResult r = postAs("/v1/access-reviews", Map.of("title", "ab\0cd", "scopes", scopes(List.of("DF2")),
+                "dueAt", inHours(48), "reason", "quarterly review"), ADMIN);
+        assertThat(r.getResponse().getStatus()).as(r.getResponse().getContentAsString()).isBetween(400, 422);
+    }
+
+    @Test
+    @Tag("SEC-007")
+    @Tag("SEC-022")
+    @Tag("defect")
+    @DisplayName("SEC-007 defect: decision must be the string KEEP or REVOKE; a number must not revoke access")
+    void accessReviewNumericDecisionIsRefused() throws Exception {
+        assign("u-df-rev", "ACCESS_REVIEWER", List.of("DF3"), ADMIN);
+        assign("u-df-sub", "REFDATA_MAKER", List.of("DF3"), ADMIN);
+        RequestPostProcessor reviewer = as("u-df-rev");
+        String id = openReview(List.of("DF3"));
+        String item = itemOf(id, "u-df-sub", reviewer);
+        MvcResult r = postAs("/v1/access-review-items/" + item + "/decisions",
+                Map.of("decision", 1, "reason", "numeric decision"), reviewer);
+        assertThat(r.getResponse().getStatus()).as(r.getResponse().getContentAsString()).isEqualTo(400);
+        assertThat(myGrants("u-df-sub")).as("nothing was revoked").hasSize(1);
+    }
+
+    @Test
+    @Tag("SEC-007")
+    @Tag("DAT-002")
+    @Tag("defect")
+    @DisplayName("DAT-002 defect: the database refuses a campaign whose reason breaks the 3-character rule")
+    void accessReviewDatabaseRefusesShortReason() {
+        assertThatThrownBy(() -> db.sql("""
+                insert into access_review_campaign (id, title, regions, centres, modules, due_at, reason, status,
+                       created_by, created_at)
+                values (gen_random_uuid(), 'Direct insert', array['DF4'], array['*'], array['*'],
+                        now() + interval '1 day', 'x', 'OPEN', 'u-direct', now())""").update())
+                .isInstanceOf(DataAccessException.class);
+    }
+
+    // ------------------------------------------------------------------ coder fixes (round 2)
+
+    @Test
+    @Tag("SEC-022")
+    @Tag("SEC-007")
+    @DisplayName("SEC-022: request hardening applies to every endpoint: NUL text, out-of-range date-times, numeric enums")
+    void requestHardeningAppliesToEveryEndpoint() throws Exception {
+        Map<String, Object> nulReason = new HashMap<>(assignment("u-hd-sub", "REFDATA_MAKER", List.of("HD1")));
+        nulReason.put("reason", "integration\u0000test");
+        MvcResult nul = postAs("/v1/role-assignments", nulReason, ADMIN);
+        assertThat(nul.getResponse().getStatus()).as("NUL in a pre-existing endpoint").isEqualTo(400);
+        assertThat(body(nul).get("code").asString()).isEqualTo("VALIDATION_FAILED");
+
+        Map<String, Object> farValidTo = new HashMap<>(assignment("u-hd-sub", "REFDATA_MAKER", List.of("HD1")));
+        farValidTo.put("validTo", "+999999999-01-01T00:00:00Z");
+        assertThat(postAs("/v1/role-assignments", farValidTo, ADMIN).getResponse().getStatus())
+                .as("out-of-range validTo").isEqualTo(400);
+
+        assertThat(openReview(List.of("HD1"), "+10000-01-01T00:00:00Z", ADMIN).getResponse().getStatus())
+                .as("five-digit year is not RFC 3339").isEqualTo(400);
+        MvcResult latest = openReview(List.of("HD2"), "9999-12-31T23:59:59Z", ADMIN);
+        assertThat(latest.getResponse().getStatus()).as(latest.getResponse().getContentAsString()).isEqualTo(201);
+        assertThat(body(latest).get("dueAt").asString()).isEqualTo("9999-12-31T23:59:59Z");
+        String latestId = body(latest).get("id").asString();
+        assertThat(postAs("/v1/access-reviews/" + latestId + "/closures", Map.of("reason", "done\u0000now"), ADMIN)
+                .getResponse().getStatus()).as("NUL in a closure reason").isEqualTo(400);
+
+        assign("u-hd-rev", "ACCESS_REVIEWER", List.of("HD3"), ADMIN);
+        assign("u-hd-sub3", "REFDATA_MAKER", List.of("HD3"), ADMIN);
+        RequestPostProcessor reviewer = as("u-hd-rev");
+        String item = itemOf(openReview(List.of("HD3")), "u-hd-sub3", reviewer);
+        assertThat(decideItem(item, "1", "numeric text decision", reviewer).getResponse().getStatus())
+                .as("an index as text is not an enum name").isEqualTo(400);
+        assertThat(postAs("/v1/access-review-items/" + item + "/decisions",
+                Map.of("decision", 0, "reason", "numeric decision"), reviewer).getResponse().getStatus())
+                .isEqualTo(400);
+        assertThat(myGrants("u-hd-sub3")).as("nothing was decided").hasSize(1);
+        assertThat(decideItem(item, "KEEP", null, reviewer).getResponse().getStatus()).isEqualTo(200);
+    }
+
+    @Test
+    @Tag("SEC-007")
+    @Tag("DAT-002")
+    @DisplayName("DAT-002: the database sets NOT_REVIEWED / ENDED only on closure and refuses short reasons")
+    void accessReviewDatabaseClosureOutcomeGuards() throws Exception {
+        assign("u-dg-sub", "REFDATA_MAKER", List.of("DG1"), ADMIN);
+        String id = openReview(List.of("DG1"));
+        String item = itemOf(id, "u-dg-sub", ADMIN);
+        for (String outcome : List.of("NOT_REVIEWED", "ENDED")) {
+            assertThatThrownBy(() -> db.sql("update access_review_item set status = :s where id = cast(:id as uuid)")
+                    .param("s", outcome).param("id", item).update()).as(outcome + " in an open review")
+                    .isInstanceOf(DataAccessException.class).hasMessageContaining("only when the review is closed");
+        }
+        assertThatThrownBy(() -> db.sql("""
+                update access_review_campaign set status = 'CLOSED', closed_by = 'u-direct', closed_at = now(),
+                       closure_reason = 'x' where id = cast(:id as uuid)""").param("id", id).update())
+                .as("short closure reason").isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("ck_campaign_closure_reason");
+
+        MvcResult closed = closeReview(id, ADMIN);
+        assertThat(closed.getResponse().getStatus()).as(closed.getResponse().getContentAsString()).isEqualTo(200);
+        assertThat(body(closed).get("counts").get("notReviewed").asInt()).isEqualTo(1);
+    }
+
+    // ------------------------------------------------------------------ tester regression tests (defects, round 2)
+
+    @Test
+    @Tag("SEC-007")
+    @Tag("SEC-022")
+    @Tag("defect")
+    @DisplayName("SEC-022 defect: a decision must be exactly KEEP or REVOKE; padding or a control character is refused")
+    void accessReviewDecisionWithPaddingOrControlCharacterIsRefused() throws Exception {
+        assign("u-r2a-rev", "ACCESS_REVIEWER", List.of("R2A"), ADMIN);
+        assign("u-r2a-sub", "REFDATA_MAKER", List.of("R2A"), ADMIN);
+        RequestPostProcessor reviewer = as("u-r2a-rev");
+        String id = openReview(List.of("R2A"));
+        String item = itemOf(id, "u-r2a-sub", reviewer);
+        for (String padded : List.of("KEEP ", " KEEP", "KEEP\0")) {
+            MvcResult r = postAs("/v1/access-review-items/" + item + "/decisions",
+                    Map.of("decision", padded, "reason", "padded decision"), reviewer);
+            assertThat(r.getResponse().getStatus()).as("decision [" + padded.replace('\0', '0') + "] -> "
+                    + r.getResponse().getContentAsString()).isEqualTo(400);
+        }
+    }
+
+    @Test
+    @Tag("SEC-007")
+    @Tag("SEC-022")
+    @Tag("defect")
+    @DisplayName("SEC-022 defect: dueAt is a date-time string; a JSON number (epoch) is refused with 400")
+    void accessReviewNumericDueAtIsRefused() throws Exception {
+        MvcResult r = postAs("/v1/access-reviews", Map.of("title", "Numeric due", "scopes", scopes(List.of("R2B")),
+                "dueAt", 4102444800L, "reason", "numeric due date"), ADMIN);
+        assertThat(r.getResponse().getStatus()).as(r.getResponse().getContentAsString()).isEqualTo(400);
+    }
+
+    @Test
+    @Tag("SEC-007")
+    @Tag("defect")
+    @DisplayName("SEC-007 defect: the create response echoes the stored dueAt (microsecond precision), same as the GET")
+    void accessReviewCreateResponseMatchesStoredDueAt() throws Exception {
+        MvcResult created = openReview(List.of("R2C"), "2099-01-01T00:00:00.123456789Z", ADMIN);
+        assertThat(created.getResponse().getStatus()).isEqualTo(201);
+        String id = body(created).get("id").asString();
+        String stored = body(getAs("/v1/access-reviews/" + id, ADMIN)).get("dueAt").asString();
+        assertThat(body(created).get("dueAt").asString()).isEqualTo(stored);
+    }
+
+    @Test
+    @Tag("CC-003")
+    @Tag("SEC-022")
+    @Tag("defect")
+    @DisplayName("CC-003 defect: a fractional maxAmountMinor is refused, not silently truncated")
+    void approvalLimitFractionalAmountIsRefused() throws Exception {
+        MvcResult role = postAs("/v1/roles", Map.of("code", "IT_R2_LIMITS", "name", Map.of("nl", "س", "en", "R2"),
+                "permissions", List.of("iam.role.read"), "reason", "round 2 probe"), ADMIN);
+        assertThat(role.getResponse().getStatus()).as(role.getResponse().getContentAsString()).isEqualTo(201);
+        String raw = "{\"version\":1,\"reason\":\"fraction probe\",\"limits\":[{\"limitType\":\"REFUND_AMOUNT\","
+                + "\"maxAmountMinor\":5.9,\"currency\":\"XTS\"}]}";
+        MvcResult r = putAs("/v1/roles/IT_R2_LIMITS/approval-limits", json.readTree(raw), ADMIN);
+        assertThat(r.getResponse().getStatus()).as(r.getResponse().getContentAsString()).isEqualTo(400);
+    }
+
+    @Test
+    @Tag("SEC-007")
+    @Tag("DAT-002")
+    @Tag("defect")
+    @DisplayName("DAT-002 defect: the database refuses a campaign reason that the domain would reject (tabs only)")
+    void accessReviewDatabaseRefusesWhitespaceOnlyReason() {
+        assertThatThrownBy(() -> db.sql("""
+                insert into access_review_campaign (id, title, regions, centres, modules, due_at, reason, status,
+                       created_by, created_at)
+                values (gen_random_uuid(), 'Direct insert', array['R2D'], array['*'], array['*'],
+                        now() + interval '1 day', E'\t\t\t', 'OPEN', 'u-direct', now())""").update())
+                .isInstanceOf(DataAccessException.class);
+    }
+
+    @Test
+    @Tag("SEC-022")
+    @DisplayName("SEC-022: a status query parameter must be exactly an enum name; padding is refused with 400")
+    void enumQueryParameterWithPaddingIsRefused() throws Exception {
+        for (String status : List.of("OPEN ", " OPEN", "open", "OPEN\0")) {
+            MvcResult r = mvc.perform(get("/v1/access-reviews").param("status", status).with(ADMIN)
+                    .header("X-Channel", "BACKOFFICE").accept(MediaType.APPLICATION_JSON,
+                            MediaType.APPLICATION_PROBLEM_JSON)).andReturn();
+            assertThat(r.getResponse().getStatus()).as("status [" + status.replace('\0', '0') + "]").isEqualTo(400);
+        }
+        assertThat(getAs("/v1/access-reviews?status=OPEN", ADMIN).getResponse().getStatus()).isEqualTo(200);
+    }
+
+    @Test
+    @Tag("CC-003")
+    @Tag("SEC-022")
+    @DisplayName("CC-003: maxAmountMinor as a string or in exponent form is refused, never parsed or converted")
+    void approvalLimitAmountMustBeJsonInteger() throws Exception {
+        MvcResult role = postAs("/v1/roles", Map.of("code", "IT_R3_LIMITS", "name", Map.of("nl", "R3", "en", "R3"),
+                "permissions", List.of("iam.role.read"), "reason", "round 3 probe"), ADMIN);
+        assertThat(role.getResponse().getStatus()).as(role.getResponse().getContentAsString()).isEqualTo(201);
+        for (String amount : List.of("\"7\"", "1e3", "7.0", "true")) {
+            String raw = "{\"version\":1,\"reason\":\"amount probe\",\"limits\":[{\"limitType\":\"REFUND_AMOUNT\","
+                    + "\"maxAmountMinor\":" + amount + ",\"currency\":\"XTS\"}]}";
+            MvcResult r = putAs("/v1/roles/IT_R3_LIMITS/approval-limits", json.readTree(raw), ADMIN);
+            assertThat(r.getResponse().getStatus()).as(amount + " -> " + r.getResponse().getContentAsString())
+                    .isEqualTo(400);
+        }
+    }
+
+    @Test
+    @Tag("SEC-007")
+    @Tag("SEC-022")
+    @DisplayName("SEC-022: a text field given as a number or boolean is refused, not stored as text")
+    void textFieldsMustBeJsonStrings() throws Exception {
+        for (Object title : List.of(12345, true, 1.5)) {
+            MvcResult r = postAs("/v1/access-reviews", Map.of("title", title, "scopes", scopes(List.of("R3T")),
+                    "dueAt", "2099-01-01T00:00:00Z", "reason", "typed title"), ADMIN);
+            assertThat(r.getResponse().getStatus()).as(title + " -> " + r.getResponse().getContentAsString())
+                    .isEqualTo(400);
+        }
+    }
+
+    @Test
+    @Tag("DAT-002")
+    @DisplayName("DAT-002: iam_strip treats exactly the characters Java String.strip() treats as whitespace")
+    void databaseStripMatchesJavaWhitespace() {
+        List<Integer> stripped = db.sql("""
+                select cp from generate_series(1, 65535) cp
+                where cp not between 55296 and 57343 and iam_strip(chr(cp)) = ''
+                order by cp""").query(Integer.class).list();
+        List<Integer> java = new java.util.ArrayList<>();
+        for (int cp = 1; cp <= 0xFFFF; cp++) {
+            if ((cp < 0xD800 || cp > 0xDFFF) && Character.isWhitespace(cp)) {
+                java.add(cp);
+            }
+        }
+        assertThat(stripped).isEqualTo(java).contains(0x09, 0x2003).doesNotContain(0xA0, 0x2007, 0x202F);
     }
 }

@@ -6,6 +6,7 @@ import gov.itms.iam.domain.AssignmentScopes;
 import gov.itms.iam.domain.BilingualName;
 import gov.itms.iam.domain.Codes;
 import gov.itms.iam.domain.DomainException;
+import gov.itms.iam.domain.Instants;
 import gov.itms.iam.domain.Permission;
 import gov.itms.iam.domain.Role;
 import gov.itms.iam.domain.RoleAssignment;
@@ -577,7 +578,7 @@ public class IamService {
     }
 
     private Instant now() {
-        return clock.instant();
+        return Instants.stored(clock.instant());
     }
 
     private static DomainException roleNotFound(String code) {

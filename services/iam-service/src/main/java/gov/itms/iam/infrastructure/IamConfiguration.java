@@ -1,6 +1,8 @@
 package gov.itms.iam.infrastructure;
 
+import gov.itms.iam.application.AccessReviewService;
 import gov.itms.iam.application.IamService;
+import gov.itms.iam.domain.AccessReviewPolicy;
 import gov.itms.platform.audit.AuditRecorder;
 import gov.itms.platform.security.AuthorisationResolver;
 import java.time.Clock;
@@ -23,6 +25,17 @@ public class IamConfiguration {
         return new IamService(new JdbcPermissionRepository(jdbc), new JdbcRoleRepository(jdbc),
                 new JdbcAssignmentRepository(jdbc), new JdbcApprovalLimitRepository(jdbc),
                 new JdbcRoleConflictRepository(jdbc), audit, clock);
+    }
+
+    /**
+     * Access reviews (SEC-007, ADR-026). The review period is configuration ({@code itms.iam.access-review.period},
+     * ISO-8601, default P3M in application.yml); an invalid or non-positive value stops start-up.
+     */
+    @Bean
+    AccessReviewService accessReviewService(JdbcClient jdbc, AuditRecorder audit, Clock clock,
+                                            @Value("${itms.iam.access-review.period}") String period) {
+        return new AccessReviewService(new JdbcAccessReviewRepository(jdbc), new JdbcAssignmentRepository(jdbc),
+                audit, AccessReviewPolicy.parse(period), clock);
     }
 
     /** Replaces the platform's remote resolver: iam-service is the source of grants (ADR-022). */

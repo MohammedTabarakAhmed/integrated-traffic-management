@@ -1,5 +1,7 @@
 package gov.itms.iam.application;
 
+import gov.itms.iam.domain.AccessReviewCampaign;
+import gov.itms.iam.domain.AccessReviewItem;
 import gov.itms.iam.domain.ApprovalLimit;
 import gov.itms.iam.domain.Permission;
 import gov.itms.iam.domain.Role;
@@ -129,6 +131,14 @@ final class InMemoryRepositories {
         }
 
         @Override
+        public List<RoleAssignment> activeDirect(Instant at) {
+            return rows.values().stream()
+                    .filter(a -> !a.isDelegation() && a.isActiveOrUpcomingAt(at))
+                    .sorted(Comparator.comparing(RoleAssignment::assignedAt))
+                    .toList();
+        }
+
+        @Override
         public List<RoleAssignment> delegations(String partyId) {
             return rows.values().stream()
                     .filter(RoleAssignment::isDelegation)
@@ -185,6 +195,128 @@ final class InMemoryRepositories {
                     .filter(c -> status == null || c.status() == status)
                     .sorted(Comparator.comparing(RoleConflict::createdAt).reversed())
                     .toList();
+        }
+    }
+
+    /**
+     * Access reviews. Mimics the database rules that matter to the use cases: one PENDING item per assignment
+     * (skipped on insert), and a REVOKED item needs its assignment revoked first.
+     */
+    static final class AccessReviews implements AccessReviewRepository {
+        final Map<UUID, AccessReviewCampaign> campaigns = new LinkedHashMap<>();
+        final Map<UUID, AccessReviewItem> items = new LinkedHashMap<>();
+        final List<String> locks = new ArrayList<>();
+        private final Assignments assignments;
+
+        AccessReviews(Assignments assignments) {
+            this.assignments = assignments;
+        }
+
+        @Override
+        public void insertCampaign(AccessReviewCampaign campaign) {
+            campaigns.put(campaign.id(), campaign);
+        }
+
+        @Override
+        public Optional<AccessReviewCampaign> findCampaign(UUID id) {
+            return Optional.ofNullable(campaigns.get(id));
+        }
+
+        @Override
+        public Optional<AccessReviewCampaign> findCampaignForShare(UUID id) {
+            locks.add("share " + id);
+            return findCampaign(id);
+        }
+
+        @Override
+        public Optional<AccessReviewCampaign> findCampaignForUpdate(UUID id) {
+            locks.add("update " + id);
+            return findCampaign(id);
+        }
+
+        @Override
+        public List<AccessReviewCampaign> searchCampaigns(AccessReviewCampaign.Status status) {
+            return campaigns.values().stream()
+                    .filter(c -> status == null || c.status() == status)
+                    .sorted(Comparator.comparing(AccessReviewCampaign::createdAt).reversed())
+                    .toList();
+        }
+
+        @Override
+        public void saveClosure(AccessReviewCampaign campaign) {
+            campaigns.put(campaign.id(), campaign);
+        }
+
+        @Override
+        public int insertItemsSkippingPending(List<AccessReviewItem> newItems) {
+            int inserted = 0;
+            for (AccessReviewItem item : newItems) {
+                boolean pendingElsewhere = items.values().stream().anyMatch(i -> i.status()
+                        == AccessReviewItem.Status.PENDING && i.assignmentId().equals(item.assignmentId()));
+                boolean active = assignments.find(item.assignmentId())
+                        .map(a -> a.status() == RoleAssignment.Status.ACTIVE).orElse(false);
+                if (!pendingElsewhere && active) {
+                    items.put(item.id(), item);
+                    inserted++;
+                }
+            }
+            return inserted;
+        }
+
+        @Override
+        public Optional<AccessReviewItem> findItem(UUID id) {
+            return Optional.ofNullable(items.get(id));
+        }
+
+        @Override
+        public Optional<AccessReviewItem> findItemForUpdate(UUID id) {
+            locks.add("item " + id);
+            return findItem(id);
+        }
+
+        @Override
+        public List<AccessReviewItem> searchItems(UUID campaignId, AccessReviewItem.Status status, String subjectId) {
+            return items.values().stream()
+                    .filter(i -> campaignId == null || i.campaignId().equals(campaignId))
+                    .filter(i -> status == null || i.status() == status)
+                    .filter(i -> subjectId == null || i.subjectId().equals(subjectId))
+                    .toList();
+        }
+
+        @Override
+        public void saveItemDecision(AccessReviewItem item) {
+            if (item.status() == AccessReviewItem.Status.REVOKED && assignments.find(item.assignmentId())
+                    .map(a -> a.status() != RoleAssignment.Status.REVOKED).orElse(true)) {
+                throw new IllegalStateException("a REVOKED review item needs its role assignment to be revoked first");
+            }
+            items.put(item.id(), item);
+        }
+
+        @Override
+        public Map<AccessReviewItem.Status, Integer> counts(UUID campaignId) {
+            Map<AccessReviewItem.Status, Integer> counts = new LinkedHashMap<>();
+            items.values().stream().filter(i -> i.campaignId().equals(campaignId))
+                    .forEach(i -> counts.merge(i.status(), 1, Integer::sum));
+            return counts;
+        }
+
+        @Override
+        public Map<UUID, Instant> lastKeptAt(Collection<UUID> assignmentIds) {
+            Map<UUID, Instant> kept = new LinkedHashMap<>();
+            items.values().stream()
+                    .filter(i -> i.status() == AccessReviewItem.Status.KEPT && assignmentIds.contains(i.assignmentId()))
+                    .forEach(i -> kept.merge(i.assignmentId(), i.decidedAt(), (a, b) -> a.isAfter(b) ? a : b));
+            return kept;
+        }
+
+        @Override
+        public Map<UUID, UUID> pendingItemIds(Collection<UUID> assignmentIds) {
+            Map<UUID, UUID> pending = new LinkedHashMap<>();
+            items.values().stream()
+                    .filter(i -> i.status() == AccessReviewItem.Status.PENDING
+                            && assignmentIds.contains(i.assignmentId()))
+                    .forEach(i -> pending.put(i.assignmentId(), i.id()));
+            return pending;
         }
     }
 

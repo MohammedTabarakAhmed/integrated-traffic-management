@@ -41,7 +41,8 @@ public final class Codes {
     }
 
     public static String reason(String value) {
-        if (value == null || value.strip().length() < 3) {
+        // At least 3 characters counted as code points, as PostgreSQL char_length does (V5 checks).
+        if (value == null || value.strip().codePointCount(0, value.strip().length()) < 3) {
             throw DomainException.validation("REASON_REQUIRED", "a reason of at least 3 characters is required");
         }
         String clean = value.strip();

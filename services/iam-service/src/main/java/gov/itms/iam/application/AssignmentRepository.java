@@ -1,6 +1,7 @@
 package gov.itms.iam.application;
 
 import gov.itms.iam.domain.RoleAssignment;
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -26,6 +27,12 @@ public interface AssignmentRepository {
 
     /** Newest first. Every filter is optional ({@code null} = any). */
     List<RoleAssignment> search(String subjectId, String roleCode, RoleAssignment.Status status);
+
+    /**
+     * ACTIVE DIRECT assignments that have not ended at {@code at} (upcoming ones included), oldest first: the
+     * population of an access review (SEC-007).
+     */
+    List<RoleAssignment> activeDirect(Instant at);
 
     /**
      * Delegations (CC-004) in which {@code partyId} is the delegate, the delegator or the holder of the source;

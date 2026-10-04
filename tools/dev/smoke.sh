@@ -2,7 +2,7 @@
 # End-to-end smoke test against the running local stack, with real Keycloak tokens:
 # grants come from iam-service, not the token (ADR-022) -> maker submits a change -> maker cannot approve ->
 # checker approves (CC-114) -> item readable -> maker delegates their role to the checker and revokes it (CC-004)
-# -> the directory feed deactivates a throw-away leaver (SEC-007).
+# -> the directory feed deactivates a throw-away leaver (SEC-007) -> a manager reviews and revokes access (SEC-007).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 set -a; source infra/local/.env; set +a
@@ -103,5 +103,39 @@ active=$(curl -sf -H "Authorization: Bearer $FEED" "$IAM/v1/role-assignments?sub
 [[ "$active" == 0 ]] || { echo "FAIL: leaver still has $active active assignments"; exit 1; }
 status=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $FEED" "$IAM/v1/roles")
 [[ "$status" == 403 ]] || { echo "FAIL: the feed should not read roles, got $status"; exit 1; }
+
+echo "10. Quarterly access review (SEC-007): admin opens a review over a throw-away region; the checker (reviewer) revokes"
+# A fresh region code keeps the review to this run's assignment. If this step fails midway it leaves an OPEN review
+# over the throw-away region, which is harmless.
+REGION="SMK$(date +%s)"
+REVIEWED="smoke-reviewed-$(date +%s)"
+curl -sf -o /dev/null -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' -H 'X-Channel: BACKOFFICE' \
+  "$IAM/v1/role-assignments" \
+  -d "{\"subjectId\":\"$REVIEWED\",\"roleCode\":\"REFDATA_MAKER\",\"scopes\":{\"regions\":[\"$REGION\"],\"centres\":[\"*\"],\"modules\":[\"*\"]},\"reason\":\"smoke test reviewed access\"}"
+due=$("$PY" -c "import datetime as d; print((d.datetime.now(d.timezone.utc)+d.timedelta(days=7)).strftime('%Y-%m-%dT%H:%M:%SZ'))")
+review=$(curl -sf -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' -H 'X-Channel: BACKOFFICE' \
+  "$IAM/v1/access-reviews" \
+  -d "{\"title\":\"Smoke access review\",\"scopes\":{\"regions\":[\"$REGION\"],\"centres\":[\"*\"],\"modules\":[\"*\"]},\"dueAt\":\"$due\",\"reason\":\"smoke test review\"}")
+review_id=$(printf '%s' "$review" | json_field "['id']")
+total=$(printf '%s' "$review" | json_field "['counts']['total']")
+[[ "$total" == 1 ]] || { echo "FAIL: expected 1 review item, got $total"; exit 1; }
+item_id=$(curl -sf -H "Authorization: Bearer $CHECKER" "$IAM/v1/access-review-items?campaignId=$review_id" | json_field "['items'][0]['id']")
+decide_item() {
+  curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $CHECKER" -H 'Content-Type: application/json' \
+    -H 'X-Channel: BACKOFFICE' "$IAM/v1/access-review-items/$item_id/decisions" \
+    -d '{"decision":"REVOKE","reason":"smoke test: access no longer needed"}'
+}
+status=$(decide_item)
+[[ "$status" == 200 ]] || { echo "FAIL: reviewer decision returned $status"; exit 1; }
+status=$(decide_item)
+[[ "$status" == 409 ]] || { echo "FAIL: a second decision should be 409, got $status"; exit 1; }
+active=$(curl -sf -H "Authorization: Bearer $ADMIN_TOKEN" "$IAM/v1/role-assignments?subjectId=$REVIEWED&status=ACTIVE" | json_field "['items'].__len__()")
+[[ "$active" == 0 ]] || { echo "FAIL: the revoked assignment is still active"; exit 1; }
+revoked=$(curl -sf -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' -H 'X-Channel: BACKOFFICE' \
+  "$IAM/v1/access-reviews/$review_id/closures" -d '{"reason":"smoke test review done"}' | json_field "['counts']['revoked']")
+[[ "$revoked" == 1 ]] || { echo "FAIL: expected 1 revoked item after closure, got $revoked"; exit 1; }
+period=$(curl -sf -H "Authorization: Bearer $ADMIN_TOKEN" "$IAM/v1/access-reviews/overdue-assignments" | json_field "['reviewPeriod']")
+[[ -n "$period" ]] || { echo "FAIL: the overdue listing has no review period"; exit 1; }
+echo "   review period: $period"
 
 echo "SMOKE OK"

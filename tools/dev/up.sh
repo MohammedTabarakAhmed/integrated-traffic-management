@@ -83,6 +83,9 @@ grant() { # subject username role
 }
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker REFDATA_MAKER
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker REFDATA_CHECKER
+# dev.checker is also the development access reviewer ("manager", SEC-007, ADR-026); dev.iam-admin, the IT
+# administrator, opens and closes reviews.
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker ACCESS_REVIEWER
 # Service-account subject of the itms-directory-feed client (fixed in the realm file); deactivates leavers (SEC-007).
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000010 service-account-itms-directory-feed DIRECTORY_FEED
 

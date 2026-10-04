@@ -27,10 +27,20 @@ info:
       empty (Q-030); adding a pair revokes nothing, and current holders of both roles are listed as violations.
     - Leavers (SEC-007): the directory feed (or an administrator) deactivates a subject, which revokes all of their
       assignments and delegations in one step. Disabling the sign-in itself stays with the identity provider.
+    - Access reviews (SEC-007, ADR-026): an administrator opens a review over a data scope with a due date; every
+      ACTIVE DIRECT assignment in that scope becomes a review item. Reviewers (role ACCESS_REVIEWER, "managers")
+      keep or revoke the items within their own scope; a REVOKE revokes the assignment at once. Undecided items are
+      flagged overdue and are never revoked automatically. Assignments not kept by a review within the configured
+      period (default `P3M`, "every quarter") are listed at `/v1/access-reviews/overdue-assignments`.
 
     Scope values: `*` means "all" for that dimension and must then be the only value. Otherwise values are codes
     (`^[A-Z0-9_]{1,40}$`) owned by geo-service (regions, centres) and reference data (modules); see Q-027.
     Only GET/POST/PUT are used (INT-003); business actions are POSTs to sub-resources.
+
+    Request bodies (SEC-022), all endpoints: enum values are their names as JSON strings (a number is refused, never
+    read as a position); text must not contain the NUL character (U+0000); every `date-time` must be an RFC 3339
+    instant with a four-digit year, between `0001-01-01T00:00:00Z` and `9999-12-31T23:59:59.999999Z`. A body that
+    breaks one of these rules is refused with 400 `VALIDATION_FAILED`.
 servers:
   - url: /
 security:
@@ -43,6 +53,7 @@ tags:
   - name: Delegations
   - name: Role conflicts
   - name: Subjects
+  - name: Access reviews
   - name: Effective authorisation
 
 paths:
@@ -541,6 +552,205 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
 
+  /v1/access-reviews:
+    get:
+      tags: [Access reviews]
+      operationId: listAccessReviews
+      summary: Access reviews within the caller's scope, newest first (SEC-007)
+      description: Only reviews whose scopes lie within the caller's `iam.review.read` scope are returned.
+      x-itms-permission: iam.review.read
+      x-itms-scope: assignment-scopes
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/AccessReviewStatus' }
+      responses:
+        '200':
+          description: Access reviews, newest first
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccessReviewCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [Access reviews]
+      operationId: openAccessReview
+      summary: Open an access review over a data scope with a due date (SEC-007)
+      description: |
+        Every ACTIVE DIRECT role assignment that has not ended (upcoming ones included) and whose scopes lie within
+        the review's scopes becomes a PENDING review item, with a snapshot of the assignment. A national (`*`)
+        assignment is therefore only reviewed by a national review. Delegations are not reviewed (Q-039). An
+        assignment already PENDING in another open review is skipped and counted in `skippedUnderReview`. A review
+        with no items is allowed. The caller's `iam.review.manage` scope must cover the review's scopes (403
+        `SCOPE_EXCEEDED`); `dueAt` must be in the future (422 `ACCESS_REVIEW_DUE_IN_PAST`) and no later than
+        `9999-12-31T23:59:59.999999Z` (400 `VALIDATION_FAILED`, RFC 3339 range). Audited as
+        `IAM_ACCESS_REVIEW_OPENED`.
+      x-itms-permission: iam.review.manage
+      x-itms-scope: assignment-scopes
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AccessReviewRequest' }
+      responses:
+        '201':
+          description: Review opened
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccessReview' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/access-reviews/overdue-assignments:
+    get:
+      tags: [Access reviews]
+      operationId: listAssignmentsOverdueForReview
+      summary: Assignments not kept by a review within the configured review period (SEC-007)
+      description: |
+        ACTIVE DIRECT assignments that have not ended, were assigned more than one review period ago and have no
+        KEPT review decision within the last period. The period is configuration (`reviewPeriod`, ISO-8601, default
+        `P3M`), evaluated as a rolling period on the UTC clock (Q-038). `pendingItemId` is the open review item of
+        the assignment, if any. Only assignments within the caller's `iam.review.read` scope are listed. Nothing is
+        revoked automatically (Q-037).
+      x-itms-permission: iam.review.read
+      x-itms-scope: assignment-scopes
+      responses:
+        '200':
+          description: Assignments overdue for review
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OverdueAssignments' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+
+  /v1/access-reviews/{reviewId}:
+    get:
+      tags: [Access reviews]
+      operationId: getAccessReview
+      summary: One access review with its counts (404 if outside the caller's scope)
+      x-itms-permission: iam.review.read
+      x-itms-scope: assignment-scopes
+      parameters:
+        - $ref: '#/components/parameters/ReviewId'
+      responses:
+        '200':
+          description: Access review
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccessReview' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/access-reviews/{reviewId}/closures:
+    post:
+      tags: [Access reviews]
+      operationId: closeAccessReview
+      summary: Close an open access review, with a reason (SEC-007)
+      description: |
+        Allowed at any time while the review is OPEN, once (409 `ACCESS_REVIEW_CLOSED` afterwards). Each PENDING
+        item becomes ENDED if its assignment was revoked or has ended meanwhile, otherwise NOT_REVIEWED. Nothing is
+        revoked: NOT_REVIEWED assignments stay on the overdue listing. The caller's `iam.review.manage` scope must
+        cover the review's scopes. Audited as `IAM_ACCESS_REVIEW_CLOSED` with the counts and the NOT_REVIEWED items.
+      x-itms-permission: iam.review.manage
+      x-itms-scope: assignment-scopes
+      parameters:
+        - $ref: '#/components/parameters/ReviewId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReasonRequest' }
+      responses:
+        '200':
+          description: Review closed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccessReview' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/access-review-items:
+    get:
+      tags: [Access reviews]
+      operationId: listAccessReviewItems
+      summary: Review items within the caller's scope - the reviewer's queue across reviews (SEC-007)
+      description: |
+        Items are visible individually when the caller's `iam.review.read` scope covers the item's scopes, so a
+        regional reviewer works the items of a national review in their region. `status` defaults to PENDING.
+        A `campaignId` that matches no visible item returns an empty list.
+      x-itms-permission: iam.review.read
+      x-itms-scope: assignment-scopes
+      parameters:
+        - name: campaignId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/AccessReviewItemStatus' }
+        - name: subjectId
+          in: query
+          schema: { $ref: '#/components/schemas/SubjectId' }
+      responses:
+        '200':
+          description: Review items
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccessReviewItemCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/access-review-items/{itemId}/decisions:
+    post:
+      tags: [Access reviews]
+      operationId: decideAccessReviewItem
+      summary: Keep or revoke the assignment under review (SEC-007)
+      description: |
+        The caller's `iam.review.decide` scope must cover the item's scopes (403 `SCOPE_EXCEEDED`). The review must
+        be OPEN (409 `ACCESS_REVIEW_CLOSED`) and the item PENDING (409 `ACCESS_REVIEW_ITEM_DECIDED`). Nobody reviews
+        their own access (403 `ACCESS_REVIEW_SELF`) or an assignment they granted (403 `ACCESS_REVIEW_OWN_GRANT`)
+        (CC-002). The assignment must still be ACTIVE and not ended (409 `ACCESS_REVIEW_ASSIGNMENT_ENDED`). REVOKE
+        needs a reason (422 `REASON_REQUIRED`) and revokes the assignment immediately, in the same transaction
+        (audited as `IAM_ROLE_REVOKED`); delegations made from it stop granting at once. KEEP needs no reason.
+        Decisions after `dueAt` are allowed while the review is open and are marked `decidedLate`. Audited as
+        `IAM_ACCESS_REVIEW_DECIDED`.
+      x-itms-permission: iam.review.decide
+      x-itms-scope: assignment-scopes
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AccessReviewDecisionRequest' }
+      responses:
+        '200':
+          description: Decision recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccessReviewItem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
   /v1/me/assignments:
     get:
       tags: [Effective authorisation]
@@ -599,6 +809,11 @@ components:
       schema: { $ref: '#/components/schemas/RoleCode' }
     AssignmentId:
       name: assignmentId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ReviewId:
+      name: reviewId
       in: path
       required: true
       schema: { type: string, format: uuid }
@@ -915,6 +1130,140 @@ components:
         deactivatedAt: { type: string, format: date-time }
         revokedCount: { type: integer, minimum: 0 }
         revoked: { type: array, items: { $ref: '#/components/schemas/RoleAssignment' } }
+
+    AccessReviewStatus:
+      type: string
+      enum: [OPEN, CLOSED]
+    AccessReviewItemStatus:
+      type: string
+      description: |
+        PENDING = awaiting a decision; KEPT / REVOKED = decided by a reviewer; NOT_REVIEWED = still undecided when
+        the review closed (nothing revoked); ENDED = the assignment was revoked or ended before anyone decided.
+      enum: [PENDING, KEPT, REVOKED, NOT_REVIEWED, ENDED]
+    AccessReviewDecision:
+      type: string
+      description: The decision as a string; a number (for example `1`) is refused with 400.
+      enum: [KEEP, REVOKE]
+    AccessReviewRequest:
+      type: object
+      additionalProperties: false
+      required: [title, scopes, dueAt, reason]
+      properties:
+        title: { type: string, minLength: 3, maxLength: 200 }
+        scopes: { $ref: '#/components/schemas/Scopes' }
+        dueAt:
+          type: string
+          format: date-time
+          description: Must be in the future and no later than `9999-12-31T23:59:59.999999Z` (RFC 3339 range).
+        reason: { $ref: '#/components/schemas/Reason' }
+    AccessReviewCounts:
+      type: object
+      additionalProperties: false
+      description: Items by status; `overdue` counts the PENDING items once the due date has passed.
+      required: [total, pending, overdue, kept, revoked, notReviewed, ended]
+      properties:
+        total: { type: integer, minimum: 0 }
+        pending: { type: integer, minimum: 0 }
+        overdue: { type: integer, minimum: 0 }
+        kept: { type: integer, minimum: 0 }
+        revoked: { type: integer, minimum: 0 }
+        notReviewed: { type: integer, minimum: 0 }
+        ended: { type: integer, minimum: 0 }
+    AccessReview:
+      type: object
+      additionalProperties: false
+      description: An access review campaign over a data scope (SEC-007).
+      required: [id, title, scopes, dueAt, reason, status, createdBy, createdAt, overdue, counts]
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        scopes: { $ref: '#/components/schemas/Scopes' }
+        dueAt: { type: string, format: date-time }
+        reason: { type: string }
+        status: { $ref: '#/components/schemas/AccessReviewStatus' }
+        createdBy: { $ref: '#/components/schemas/Actor' }
+        createdAt: { type: string, format: date-time }
+        closedBy: { oneOf: [ { $ref: '#/components/schemas/Actor' }, { type: 'null' } ] }
+        closedAt: { oneOf: [ { type: string, format: date-time }, { type: 'null' } ] }
+        closureReason: { oneOf: [ { type: string }, { type: 'null' } ] }
+        overdue: { type: boolean, description: OPEN and past its due date }
+        counts: { $ref: '#/components/schemas/AccessReviewCounts' }
+        skippedUnderReview:
+          oneOf: [ { type: integer, minimum: 0 }, { type: 'null' } ]
+          description: |
+            Only in the response to opening a review: assignments in scope that were not added because they are
+            PENDING in another open review.
+    AccessReviewCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/AccessReview' } }
+    AccessReviewItem:
+      type: object
+      additionalProperties: false
+      description: |
+        One assignment under review, with a snapshot of the assignment taken when the review opened, and the
+        decision.
+      required: [id, campaignId, campaignDueAt, assignmentId, subjectId, roleCode, scopes, assignedBy, validFrom,
+                 status, overdue, decidedLate]
+      properties:
+        id: { type: string, format: uuid }
+        campaignId: { type: string, format: uuid }
+        campaignDueAt: { type: string, format: date-time }
+        assignmentId: { type: string, format: uuid }
+        subjectId: { $ref: '#/components/schemas/SubjectId' }
+        subjectUsername: { oneOf: [ { type: string }, { type: 'null' } ] }
+        roleCode: { $ref: '#/components/schemas/RoleCode' }
+        scopes: { $ref: '#/components/schemas/Scopes' }
+        assignedBy: { $ref: '#/components/schemas/Actor' }
+        validFrom: { type: string, format: date-time }
+        validTo: { oneOf: [ { type: string, format: date-time }, { type: 'null' } ] }
+        status: { $ref: '#/components/schemas/AccessReviewItemStatus' }
+        overdue: { type: boolean, description: PENDING and past the review's due date }
+        decidedBy: { oneOf: [ { $ref: '#/components/schemas/Actor' }, { type: 'null' } ] }
+        decidedAt: { oneOf: [ { type: string, format: date-time }, { type: 'null' } ] }
+        decisionReason: { oneOf: [ { type: string }, { type: 'null' } ] }
+        decidedLate: { type: boolean, description: Decided after the review's due date }
+    AccessReviewItemCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/AccessReviewItem' } }
+    AccessReviewDecisionRequest:
+      type: object
+      additionalProperties: false
+      required: [decision]
+      properties:
+        decision: { $ref: '#/components/schemas/AccessReviewDecision' }
+        reason:
+          allOf: [ { $ref: '#/components/schemas/Reason' } ]
+          description: Required for REVOKE, optional for KEEP
+    OverdueAssignment:
+      type: object
+      additionalProperties: false
+      required: [assignment, reviewDueSince]
+      properties:
+        assignment: { $ref: '#/components/schemas/RoleAssignment' }
+        lastReviewedAt:
+          oneOf: [ { type: string, format: date-time }, { type: 'null' } ]
+          description: When a review last kept the assignment; null if never
+        reviewDueSince:
+          type: string
+          format: date-time
+          description: One review period after it was assigned or last kept
+        pendingItemId:
+          oneOf: [ { type: string, format: uuid }, { type: 'null' } ]
+          description: The assignment's PENDING item in an open review, if any
+    OverdueAssignments:
+      type: object
+      additionalProperties: false
+      required: [reviewPeriod, evaluatedAt, assignments]
+      properties:
+        reviewPeriod: { type: string, description: 'Configured review period, ISO-8601 (for example P3M)' }
+        evaluatedAt: { type: string, format: date-time }
+        assignments: { type: array, items: { $ref: '#/components/schemas/OverdueAssignment' } }
 
     Grant:
       type: object

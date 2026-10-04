@@ -106,6 +106,15 @@ class JdbcAssignmentRepository implements AssignmentRepository {
     }
 
     @Override
+    public List<RoleAssignment> activeDirect(Instant at) {
+        return jdbc.sql(SELECT + " " + """
+                         where status = 'ACTIVE' and source = 'DIRECT' and (valid_to is null or valid_to > :at)
+                         order by assigned_at, id""")
+                .param("at", Timestamp.from(at))
+                .query((rs, n) -> map(rs)).list();
+    }
+
+    @Override
     public List<RoleAssignment> delegations(String partyId) {
         return jdbc.sql(SELECT + " d " + """
                          where d.source = 'DELEGATION'

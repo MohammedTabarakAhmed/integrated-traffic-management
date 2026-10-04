@@ -503,6 +503,185 @@ class IamApiIT {
     }
 
     @Test
+    @Tag("CC-004")
+    @DisplayName("CC-004: a holder without any IAM permission lists their own assignments and delegates one by its id")
+    void myAssignmentsEnableSelfServiceDelegation() throws Exception {
+        String own = assign("u-self", "REFDATA_MAKER", List.of("R10"), ADMIN);
+        RequestPostProcessor self = as("u-self");
+        assertThat(getAs("/v1/role-assignments?subjectId=u-self", self).getResponse().getStatus()).isEqualTo(403);
+
+        JsonNode mine = body(getAs("/v1/me/assignments", self)).get("items");
+        assertThat(mine).singleElement().satisfies(a -> {
+            assertThat(a.get("id").asString()).isEqualTo(own);
+            assertThat(a.get("source").asString()).isEqualTo("DIRECT");
+        });
+        assertThat(body(getAs("/v1/me/assignments?status=REVOKED", self)).get("items")).isEmpty();
+        assertThat(body(getAs("/v1/me/assignments", as("u-nobody"))).get("items")).isEmpty();
+
+        String delegationId = body(delegate(mine.get(0).get("id").asString(), "u-self-cover", inHours(2), self))
+                .get("id").asString();
+        assertThat(body(getAs("/v1/me/assignments", as("u-self-cover"))).get("items")).singleElement()
+                .satisfies(a -> assertThat(a.get("delegatedFrom").asString()).isEqualTo(own));
+        postAs("/v1/delegations/" + delegationId + "/revocations", Map.of("reason", "back"), self);
+        assertThat(body(getAs("/v1/me/assignments?status=REVOKED", as("u-self-cover"))).get("items")).hasSize(1);
+    }
+
+    private void createRole(String code) throws Exception {
+        MvcResult r = postAs("/v1/roles", Map.of("code", code, "name", Map.of("nl", "دور", "en", code),
+                "permissions", List.of("refdata.read"), "reason", "conflict test role"), ADMIN);
+        assertThat(r.getResponse().getStatus()).as(r.getResponse().getContentAsString()).isEqualTo(201);
+    }
+
+    @Test
+    @Tag("CC-002")
+    @DisplayName("CC-002: configured conflicting roles are refused on assignment and delegation; violations; audited")
+    void conflictingRoles() throws Exception {
+        createRole("IT_CASHIER");
+        createRole("IT_RECONCILER");
+        // No pair configured (the default, Q-030): one person may hold both.
+        String dualCashier = assign("u-dual", "IT_CASHIER", List.of("R12"), ADMIN);
+        String dualReconciler = assign("u-dual", "IT_RECONCILER", List.of("R12"), ADMIN);
+
+        MvcResult created = postAs("/v1/role-conflicts", Map.of("roleA", "IT_RECONCILER", "roleB", "IT_CASHIER",
+                "reason", "cash handling and reconciliation are separated"), ADMIN);
+        assertThat(created.getResponse().getStatus()).as(created.getResponse().getContentAsString()).isEqualTo(201);
+        JsonNode pair = body(created);
+        String pairId = pair.get("id").asString();
+        assertThat(pair.get("roleA").asString()).isEqualTo("IT_CASHIER");
+        assertThat(pair.get("roleB").asString()).isEqualTo("IT_RECONCILER");
+        assertThat(created.getResponse().getHeader("Location")).endsWith("/v1/role-conflicts/" + pairId);
+
+        // Existing holders keep their roles and are listed as violations.
+        assertThat(myGrants("u-dual")).hasSize(2);
+        JsonNode violations = body(getAs("/v1/role-conflicts/violations", ADMIN)).get("items");
+        assertThat(violations).singleElement().satisfies(v -> {
+            assertThat(v.get("conflictId").asString()).isEqualTo(pairId);
+            assertThat(v.get("subjectId").asString()).isEqualTo("u-dual");
+            assertThat(v.get("assignmentIds").valueStream().map(JsonNode::asString))
+                    .containsExactlyInAnyOrder(dualCashier, dualReconciler);
+        });
+
+        assign("u-cashier", "IT_CASHIER", List.of("R12"), ADMIN);
+        MvcResult refused = postAs("/v1/role-assignments", assignment("u-cashier", "IT_RECONCILER", List.of("R13")),
+                ADMIN);
+        assertThat(refused.getResponse().getStatus()).isEqualTo(403);
+        assertThat(body(refused).get("code").asString()).isEqualTo("ROLE_CONFLICT");
+        assertThat(body(refused).get("detail").asString()).isEqualTo("The role IT_RECONCILER conflicts with the role "
+                + "IT_CASHIER, which this person already holds. One person cannot hold both.");
+        assertThat(body(refused).get("requirementRefs").get(0).asString()).isEqualTo("CC-002");
+
+        String reconcilerSource = assign("u-reconciler", "IT_RECONCILER", List.of("R12"), ADMIN);
+        MvcResult delegation = delegate(reconcilerSource, "u-cashier", inHours(4), as("u-reconciler"));
+        assertThat(delegation.getResponse().getStatus()).isEqualTo(403);
+        assertThat(body(delegation).get("code").asString()).isEqualTo("ROLE_CONFLICT");
+
+        MvcResult twice = postAs("/v1/role-conflicts", Map.of("roleA", "IT_CASHIER", "roleB", "IT_RECONCILER",
+                "reason", "again"), ADMIN);
+        assertThat(twice.getResponse().getStatus()).isEqualTo(409);
+        assertThat(body(twice).get("code").asString()).isEqualTo("ROLE_CONFLICT_EXISTS");
+        MvcResult same = postAs("/v1/role-conflicts", Map.of("roleA", "IT_CASHIER", "roleB", "IT_CASHIER",
+                "reason", "same"), ADMIN);
+        assertThat(body(same).get("code").asString()).isEqualTo("ROLE_CONFLICT_SAME_ROLE");
+        assertThat(postAs("/v1/role-conflicts", Map.of("roleA", "IT_CASHIER", "roleB", "NO_SUCH_ROLE",
+                "reason", "typo"), ADMIN).getResponse().getStatus()).isEqualTo(404);
+        assertThat(postAs("/v1/role-conflicts", Map.of("roleA", "IT_CASHIER", "roleB", "IT_RECONCILER",
+                "reason", "not an admin"), as("u-cashier")).getResponse().getStatus()).isEqualTo(403);
+
+        // Defence in depth while the pair is ACTIVE.
+        assertThatThrownBy(() -> db.sql("""
+                insert into role_assignment (id, subject_id, role_code, regions, centres, modules, valid_from, status,
+                    reason, assigned_by, assigned_at)
+                values (gen_random_uuid(), 'u-cashier', 'IT_RECONCILER', '{R14}', '{*}', '{*}', now(), 'ACTIVE',
+                    'direct', 'u-admin', now())""").update()).isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("conflicts with role IT_RECONCILER");
+        assertThatThrownBy(() -> db.sql("""
+                insert into role_conflict (id, role_a, role_b, reason, status, created_by, created_at)
+                values (gen_random_uuid(), 'IT_CASHIER', 'IT_RECONCILER', 'direct', 'ACTIVE', 'u-admin', now())""")
+                .update()).isInstanceOf(DataAccessException.class).hasMessageContaining("uq_role_conflict_active");
+        assertThatThrownBy(() -> db.sql("""
+                insert into role_conflict (id, role_a, role_b, reason, status, created_by, created_at)
+                values (gen_random_uuid(), 'IT_RECONCILER', 'IT_CASHIER', 'direct', 'ACTIVE', 'u-admin', now())""")
+                .update()).isInstanceOf(DataAccessException.class).hasMessageContaining("ck_role_conflict_order");
+        assertThatThrownBy(() -> db.sql("update role_conflict set reason = 'edited' where id = cast(:id as uuid)")
+                .param("id", pairId).update()).isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("can only be retired once");
+        assertThatThrownBy(() -> db.sql("delete from role_conflict where id = cast(:id as uuid)")
+                .param("id", pairId).update()).isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("cannot be deleted");
+
+        MvcResult retired = postAs("/v1/role-conflicts/" + pairId + "/retirements",
+                Map.of("reason", "policy withdrawn"), ADMIN);
+        assertThat(retired.getResponse().getStatus()).isEqualTo(200);
+        assertThat(body(retired).get("status").asString()).isEqualTo("RETIRED");
+        assertThat(body(retired).get("retiredBy").get("id").asString()).isEqualTo("u-admin");
+        assertThat(postAs("/v1/role-conflicts/" + pairId + "/retirements", Map.of("reason", "again"), ADMIN)
+                .getResponse().getStatus()).isEqualTo(409);
+        assertThat(body(getAs("/v1/role-conflicts/violations", ADMIN)).get("items")).isEmpty();
+        assertThat(body(getAs("/v1/role-conflicts?status=RETIRED", ADMIN)).get("items").valueStream()
+                .map(n -> n.get("id").asString())).contains(pairId);
+        assertThat(postAs("/v1/role-assignments", assignment("u-cashier", "IT_RECONCILER", List.of("R13")), ADMIN)
+                .getResponse().getStatus()).as("no longer enforced").isEqualTo(201);
+
+        assertThat(db.sql("select action from audit_outbox where entity_id = :id order by occurred_at")
+                .param("id", pairId).query(String.class).list())
+                .containsExactly("IAM_ROLE_CONFLICT_CREATED", "IAM_ROLE_CONFLICT_RETIRED");
+    }
+
+    @Test
+    @Tag("SEC-007")
+    @DisplayName("SEC-007: the directory feed deactivates a leaver: all roles and delegations end at once; idempotent")
+    void leaverDeactivationByDirectoryFeed() throws Exception {
+        assertThat(body(getAs("/v1/roles/DIRECTORY_FEED", ADMIN)).get("permissions").valueStream()
+                .map(JsonNode::asString)).containsExactlyInAnyOrder("iam.subject.deactivate", "iam.assignment.read");
+        assertThat(body(getAs("/v1/roles/IT_ADMINISTRATOR", ADMIN)).get("permissions").valueStream()
+                .map(JsonNode::asString)).contains("iam.subject.deactivate");
+
+        String maker = assign("u-gone", "REFDATA_MAKER", List.of("R11"), ADMIN);
+        assign("u-gone", "REFDATA_CHECKER", List.of("R15"), ADMIN);
+        String made = body(delegate(maker, "u-gone-cover", inHours(3), as("u-gone"))).get("id").asString();
+        assign("svc-feed", "DIRECTORY_FEED", List.of("*"), ADMIN);
+        assign("svc-feed-r11", "DIRECTORY_FEED", List.of("R11"), ADMIN);
+        RequestPostProcessor feed = as("svc-feed");
+
+        MvcResult partial = postAs("/v1/subjects/u-gone/deactivations", Map.of("reason", "left the Authority"),
+                as("svc-feed-r11"));
+        assertThat(partial.getResponse().getStatus()).isEqualTo(403);
+        assertThat(body(partial).get("code").asString()).isEqualTo("SCOPE_EXCEEDED");
+        assertThat(myGrants("u-gone")).as("nothing revoked").hasSize(2);
+        assertThat(postAs("/v1/subjects/u-gone/deactivations", Map.of("reason", "not mine"), as("u-gone-cover"))
+                .getResponse().getStatus()).isEqualTo(403);
+
+        MvcResult done = postAs("/v1/subjects/u-gone/deactivations", Map.of("reason", "left the Authority"), feed);
+        assertThat(done.getResponse().getStatus()).as(done.getResponse().getContentAsString()).isEqualTo(200);
+        assertThat(body(done).get("revokedCount").asInt()).isEqualTo(3);
+        assertThat(body(done).get("revoked").valueStream().map(n -> n.get("status").asString())).containsOnly("REVOKED");
+        assertThat(body(done).get("revoked").valueStream().map(n -> n.get("id").asString())).contains(maker, made);
+        assertThat(myGrants("u-gone")).isEmpty();
+        assertThat(myGrants("u-gone-cover")).isEmpty();
+        assertThat(body(getAs("/v1/role-assignments?subjectId=u-gone&status=ACTIVE", feed)).get("items")).isEmpty();
+
+        MvcResult repeat = postAs("/v1/subjects/u-gone/deactivations", Map.of("reason", "feed resent"), feed);
+        assertThat(repeat.getResponse().getStatus()).isEqualTo(200);
+        assertThat(body(repeat).get("revokedCount").asInt()).isZero();
+        assertThat(postAs("/v1/subjects/bad!id/deactivations", Map.of("reason", "x y z"), feed)
+                .getResponse().getStatus()).isEqualTo(422);
+        assertThat(getAs("/v1/roles", feed).getResponse().getStatus()).as("the feed can do nothing else")
+                .isEqualTo(403);
+
+        var summaries = db.sql("""
+                        select actor_id, reason from audit_outbox
+                         where action = 'IAM_SUBJECT_DEACTIVATED' and entity_id = 'u-gone' order by occurred_at""")
+                .query().listOfRows();
+        assertThat(summaries).extracting(r -> r.get("actor_id")).containsExactly("svc-feed", "svc-feed");
+        assertThat(summaries).extracting(r -> r.get("reason")).containsExactly("left the Authority", "feed resent");
+        assertThat(db.sql("select action from audit_outbox where entity_id = :id order by occurred_at")
+                .param("id", made).query(String.class).list())
+                .containsExactly("IAM_DELEGATION_CREATED", "IAM_DELEGATION_REVOKED");
+        assertThat(db.sql("select actor_id from audit_outbox where entity_id = :id and action = 'IAM_ROLE_REVOKED'")
+                .param("id", maker).query(String.class).single()).isEqualTo("svc-feed");
+    }
+
+    @Test
     @Tag("SEC-022")
     @Tag("CH-053")
     @DisplayName("SEC-022/CH-053: malformed and rule-breaking requests are refused with plain-language problems")

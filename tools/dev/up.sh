@@ -26,6 +26,7 @@ wanted = {
     "DEV_IAM_ADMIN_PASSWORD": lambda: secrets.token_urlsafe(16),
     "DEV_MAKER_PASSWORD": lambda: secrets.token_urlsafe(16),
     "DEV_CHECKER_PASSWORD": lambda: secrets.token_urlsafe(16),
+    "DEV_DIRECTORY_FEED_SECRET": lambda: secrets.token_urlsafe(32),
 }
 present = set()
 if os.path.exists(path):
@@ -60,6 +61,8 @@ KC=(env MSYS_NO_PATHCONV=1 docker compose -f infra/local/compose.yaml --env-file
 "${KC[@]}" set-password -r itms --username dev.iam-admin --new-password "$DEV_IAM_ADMIN_PASSWORD"
 "${KC[@]}" set-password -r itms --username dev.maker --new-password "$DEV_MAKER_PASSWORD"
 "${KC[@]}" set-password -r itms --username dev.checker --new-password "$DEV_CHECKER_PASSWORD"
+# The directory feed (SEC-007) signs in with client credentials; its client id is fixed in the realm file.
+"${KC[@]}" update clients/7d0c1a3e-5b2f-4c1d-9e8a-100000000001 -r itms -s "secret=$DEV_DIRECTORY_FEED_SECRET"
 
 echo "== Granting development roles through iam-service (dev.iam-admin is the bootstrap administrator)"
 IAM=http://localhost:8082
@@ -80,6 +83,8 @@ grant() { # subject username role
 }
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker REFDATA_MAKER
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker REFDATA_CHECKER
+# Service-account subject of the itms-directory-feed client (fixed in the realm file); deactivates leavers (SEC-007).
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000010 service-account-itms-directory-feed DIRECTORY_FEED
 
 cat <<EOF
 
@@ -87,7 +92,8 @@ ITMS local stack is up:
   iam-service             http://localhost:8082/v1/roles             (bearer token required)
   reference-data-service  http://localhost:8081/v1/reference-lists   (bearer token required)
   Keycloak                http://localhost:8180   (realm: itms; users dev.iam-admin / dev.maker / dev.checker;
-                                                   passwords in $ENV_FILE)
+                                                   passwords in $ENV_FILE; client itms-directory-feed uses
+                                                   DEV_DIRECTORY_FEED_SECRET)
 Smoke test:               tools/dev/smoke.sh
 Stop:                     tools/dev/up.sh down
 EOF

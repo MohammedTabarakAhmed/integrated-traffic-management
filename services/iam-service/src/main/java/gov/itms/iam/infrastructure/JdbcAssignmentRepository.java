@@ -8,8 +8,10 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.TreeSet;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -79,6 +81,15 @@ class JdbcAssignmentRepository implements AssignmentRepository {
                 .param("reason", a.revocationReason())
                 .param("id", a.id())
                 .update();
+    }
+
+    /** Transaction-scoped advisory locks, taken in a fixed order so two requests never wait on each other. */
+    @Override
+    public void lockSubjects(Collection<String> subjectIds) {
+        for (String subject : new TreeSet<>(subjectIds)) {
+            jdbc.sql("select pg_advisory_xact_lock(hashtextextended('iam.subject:' || :subject, 0))")
+                    .param("subject", subject).query().listOfRows();
+        }
     }
 
     @Override

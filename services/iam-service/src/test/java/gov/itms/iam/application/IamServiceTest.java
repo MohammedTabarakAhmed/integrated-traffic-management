@@ -11,6 +11,7 @@ import gov.itms.iam.domain.DomainException;
 import gov.itms.iam.domain.Permission;
 import gov.itms.iam.domain.Role;
 import gov.itms.iam.domain.RoleAssignment;
+import gov.itms.iam.domain.RoleConflict;
 import gov.itms.platform.security.Authorisation;
 import gov.itms.platform.security.ScopeTarget;
 import gov.itms.platform.security.Scopes;
@@ -42,6 +43,7 @@ class IamServiceTest {
     private InMemoryRepositories.Assignments assignments;
     private InMemoryRepositories.Audit audit;
     private InMemoryRepositories.ApprovalLimits limits;
+    private InMemoryRepositories.RoleConflicts conflicts;
     private IamService service;
 
     @BeforeEach
@@ -56,7 +58,8 @@ class IamServiceTest {
             @Override public Instant instant() { return now.get(); }
         };
         limits = new InMemoryRepositories.ApprovalLimits();
-        service = new IamService(permissions, roles, assignments, limits, audit, clock);
+        conflicts = new InMemoryRepositories.RoleConflicts();
+        service = new IamService(permissions, roles, assignments, limits, conflicts, audit, clock);
         for (String p : List.of("iam.role.read", "iam.role.manage", "iam.assignment.read", "iam.assignment.manage",
                 "refdata.read", "refdata.change.submit", "txn.create")) {
             permissions.rows.put(p, new Permission(p, "svc", NAME));
@@ -504,5 +507,246 @@ class IamServiceTest {
         assertThat(service.delegations("u-deputy", delegationAdmin(regions("R2")))).isEmpty();
         assertThat(service.delegations(null, plain("u-stranger"))).isEmpty();
         assertThatThrownBy(() -> service.delegations("bad id!", plain("u-holder"))).satisfies(code("INVALID_SUBJECT"));
+    }
+
+    // ------------------------------------------------------------------ my assignments (CC-004, CC-001)
+
+    @Test
+    @Tag("CC-004")
+    @DisplayName("CC-004: a subject lists their own direct and delegated assignments without any permission")
+    void myAssignments() {
+        RoleAssignment source = holderAssignment(null);
+        RoleAssignment received = service.delegate(source.id(), "u-deputy", null, null, NOW.plusSeconds(3600),
+                "cover", HOLDER, plain("u-holder"));
+        RoleAssignment old = assign("u-deputy", assignmentScopes("R9"), admin(Scopes.NATIONAL));
+        service.revoke(old.id(), "moved", ADMIN, admin(Scopes.NATIONAL));
+
+        assertThat(service.myAssignments(null, plain("u-holder"))).extracting(RoleAssignment::id)
+                .containsExactly(source.id());
+        assertThat(service.myAssignments(null, plain("u-deputy"))).extracting(RoleAssignment::id)
+                .as("ACTIVE by default").containsExactly(received.id());
+        assertThat(service.myAssignments(RoleAssignment.Status.REVOKED, plain("u-deputy")))
+                .extracting(RoleAssignment::id).containsExactly(old.id());
+        assertThat(service.myAssignments(null, plain("u-stranger"))).isEmpty();
+    }
+
+    // ------------------------------------------------------------------ conflicting roles (CC-002)
+
+    private Authorisation nationalAdmin() {
+        return admin(Scopes.NATIONAL);
+    }
+
+    private void addCheckerRole() {
+        roles.insert(Role.create("REFDATA_CHECKER", NAME, null, List.of("refdata.read")), "seed", NOW);
+    }
+
+    private RoleAssignment assignRole(String subject, String role, Instant validFrom, Instant validTo) {
+        return service.assign(subject, subject + ".name", role, assignmentScopes("R1"), validFrom, validTo,
+                "new joiner", ADMIN, nationalAdmin());
+    }
+
+    @Test
+    @Tag("CC-002")
+    @DisplayName("CC-002: with no configured pairs (the default, Q-030) nothing is refused and nothing is a violation")
+    void noConflictingPairsByDefault() {
+        addCheckerRole();
+        assignRole("u-1", "REFDATA_MAKER", null, null);
+        assertThat(assignRole("u-1", "REFDATA_CHECKER", null, null).status()).isEqualTo(RoleAssignment.Status.ACTIVE);
+
+        assertThat(service.roleConflicts(null)).isEmpty();
+        assertThat(service.roleConflictViolations(nationalAdmin())).isEmpty();
+        assertThat(assignments.locked).containsExactly("u-1", "u-1");
+    }
+
+    @Test
+    @Tag("CC-002")
+    @DisplayName("CC-002: a configured pair refuses assigning or delegating a role that conflicts with one held")
+    void configuredPairRefusesAssignmentAndDelegation() {
+        addCheckerRole();
+        RoleConflict pair = service.declareRoleConflict("REFDATA_MAKER", "REFDATA_CHECKER", "maker-checker policy",
+                ADMIN);
+        assertThat(pair.roleA()).as("stored in alphabetical order").isEqualTo("REFDATA_CHECKER");
+        assertThat(pair.roleB()).isEqualTo("REFDATA_MAKER");
+        assertThat(audit.actions()).containsExactly("IAM_ROLE_CONFLICT_CREATED");
+
+        assignRole("u-maker", "REFDATA_MAKER", null, null);
+        int stored = assignments.rows.size();
+        assertThatThrownBy(() -> assignRole("u-maker", "REFDATA_CHECKER", null, null))
+                .satisfies(code("ROLE_CONFLICT"))
+                .satisfies(t -> assertThat(((DomainException) t).kind())
+                        .isEqualTo(DomainException.Kind.SEGREGATION_OF_DUTIES))
+                .satisfies(t -> assertThat(((DomainException) t).requirementRefs()).containsExactly("CC-002"))
+                .satisfies(t -> assertThat(((DomainException) t).args())
+                        .containsExactly("REFDATA_CHECKER", "REFDATA_MAKER"));
+        assertThat(assignments.rows).hasSize(stored);
+
+        // Delegation is checked the same way: a checker cannot delegate their role to a maker.
+        RoleAssignment checker = assignRole("u-checker", "REFDATA_CHECKER", null, null);
+        assertThatThrownBy(() -> service.delegate(checker.id(), "u-maker", null, null, NOW.plusSeconds(3600),
+                "cover", new Actor("u-checker", null), plain("u-checker"))).satisfies(code("ROLE_CONFLICT"));
+
+        // An assignment that starts later is already held; a revoked or expired one is not.
+        assignRole("u-future", "REFDATA_MAKER", NOW.plusSeconds(86_400), null);
+        assertThatThrownBy(() -> assignRole("u-future", "REFDATA_CHECKER", null, null))
+                .satisfies(code("ROLE_CONFLICT"));
+        RoleAssignment revoked = assignRole("u-moved", "REFDATA_MAKER", null, null);
+        service.revoke(revoked.id(), "moved to checking", ADMIN, nationalAdmin());
+        assertThat(assignRole("u-moved", "REFDATA_CHECKER", null, null).status())
+                .isEqualTo(RoleAssignment.Status.ACTIVE);
+        assignRole("u-temp", "REFDATA_MAKER", null, NOW.plusSeconds(60));
+        now.set(NOW.plusSeconds(60));
+        assertThat(assignRole("u-temp", "REFDATA_CHECKER", null, null).status())
+                .isEqualTo(RoleAssignment.Status.ACTIVE);
+        // Other roles are unaffected.
+        assertThat(assignRole("u-maker", "IT_ADMINISTRATOR", null, null).status())
+                .isEqualTo(RoleAssignment.Status.ACTIVE);
+    }
+
+    @Test
+    @Tag("CC-002")
+    @DisplayName("CC-002: pairs are validated, unique while active, retired once with a reason, and audited")
+    void conflictingPairRules() {
+        addCheckerRole();
+        assertThatThrownBy(() -> service.declareRoleConflict("REFDATA_MAKER", "REFDATA_MAKER", "same", ADMIN))
+                .satisfies(code("ROLE_CONFLICT_SAME_ROLE"));
+        assertThatThrownBy(() -> service.declareRoleConflict("REFDATA_MAKER", "NO_SUCH_ROLE", "typo", ADMIN))
+                .satisfies(code("ROLE_NOT_FOUND"));
+        assertThatThrownBy(() -> service.declareRoleConflict("REFDATA_MAKER", "REFDATA_CHECKER", "x", ADMIN))
+                .satisfies(code("REASON_REQUIRED"));
+        RoleConflict pair = service.declareRoleConflict("REFDATA_CHECKER", "REFDATA_MAKER", "policy", ADMIN);
+        assertThatThrownBy(() -> service.declareRoleConflict("REFDATA_MAKER", "REFDATA_CHECKER", "again", ADMIN))
+                .satisfies(code("ROLE_CONFLICT_EXISTS"));
+
+        RoleConflict retired = service.retireRoleConflict(pair.id(), "policy withdrawn", ADMIN);
+        assertThat(retired.status()).isEqualTo(RoleConflict.Status.RETIRED);
+        assertThat(retired.retiredBy()).isEqualTo(ADMIN);
+        assertThatThrownBy(() -> service.retireRoleConflict(pair.id(), "twice", ADMIN))
+                .satisfies(code("ROLE_CONFLICT_NOT_ACTIVE"));
+        assertThatThrownBy(() -> service.retireRoleConflict(UUID.randomUUID(), "missing", ADMIN))
+                .satisfies(code("ROLE_CONFLICT_NOT_FOUND"));
+
+        // A retired pair is no longer enforced and may be declared again.
+        assignRole("u-1", "REFDATA_MAKER", null, null);
+        assignRole("u-1", "REFDATA_CHECKER", null, null);
+        RoleConflict again = service.declareRoleConflict("REFDATA_MAKER", "REFDATA_CHECKER", "policy back", ADMIN);
+        assertThat(service.roleConflicts(RoleConflict.Status.ACTIVE)).extracting(RoleConflict::id)
+                .containsExactly(again.id());
+        assertThat(service.roleConflicts(null)).hasSize(2);
+
+        assertThat(audit.actions()).containsExactly("IAM_ROLE_CONFLICT_CREATED", "IAM_ROLE_CONFLICT_RETIRED",
+                "IAM_ROLE_ASSIGNED", "IAM_ROLE_ASSIGNED", "IAM_ROLE_CONFLICT_CREATED");
+        InMemoryRepositories.AuditEntry retirement = audit.entries.get(1);
+        assertThat(retirement.reason()).isEqualTo("policy withdrawn");
+        assertThat(retirement.oldValue().toString()).contains("status=ACTIVE");
+        assertThat(retirement.newValue().toString()).contains("status=RETIRED");
+    }
+
+    @Test
+    @Tag("CC-002")
+    @DisplayName("CC-002: adding a pair revokes nothing; current holders of both roles are listed as violations in scope")
+    void violationsOfExistingHolders() {
+        addCheckerRole();
+        RoleAssignment maker = assignRole("u-both", "REFDATA_MAKER", null, null);
+        RoleAssignment checker = assignRole("u-both", "REFDATA_CHECKER", null, null);
+        assignRole("u-one", "REFDATA_MAKER", null, null);
+
+        RoleConflict pair = service.declareRoleConflict("REFDATA_MAKER", "REFDATA_CHECKER", "policy", ADMIN);
+
+        assertThat(service.effectiveAuthorisation("u-both").roles()).containsExactlyInAnyOrder("REFDATA_MAKER",
+                "REFDATA_CHECKER");
+        assertThat(service.roleConflictViolations(nationalAdmin())).singleElement().satisfies(v -> {
+            assertThat(v.conflict().id()).isEqualTo(pair.id());
+            assertThat(v.subjectId()).isEqualTo("u-both");
+            assertThat(v.subjectUsername()).isEqualTo("u-both.name");
+            assertThat(v.assignmentIds()).containsExactlyInAnyOrder(maker.id(), checker.id());
+        });
+        assertThat(service.roleConflictViolations(admin(regions("R2")))).as("outside the caller's scope").isEmpty();
+
+        service.revoke(checker.id(), "resolve the conflict", ADMIN, nationalAdmin());
+        assertThat(service.roleConflictViolations(nationalAdmin())).isEmpty();
+    }
+
+    // ------------------------------------------------------------------ leaver deactivation (SEC-007)
+
+    private static Authorisation directoryFeed(Scopes scopes) {
+        return new Authorisation("svc-directory-feed", List.of(new Authorisation.Grant("DIRECTORY_FEED",
+                Set.of("iam.subject.deactivate", "iam.assignment.read"), scopes, null)), NOW);
+    }
+
+    private static final Actor FEED = new Actor("svc-directory-feed", "service-account-itms-directory-feed");
+
+    @Test
+    @Tag("SEC-007")
+    @DisplayName("SEC-007: a leaver loses every assignment, received delegation and delegation made, in one step")
+    void leaverDeactivation() {
+        addCheckerRole();
+        RoleAssignment ownMaker = assignRole("u-leaver", "REFDATA_MAKER", null, null);
+        RoleAssignment ownChecker = assignRole("u-leaver", "REFDATA_CHECKER", null, NOW.plusSeconds(86_400));
+        RoleAssignment holderSource = service.assign("u-holder", null, "IT_ADMINISTRATOR", assignmentScopes("R1"),
+                null, null, "admin", ADMIN, nationalAdmin());
+        RoleAssignment received = service.delegate(holderSource.id(), "u-leaver", null, null, NOW.plusSeconds(3600),
+                "cover", HOLDER, plain("u-holder"));
+        RoleAssignment made = service.delegate(ownMaker.id(), "u-deputy", null, null, NOW.plusSeconds(3600),
+                "cover", new Actor("u-leaver", null), plain("u-leaver"));
+        audit.entries.clear();
+
+        IamService.SubjectDeactivation result = service.deactivateSubject("u-leaver", "left the Authority", FEED,
+                directoryFeed(Scopes.NATIONAL));
+
+        assertThat(result.revoked()).extracting(RoleAssignment::id)
+                .containsExactlyInAnyOrder(ownMaker.id(), ownChecker.id(), received.id(), made.id());
+        assertThat(result.revoked()).allSatisfy(a -> {
+            assertThat(a.status()).isEqualTo(RoleAssignment.Status.REVOKED);
+            assertThat(a.revokedBy()).isEqualTo(FEED);
+            assertThat(a.revocationReason()).isEqualTo("left the Authority");
+        });
+        assertThat(result.deactivatedAt()).isEqualTo(NOW);
+        assertThat(service.effectiveAuthorisation("u-leaver").grants()).isEmpty();
+        assertThat(service.effectiveAuthorisation("u-deputy").grants()).isEmpty();
+        assertThat(service.effectiveAuthorisation("u-holder").roles()).as("the holder keeps their own role")
+                .containsExactly("IT_ADMINISTRATOR");
+        assertThat(assignments.locked).contains("u-leaver");
+
+        assertThat(audit.actions()).containsExactlyInAnyOrder("IAM_DELEGATION_REVOKED", "IAM_ROLE_REVOKED",
+                "IAM_ROLE_REVOKED", "IAM_DELEGATION_REVOKED", "IAM_SUBJECT_DEACTIVATED");
+        InMemoryRepositories.AuditEntry summary = audit.entries.getLast();
+        assertThat(summary.action()).isEqualTo("IAM_SUBJECT_DEACTIVATED");
+        assertThat(summary.entityType()).isEqualTo("Subject");
+        assertThat(summary.entityId()).isEqualTo("u-leaver");
+        assertThat(summary.newValue().toString()).contains("revokedCount=4");
+
+        // Idempotent: a repeat call revokes nothing, but the feed's call is still audited.
+        IamService.SubjectDeactivation repeat = service.deactivateSubject("u-leaver", "feed resent", FEED,
+                directoryFeed(Scopes.NATIONAL));
+        assertThat(repeat.revoked()).isEmpty();
+        assertThat(audit.actions()).endsWith("IAM_SUBJECT_DEACTIVATED", "IAM_SUBJECT_DEACTIVATED");
+        assertThat(service.deactivateSubject("u-never-had-a-role", "left", FEED, directoryFeed(Scopes.NATIONAL))
+                .revoked()).isEmpty();
+    }
+
+    @Test
+    @Tag("SEC-007")
+    @DisplayName("SEC-007: deactivation is all or nothing: one assignment outside the caller's scope stops it")
+    void leaverDeactivationNeedsScopeForEverything() {
+        RoleAssignment inR1 = assignRole("u-leaver", "REFDATA_MAKER", null, null);
+        RoleAssignment inR2 = service.assign("u-leaver", null, "REFDATA_MAKER", assignmentScopes("R2"), null, null,
+                "second region", ADMIN, nationalAdmin());
+        audit.entries.clear();
+
+        assertThatThrownBy(() -> service.deactivateSubject("u-leaver", "left", FEED, directoryFeed(regions("R1"))))
+                .satisfies(code("SCOPE_EXCEEDED"))
+                .satisfies(t -> assertThat(((DomainException) t).kind()).isEqualTo(DomainException.Kind.OUT_OF_SCOPE));
+        assertThat(assignments.rows.get(inR1.id()).status()).isEqualTo(RoleAssignment.Status.ACTIVE);
+        assertThat(assignments.rows.get(inR2.id()).status()).isEqualTo(RoleAssignment.Status.ACTIVE);
+        assertThat(audit.entries).isEmpty();
+        assertThatThrownBy(() -> service.deactivateSubject("u-leaver", "left", FEED, admin(Scopes.NATIONAL)))
+                .as("iam.assignment.manage is not iam.subject.deactivate").satisfies(code("SCOPE_EXCEEDED"));
+
+        assertThatThrownBy(() -> service.deactivateSubject("bad id!", "left", FEED, directoryFeed(Scopes.NATIONAL)))
+                .satisfies(code("INVALID_SUBJECT"));
+        assertThatThrownBy(() -> service.deactivateSubject("u-leaver", "", FEED, directoryFeed(Scopes.NATIONAL)))
+                .satisfies(code("REASON_REQUIRED"));
+        assertThat(service.deactivateSubject("u-leaver", "left", FEED, directoryFeed(regions("R1", "R2")))
+                .revoked()).hasSize(2);
     }
 }

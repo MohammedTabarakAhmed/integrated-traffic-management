@@ -270,4 +270,57 @@ class DomainModelTest {
                 NOW, null, "reason", ADMIN, NOW, RoleAssignment.Status.ACTIVE, null, null, null,
                 RoleAssignment.Source.DIRECT, id)).isInstanceOf(IllegalArgumentException.class);
     }
+
+    // ------------------------------------------------------------------ conflicting roles (CC-002)
+
+    @Test
+    @Tag("CC-002")
+    @DisplayName("CC-002: a conflicting pair is stored in alphabetical order and knows both of its roles")
+    void roleConflictOrder() {
+        RoleConflict pair = RoleConflict.declare("REFDATA_MAKER", "REFDATA_CHECKER", "  maker-checker  ", ADMIN, NOW);
+
+        assertThat(pair.roleA()).isEqualTo("REFDATA_CHECKER");
+        assertThat(pair.roleB()).isEqualTo("REFDATA_MAKER");
+        assertThat(pair.reason()).isEqualTo("maker-checker");
+        assertThat(pair.status()).isEqualTo(RoleConflict.Status.ACTIVE);
+        assertThat(pair.createdBy()).isEqualTo(ADMIN);
+        assertThat(pair.createdAt()).isEqualTo(NOW);
+        assertThat(pair.involves("REFDATA_MAKER")).isTrue();
+        assertThat(pair.involves("IT_ADMINISTRATOR")).isFalse();
+        assertThat(pair.otherThan("REFDATA_MAKER")).isEqualTo("REFDATA_CHECKER");
+        assertThat(pair.otherThan("REFDATA_CHECKER")).isEqualTo("REFDATA_MAKER");
+        assertThatThrownBy(() -> pair.otherThan("IT_ADMINISTRATOR")).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @Tag("CC-002")
+    @DisplayName("CC-002: a role cannot conflict with itself; codes and reason are validated")
+    void roleConflictValidation() {
+        assertThatThrownBy(() -> RoleConflict.declare("REFDATA_MAKER", "REFDATA_MAKER", "same", ADMIN, NOW))
+                .satisfies(code("ROLE_CONFLICT_SAME_ROLE"));
+        assertThatThrownBy(() -> RoleConflict.declare("bad", "REFDATA_MAKER", "reason", ADMIN, NOW))
+                .satisfies(code("INVALID_ROLE_CODE"));
+        assertThatThrownBy(() -> RoleConflict.declare("REFDATA_CHECKER", "REFDATA_MAKER", " ", ADMIN, NOW))
+                .satisfies(code("REASON_REQUIRED"));
+        java.util.UUID id = java.util.UUID.randomUUID();
+        assertThatThrownBy(() -> new RoleConflict(id, "REFDATA_MAKER", "REFDATA_CHECKER", "reason", ADMIN, NOW,
+                RoleConflict.Status.ACTIVE, null, null, null)).as("unordered rehydration")
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @Tag("CC-002")
+    @DisplayName("CC-002: a pair is retired once, with a reason")
+    void roleConflictRetirement() {
+        RoleConflict pair = RoleConflict.declare("REFDATA_CHECKER", "REFDATA_MAKER", "policy", ADMIN, NOW);
+        assertThatThrownBy(() -> pair.retire(ADMIN, "", NOW)).satisfies(code("REASON_REQUIRED"));
+        assertThat(pair.status()).isEqualTo(RoleConflict.Status.ACTIVE);
+
+        pair.retire(ADMIN, "policy withdrawn", NOW.plusSeconds(60));
+        assertThat(pair.status()).isEqualTo(RoleConflict.Status.RETIRED);
+        assertThat(pair.retiredBy()).isEqualTo(ADMIN);
+        assertThat(pair.retiredAt()).isEqualTo(NOW.plusSeconds(60));
+        assertThat(pair.retirementReason()).isEqualTo("policy withdrawn");
+        assertThatThrownBy(() -> pair.retire(ADMIN, "again", NOW)).satisfies(code("ROLE_CONFLICT_NOT_ACTIVE"));
+    }
 }

@@ -35,8 +35,8 @@ public class DomainException extends RuntimeException {
         return new DomainException(Kind.CONFLICT, code, message, List.of(), args);
     }
 
-    public static DomainException segregationOfDuties(String code, String message) {
-        return new DomainException(Kind.SEGREGATION_OF_DUTIES, code, message, List.of("CC-002"));
+    public static DomainException segregationOfDuties(String code, String message, Object... args) {
+        return new DomainException(Kind.SEGREGATION_OF_DUTIES, code, message, List.of("CC-002"), args);
     }
 
     public static DomainException outOfScope(String code, String message) {

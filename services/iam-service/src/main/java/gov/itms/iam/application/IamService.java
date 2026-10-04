@@ -9,6 +9,7 @@ import gov.itms.iam.domain.DomainException;
 import gov.itms.iam.domain.Permission;
 import gov.itms.iam.domain.Role;
 import gov.itms.iam.domain.RoleAssignment;
+import gov.itms.iam.domain.RoleConflict;
 import gov.itms.platform.audit.AuditRecorder;
 import gov.itms.platform.security.Authorisation;
 import gov.itms.platform.security.CurrentActor;
@@ -17,11 +18,14 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.UUID;
 import org.springframework.transaction.annotation.Transactional;
@@ -35,7 +39,9 @@ import org.springframework.transaction.annotation.Transactional;
  *   <li>delegations (CC-004) are made by the holder of the source, or by a caller whose {@value #DELEGATION_CREATE}
  *       covers the source's scopes; parties to a delegation always see it, others need {@value #DELEGATION_READ}
  *       in scope.</li>
+ *   <li>deactivating a leaver (SEC-007) needs {@value #SUBJECT_DEACTIVATE} covering every assignment it revokes.</li>
  * </ul>
+ * Nobody receives a role that conflicts with one they hold, by assignment or by delegation (CC-002).
  */
 public class IamService {
 
@@ -43,6 +49,7 @@ public class IamService {
     public static final String ASSIGNMENT_MANAGE = "iam.assignment.manage";
     public static final String DELEGATION_CREATE = "iam.delegation.create";
     public static final String DELEGATION_READ = "iam.delegation.read";
+    public static final String SUBJECT_DEACTIVATE = "iam.subject.deactivate";
     static final String BOOTSTRAP_ROLE = "IT_ADMINISTRATOR";
     static final String BOOTSTRAP_ACTOR = "SYSTEM_BOOTSTRAP";
 
@@ -50,6 +57,7 @@ public class IamService {
     private final RoleRepository roles;
     private final AssignmentRepository assignments;
     private final ApprovalLimitRepository limits;
+    private final RoleConflictRepository conflicts;
     private final AuditRecorder audit;
     private final Clock clock;
 
@@ -57,12 +65,23 @@ public class IamService {
     public record RoleApprovalLimits(String roleCode, long version, List<ApprovalLimit> limits) {
     }
 
+    /** A subject who holds both roles of an ACTIVE conflicting pair, with the assignments involved (CC-002). */
+    public record RoleConflictViolation(RoleConflict conflict, String subjectId, String subjectUsername,
+                                        List<UUID> assignmentIds) {
+    }
+
+    /** What one leaver deactivation revoked (SEC-007); empty when there was nothing left to revoke. */
+    public record SubjectDeactivation(String subjectId, Instant deactivatedAt, List<RoleAssignment> revoked) {
+    }
+
     public IamService(PermissionRepository permissions, RoleRepository roles, AssignmentRepository assignments,
-                      ApprovalLimitRepository limits, AuditRecorder audit, Clock clock) {
+                      ApprovalLimitRepository limits, RoleConflictRepository conflicts, AuditRecorder audit,
+                      Clock clock) {
         this.permissions = permissions;
         this.roles = roles;
         this.assignments = assignments;
         this.limits = limits;
+        this.conflicts = conflicts;
         this.audit = audit;
         this.clock = clock;
     }
@@ -177,7 +196,19 @@ public class IamService {
                 .orElseThrow(() -> assignmentNotFound(id));
     }
 
-    /** Assigns a role within data scopes (CC-001). Self-assignment and granting beyond one's own scope are refused. */
+    /**
+     * The caller's own assignments, direct and received by delegation (CC-001, CC-004); {@code status} defaults to
+     * ACTIVE. Needs no permission: a holder needs the ids to delegate their own assignments.
+     */
+    @Transactional(readOnly = true)
+    public List<RoleAssignment> myAssignments(RoleAssignment.Status status, Authorisation caller) {
+        return assignments.search(caller.subjectId(), null, status == null ? RoleAssignment.Status.ACTIVE : status);
+    }
+
+    /**
+     * Assigns a role within data scopes (CC-001). Self-assignment, granting beyond one's own scope and a role that
+     * conflicts with one the subject holds (CC-002) are refused.
+     */
     @Transactional
     public RoleAssignment assign(String subjectId, String subjectUsername, String roleCode, AssignmentScopes scopes,
                                  Instant validFrom, Instant validTo, String reason, Actor actor, Authorisation caller) {
@@ -191,12 +222,14 @@ public class IamService {
         if (!role.active()) {
             throw DomainException.validation("ROLE_INACTIVE", "role " + role.code() + " is inactive", role.code());
         }
+        assignments.lockSubjects(List.of(assignment.subjectId()));
         boolean duplicate = assignments.search(assignment.subjectId(), role.code(), RoleAssignment.Status.ACTIVE)
                 .stream().anyMatch(a -> a.scopes().equals(scopes) && overlaps(a, assignment));
         if (duplicate) {
             throw DomainException.conflict("ASSIGNMENT_EXISTS",
                     "the subject already holds this role with the same scopes for an overlapping period");
         }
+        requireNoConflictingRole(assignment.subjectId(), role.code());
         assignments.insert(assignment);
         audit.record("IAM_ROLE_ASSIGNED", "RoleAssignment", assignment.id().toString(), null, snapshot(assignment),
                 assignment.reason());
@@ -250,9 +283,12 @@ public class IamService {
             }
             throw assignmentNotFound(sourceId);
         }
-        RoleAssignment delegation = RoleAssignment.delegate(source, delegateId, delegateUsername, validFrom, validTo,
+        // Lock holder and delegate, then read the source again: a concurrent leaver deactivation may have revoked it.
+        assignments.lockSubjects(List.of(source.subjectId(), Codes.subjectId(delegateId)));
+        RoleAssignment current = assignments.find(sourceId).orElseThrow(() -> assignmentNotFound(sourceId));
+        RoleAssignment delegation = RoleAssignment.delegate(current, delegateId, delegateUsername, validFrom, validTo,
                 reason, actor, now());
-        Role role = roles.find(source.roleCode()).orElseThrow(() -> roleNotFound(source.roleCode()));
+        Role role = roles.find(current.roleCode()).orElseThrow(() -> roleNotFound(current.roleCode()));
         if (!role.active()) {
             throw DomainException.validation("ROLE_INACTIVE", "role " + role.code() + " is inactive", role.code());
         }
@@ -262,6 +298,7 @@ public class IamService {
             throw DomainException.conflict("ASSIGNMENT_EXISTS",
                     "the subject already holds this role with the same scopes for an overlapping period");
         }
+        requireNoConflictingRole(delegation.subjectId(), role.code());
         assignments.insert(delegation);
         audit.record("IAM_DELEGATION_CREATED", "RoleAssignment", delegation.id().toString(), null,
                 snapshot(delegation), delegation.reason());
@@ -299,6 +336,151 @@ public class IamService {
 
     private boolean holderOfSource(RoleAssignment delegation, String subjectId) {
         return assignments.find(delegation.delegatedFrom()).map(s -> s.subjectId().equals(subjectId)).orElse(false);
+    }
+
+    // ---------------------------------------------------------------- conflicting roles (CC-002)
+
+    @Transactional(readOnly = true)
+    public List<RoleConflict> roleConflicts(RoleConflict.Status status) {
+        return conflicts.search(status);
+    }
+
+    /**
+     * Declares two roles that one subject must not hold together. Revokes nothing: current holders of both show up
+     * in {@link #roleConflictViolations}.
+     */
+    @Transactional
+    public RoleConflict declareRoleConflict(String role1, String role2, String reason, Actor actor) {
+        RoleConflict conflict = RoleConflict.declare(role1, role2, reason, actor, now());
+        role(conflict.roleA());
+        role(conflict.roleB());
+        boolean exists = conflicts.search(RoleConflict.Status.ACTIVE).stream()
+                .anyMatch(c -> c.roleA().equals(conflict.roleA()) && c.roleB().equals(conflict.roleB()));
+        if (exists) {
+            throw DomainException.conflict("ROLE_CONFLICT_EXISTS", "these roles are already declared as conflicting",
+                    conflict.roleA(), conflict.roleB());
+        }
+        conflicts.insert(conflict);
+        audit.record("IAM_ROLE_CONFLICT_CREATED", "RoleConflict", conflict.id().toString(), null, snapshot(conflict),
+                conflict.reason());
+        return conflict;
+    }
+
+    @Transactional
+    public RoleConflict retireRoleConflict(UUID id, String reason, Actor actor) {
+        RoleConflict conflict = conflicts.findForUpdate(id).orElseThrow(() -> DomainException.notFound(
+                "ROLE_CONFLICT_NOT_FOUND", "role conflict " + id + " does not exist"));
+        Map<String, Object> before = snapshot(conflict);
+        conflict.retire(actor, reason, now());
+        conflicts.saveRetirement(conflict);
+        audit.record("IAM_ROLE_CONFLICT_RETIRED", "RoleConflict", id.toString(), before, snapshot(conflict),
+                conflict.retirementReason());
+        return conflict;
+    }
+
+    /**
+     * Subjects who hold both roles of an ACTIVE pair now (ACTIVE assignments that have not ended), considering only
+     * assignments inside the caller's {@value #ASSIGNMENT_READ} scope. Ordered by pair, then subject.
+     */
+    @Transactional(readOnly = true)
+    public List<RoleConflictViolation> roleConflictViolations(Authorisation caller) {
+        List<RoleConflict> pairs = conflicts.search(RoleConflict.Status.ACTIVE).stream()
+                .sorted(Comparator.comparing(RoleConflict::roleA).thenComparing(RoleConflict::roleB)).toList();
+        if (pairs.isEmpty()) {
+            return List.of();
+        }
+        Instant now = now();
+        Map<String, List<RoleAssignment>> held = new TreeMap<>();
+        for (RoleAssignment a : assignments.search(null, null, RoleAssignment.Status.ACTIVE)) {
+            if (a.isActiveOrUpcomingAt(now) && caller.covers(ASSIGNMENT_READ, toScopes(a.scopes()))) {
+                held.computeIfAbsent(a.subjectId(), s -> new ArrayList<>()).add(a);
+            }
+        }
+        List<RoleConflictViolation> violations = new ArrayList<>();
+        for (RoleConflict pair : pairs) {
+            held.forEach((subject, list) -> {
+                List<RoleAssignment> involved = list.stream().filter(a -> pair.involves(a.roleCode())).toList();
+                Set<String> roleCodes = new TreeSet<>(involved.stream().map(RoleAssignment::roleCode).toList());
+                if (roleCodes.size() == 2) {
+                    String username = involved.stream().map(RoleAssignment::subjectUsername)
+                            .filter(Objects::nonNull).findFirst().orElse(null);
+                    violations.add(new RoleConflictViolation(pair, subject, username,
+                            involved.stream().map(RoleAssignment::id).toList()));
+                }
+            });
+        }
+        return violations;
+    }
+
+    /** Refuses a role that conflicts with one the subject holds: ACTIVE and not yet ended (CC-002). */
+    private void requireNoConflictingRole(String subjectId, String roleCode) {
+        Set<String> conflicting = new TreeSet<>();
+        for (RoleConflict c : conflicts.search(RoleConflict.Status.ACTIVE)) {
+            if (c.involves(roleCode)) {
+                conflicting.add(c.otherThan(roleCode));
+            }
+        }
+        if (conflicting.isEmpty()) {
+            return;
+        }
+        Instant now = now();
+        assignments.search(subjectId, null, RoleAssignment.Status.ACTIVE).stream()
+                .filter(a -> a.isActiveOrUpcomingAt(now) && conflicting.contains(a.roleCode()))
+                .findFirst()
+                .ifPresent(a -> {
+                    throw DomainException.segregationOfDuties("ROLE_CONFLICT", "role " + roleCode
+                            + " conflicts with role " + a.roleCode() + ", which the subject holds", roleCode,
+                            a.roleCode());
+                });
+    }
+
+    // ---------------------------------------------------------------- leavers (SEC-007)
+
+    /**
+     * Leaver deactivation, normally called by the directory feed the day a person leaves (SEC-007). In one
+     * transaction it revokes every ACTIVE assignment of the subject (direct and received delegations) and every ACTIVE
+     * delegation made from the subject's assignments. The caller's {@value #SUBJECT_DEACTIVATE} scope must cover all
+     * of them, otherwise nothing is revoked. Idempotent: a repeat call revokes nothing and is still audited.
+     */
+    @Transactional
+    public SubjectDeactivation deactivateSubject(String subjectId, String reason, Actor actor, Authorisation caller) {
+        String subject = Codes.subjectId(subjectId);
+        String why = Codes.reason(reason);
+        assignments.lockSubjects(List.of(subject));
+        Map<UUID, RoleAssignment> targets = new LinkedHashMap<>();
+        for (RoleAssignment d : assignments.delegations(subject)) {
+            if (d.status() == RoleAssignment.Status.ACTIVE && !d.subjectId().equals(subject)
+                    && holderOfSource(d, subject)) {
+                targets.put(d.id(), d);
+            }
+        }
+        for (RoleAssignment a : assignments.search(subject, null, RoleAssignment.Status.ACTIVE)) {
+            targets.put(a.id(), a);
+        }
+        if (targets.values().stream().anyMatch(a -> !caller.covers(SUBJECT_DEACTIVATE, toScopes(a.scopes())))) {
+            throw DomainException.outOfScope("SCOPE_EXCEEDED",
+                    "some of this person's roles are outside your regions, centres or modules; nothing was revoked");
+        }
+        Instant at = now();
+        List<RoleAssignment> revoked = new ArrayList<>();
+        for (UUID id : targets.keySet()) {
+            RoleAssignment a = assignments.findForUpdate(id).orElseThrow(() -> assignmentNotFound(id));
+            if (a.status() != RoleAssignment.Status.ACTIVE) {
+                continue; // revoked concurrently by someone else
+            }
+            Map<String, Object> before = snapshot(a);
+            a.revoke(actor, why, at);
+            assignments.saveRevocation(a);
+            audit.record(a.isDelegation() ? "IAM_DELEGATION_REVOKED" : "IAM_ROLE_REVOKED", "RoleAssignment",
+                    id.toString(), before, snapshot(a), why);
+            revoked.add(a);
+        }
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("subjectId", subject);
+        summary.put("revokedCount", revoked.size());
+        summary.put("revokedAssignmentIds", revoked.stream().map(a -> a.id().toString()).toList());
+        audit.record("IAM_SUBJECT_DEACTIVATED", "Subject", subject, null, summary, why);
+        return new SubjectDeactivation(subject, at, revoked);
     }
 
     // ---------------------------------------------------------------- effective authorisation
@@ -421,6 +603,20 @@ public class IamService {
         m.put("assignedBy", a.assignedBy().id());
         m.put("revokedBy", a.revokedBy() == null ? null : a.revokedBy().id());
         m.put("revocationReason", a.revocationReason());
+        return m;
+    }
+
+    /** Audit-friendly view of a conflicting-role pair. */
+    static Map<String, Object> snapshot(RoleConflict c) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id", c.id().toString());
+        m.put("roleA", c.roleA());
+        m.put("roleB", c.roleB());
+        m.put("reason", c.reason());
+        m.put("status", c.status().name());
+        m.put("createdBy", c.createdBy().id());
+        m.put("retiredBy", c.retiredBy() == null ? null : c.retiredBy().id());
+        m.put("retirementReason", c.retirementReason());
         return m;
     }
 }

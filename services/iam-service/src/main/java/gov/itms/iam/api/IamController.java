@@ -4,6 +4,7 @@ import gov.itms.iam.api.ApiModels.ApprovalLimitDto;
 import gov.itms.iam.api.ApiModels.Collection;
 import gov.itms.iam.api.ApiModels.CreateDelegationRequest;
 import gov.itms.iam.api.ApiModels.CreateRoleAssignmentRequest;
+import gov.itms.iam.api.ApiModels.CreateRoleConflictRequest;
 import gov.itms.iam.api.ApiModels.CreateRoleRequest;
 import gov.itms.iam.api.ApiModels.EffectiveAuthorisationDto;
 import gov.itms.iam.api.ApiModels.PermissionDto;
@@ -11,13 +12,17 @@ import gov.itms.iam.api.ApiModels.ReasonRequest;
 import gov.itms.iam.api.ApiModels.ReplaceApprovalLimitsRequest;
 import gov.itms.iam.api.ApiModels.RoleApprovalLimitsDto;
 import gov.itms.iam.api.ApiModels.RoleAssignmentDto;
+import gov.itms.iam.api.ApiModels.RoleConflictDto;
+import gov.itms.iam.api.ApiModels.RoleConflictViolationDto;
 import gov.itms.iam.api.ApiModels.RoleDto;
 import gov.itms.iam.api.ApiModels.RoleVersionDto;
+import gov.itms.iam.api.ApiModels.SubjectDeactivationDto;
 import gov.itms.iam.api.ApiModels.UpdateRoleRequest;
 import gov.itms.iam.application.IamService;
 import gov.itms.iam.domain.Actor;
 import gov.itms.iam.domain.Role;
 import gov.itms.iam.domain.RoleAssignment;
+import gov.itms.iam.domain.RoleConflict;
 import gov.itms.platform.security.CurrentActor;
 import gov.itms.platform.security.CurrentActorProvider;
 import jakarta.validation.Valid;
@@ -151,6 +156,47 @@ class IamController {
     RoleAssignmentDto revokeDelegation(@PathVariable UUID delegationId, @Valid @RequestBody ReasonRequest body) {
         return RoleAssignmentDto.of(service.revokeDelegation(delegationId, body.reason(), actor(),
                 actors.authorisation()));
+    }
+
+    @GetMapping("/role-conflicts")
+    @PreAuthorize("hasAuthority('iam.role.read')")
+    Collection<RoleConflictDto> roleConflicts(@RequestParam(required = false) RoleConflict.Status status) {
+        return new Collection<>(service.roleConflicts(status).stream().map(RoleConflictDto::of).toList());
+    }
+
+    @PostMapping("/role-conflicts")
+    @PreAuthorize("hasAuthority('iam.role.manage')")
+    ResponseEntity<RoleConflictDto> declareRoleConflict(@Valid @RequestBody CreateRoleConflictRequest body) {
+        RoleConflict c = service.declareRoleConflict(body.roleA(), body.roleB(), body.reason(), actor());
+        return ResponseEntity.created(URI.create("/v1/role-conflicts/" + c.id())).body(RoleConflictDto.of(c));
+    }
+
+    @GetMapping("/role-conflicts/violations")
+    @PreAuthorize("hasAuthority('iam.assignment.read')")
+    Collection<RoleConflictViolationDto> roleConflictViolations() {
+        return new Collection<>(service.roleConflictViolations(actors.authorisation()).stream()
+                .map(RoleConflictViolationDto::of).toList());
+    }
+
+    @PostMapping("/role-conflicts/{conflictId}/retirements")
+    @PreAuthorize("hasAuthority('iam.role.manage')")
+    RoleConflictDto retireRoleConflict(@PathVariable UUID conflictId, @Valid @RequestBody ReasonRequest body) {
+        return RoleConflictDto.of(service.retireRoleConflict(conflictId, body.reason(), actor()));
+    }
+
+    /** Leaver deactivation (SEC-007): called by the directory feed's service account or an administrator. */
+    @PostMapping("/subjects/{subjectId}/deactivations")
+    @PreAuthorize("hasAuthority('iam.subject.deactivate')")
+    SubjectDeactivationDto deactivateSubject(@PathVariable String subjectId, @Valid @RequestBody ReasonRequest body) {
+        return SubjectDeactivationDto.of(service.deactivateSubject(subjectId, body.reason(), actor(),
+                actors.authorisation()));
+    }
+
+    /** Any authenticated subject may list their own assignments, for example to delegate one (CC-004). */
+    @GetMapping("/me/assignments")
+    Collection<RoleAssignmentDto> myAssignments(@RequestParam(required = false) RoleAssignment.Status status) {
+        return new Collection<>(service.myAssignments(status, actors.authorisation()).stream()
+                .map(RoleAssignmentDto::of).toList());
     }
 
     /** Any authenticated subject may read their own grants; every ITMS service calls this (ADR-022). */

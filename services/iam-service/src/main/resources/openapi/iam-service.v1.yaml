@@ -21,6 +21,12 @@ info:
     - Delegation (CC-004): the holder of an assignment (or an administrator whose `iam.delegation.create` scope
       covers it) can delegate it to another subject for a set period. The delegation is a role assignment with
       `source = DELEGATION`; it grants nothing once its source is revoked or expired, and cannot be re-delegated.
+      A subject lists their own assignments at `/v1/me/assignments`.
+    - Conflicting roles (CC-002): administrators configure pairs of roles that one subject must not hold together.
+      Assigning or delegating a role that conflicts with one the subject already holds is refused. The list starts
+      empty (Q-030); adding a pair revokes nothing, and current holders of both roles are listed as violations.
+    - Leavers (SEC-007): the directory feed (or an administrator) deactivates a subject, which revokes all of their
+      assignments and delegations in one step. Disabling the sign-in itself stays with the identity provider.
 
     Scope values: `*` means "all" for that dimension and must then be the only value. Otherwise values are codes
     (`^[A-Z0-9_]{1,40}$`) owned by geo-service (regions, centres) and reference data (modules); see Q-027.
@@ -35,6 +41,8 @@ tags:
   - name: Role assignments
   - name: Approval limits
   - name: Delegations
+  - name: Role conflicts
+  - name: Subjects
   - name: Effective authorisation
 
 paths:
@@ -238,7 +246,9 @@ paths:
       summary: Assign a role to a subject with data scopes and a validity period (CC-001)
       description: |
         The requested scopes must lie within the caller's own `iam.assignment.manage` scope, and the caller cannot
-        assign a role to themselves (CC-002). `validFrom` defaults to now; `validTo` is optional.
+        assign a role to themselves (CC-002). `validFrom` defaults to now; `validTo` is optional. A role that
+        conflicts with one the subject holds (an ACTIVE pair in `/v1/role-conflicts`) is refused with 403
+        `ROLE_CONFLICT` (CC-002).
       x-itms-permission: iam.assignment.manage
       x-itms-scope: assignment-scopes
       requestBody:
@@ -339,7 +349,8 @@ paths:
         the source's scopes (on behalf of an absent holder). The delegation copies the source's role and scopes.
         Rules: `validTo` is required and cannot be later than the source's `validTo`; the source must be ACTIVE,
         not expired and not itself a delegation; nobody delegates to themselves (CC-002) or to the holder. Which
-        roles may be delegated is open (Q-033; interim: all). Audited as `IAM_DELEGATION_CREATED`.
+        roles may be delegated is open (Q-033; interim: all). A role that conflicts with one the delegate holds is
+        refused with 403 `ROLE_CONFLICT` (CC-002). Audited as `IAM_DELEGATION_CREATED`.
       x-itms-permission: authenticated
       x-itms-scope: assignment-scopes
       requestBody:
@@ -393,6 +404,165 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
+
+  /v1/role-conflicts:
+    get:
+      tags: [Role conflicts]
+      operationId: listRoleConflicts
+      summary: Configured pairs of conflicting roles (CC-002)
+      description: ACTIVE pairs are enforced; RETIRED pairs are kept for history. Newest first.
+      x-itms-permission: iam.role.read
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/RoleConflictStatus' }
+      responses:
+        '200':
+          description: Role conflicts
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoleConflictCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [Role conflicts]
+      operationId: createRoleConflict
+      summary: Declare that two roles must not be held by the same subject (CC-002)
+      description: |
+        The pair is stored with the role codes in alphabetical order, so (A, B) and (B, A) are the same pair; only
+        one ACTIVE pair per two roles. A role cannot conflict with itself. From now on, assigning or delegating either
+        role to a subject who holds (ACTIVE and not yet ended) the other is refused with 403 `ROLE_CONFLICT`. Adding
+        a pair revokes nothing: current holders of both roles appear in `/v1/role-conflicts/violations`. Which pairs
+        apply is a business decision (Q-030; the list starts empty). Audited as `IAM_ROLE_CONFLICT_CREATED`.
+      x-itms-permission: iam.role.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateRoleConflictRequest' }
+      responses:
+        '201':
+          description: Pair created
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoleConflict' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/role-conflicts/violations:
+    get:
+      tags: [Role conflicts]
+      operationId: listRoleConflictViolations
+      summary: Subjects who currently hold both roles of an ACTIVE pair (CC-002)
+      description: |
+        A subject holds a role when they have an ACTIVE assignment or delegation of it that has not ended (it may
+        start later). Only assignments within the caller's `iam.assignment.read` scope are considered, so a violation
+        is listed only when the caller can see an assignment of each role.
+      x-itms-permission: iam.assignment.read
+      x-itms-scope: assignment-scopes
+      responses:
+        '200':
+          description: Violations, by role pair and subject
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoleConflictViolationCollection' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+
+  /v1/role-conflicts/{conflictId}/retirements:
+    post:
+      tags: [Role conflicts]
+      operationId: retireRoleConflict
+      summary: Retire an ACTIVE pair, with a reason (CC-002)
+      description: The pair is no longer enforced but is kept for history. Audited as `IAM_ROLE_CONFLICT_RETIRED`.
+      x-itms-permission: iam.role.manage
+      parameters:
+        - name: conflictId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReasonRequest' }
+      responses:
+        '200':
+          description: Pair retired
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoleConflict' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+
+  /v1/subjects/{subjectId}/deactivations:
+    post:
+      tags: [Subjects]
+      operationId: deactivateSubject
+      summary: Leaver - revoke every assignment and delegation of a subject in one step (SEC-007)
+      description: |
+        Called by the directory feed on the day a person leaves (or by an administrator). In one transaction it
+        revokes every ACTIVE assignment of the subject (DIRECT and received delegations) and every ACTIVE delegation
+        made from the subject's assignments. The caller's `iam.subject.deactivate` scope must cover the scopes of
+        every assignment to be revoked; otherwise 403 `SCOPE_EXCEEDED` and nothing is revoked. Idempotent: a repeat
+        call (or a subject with nothing to revoke) returns 200 with `revokedCount: 0`. Audited as
+        `IAM_SUBJECT_DEACTIVATED`, plus `IAM_ROLE_REVOKED` or `IAM_DELEGATION_REVOKED` per revocation. Disabling the
+        sign-in itself is done by the identity provider and directory, not here.
+      x-itms-permission: iam.subject.deactivate
+      x-itms-scope: assignment-scopes
+      parameters:
+        - name: subjectId
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/SubjectId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReasonRequest' }
+      responses:
+        '200':
+          description: Subject deactivated; what was revoked by this call
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SubjectDeactivation' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/me/assignments:
+    get:
+      tags: [Effective authorisation]
+      operationId: listMyAssignments
+      summary: The caller's own role assignments, direct and received by delegation (CC-001, CC-004)
+      description: |
+        Any authenticated subject may list their own assignments; holders use the `id` of a DIRECT assignment as
+        `sourceAssignmentId` when they delegate it. `status` defaults to ACTIVE. Newest first. An ACTIVE entry may
+        lie outside its validity period; `/v1/me/authorisation` shows what is in force now.
+      x-itms-permission: authenticated
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/AssignmentStatus' }
+      responses:
+        '200':
+          description: Assignments, newest first
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoleAssignmentCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
 
   /v1/me/authorisation:
     get:
@@ -679,6 +849,72 @@ components:
       required: [reason]
       properties:
         reason: { $ref: '#/components/schemas/Reason' }
+
+    RoleConflictStatus:
+      type: string
+      enum: [ACTIVE, RETIRED]
+    RoleConflict:
+      type: object
+      additionalProperties: false
+      description: Two roles that one subject must not hold at the same time (CC-002). `roleA` sorts before `roleB`.
+      required: [id, roleA, roleB, reason, status, createdBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        roleA: { $ref: '#/components/schemas/RoleCode' }
+        roleB: { $ref: '#/components/schemas/RoleCode' }
+        reason: { type: string }
+        status: { $ref: '#/components/schemas/RoleConflictStatus' }
+        createdBy: { $ref: '#/components/schemas/Actor' }
+        createdAt: { type: string, format: date-time }
+        retiredBy: { oneOf: [ { $ref: '#/components/schemas/Actor' }, { type: 'null' } ] }
+        retiredAt: { oneOf: [ { type: string, format: date-time }, { type: 'null' } ] }
+        retirementReason: { oneOf: [ { type: string }, { type: 'null' } ] }
+    RoleConflictCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/RoleConflict' } }
+    CreateRoleConflictRequest:
+      type: object
+      additionalProperties: false
+      required: [roleA, roleB, reason]
+      properties:
+        roleA: { $ref: '#/components/schemas/RoleCode' }
+        roleB: { $ref: '#/components/schemas/RoleCode' }
+        reason: { $ref: '#/components/schemas/Reason' }
+    RoleConflictViolation:
+      type: object
+      additionalProperties: false
+      description: A subject who currently holds both roles of an ACTIVE pair, with the assignments involved.
+      required: [conflictId, roleA, roleB, subjectId, assignmentIds]
+      properties:
+        conflictId: { type: string, format: uuid }
+        roleA: { $ref: '#/components/schemas/RoleCode' }
+        roleB: { $ref: '#/components/schemas/RoleCode' }
+        subjectId: { $ref: '#/components/schemas/SubjectId' }
+        subjectUsername: { oneOf: [ { type: string }, { type: 'null' } ] }
+        assignmentIds:
+          type: array
+          minItems: 2
+          items: { type: string, format: uuid }
+    RoleConflictViolationCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/RoleConflictViolation' } }
+
+    SubjectDeactivation:
+      type: object
+      additionalProperties: false
+      description: Result of a leaver deactivation (SEC-007). `revoked` lists what this call revoked.
+      required: [subjectId, deactivatedAt, revokedCount, revoked]
+      properties:
+        subjectId: { $ref: '#/components/schemas/SubjectId' }
+        deactivatedAt: { type: string, format: date-time }
+        revokedCount: { type: integer, minimum: 0 }
+        revoked: { type: array, items: { $ref: '#/components/schemas/RoleAssignment' } }
 
     Grant:
       type: object

@@ -1,6 +1,7 @@
 package gov.itms.iam.application;
 
 import gov.itms.iam.domain.RoleAssignment;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -16,6 +17,12 @@ public interface AssignmentRepository {
     Optional<RoleAssignment> findForUpdate(UUID id);
 
     void saveRevocation(RoleAssignment assignment);
+
+    /**
+     * Serialises changes to the given subjects' assignments until the transaction ends, so two concurrent requests
+     * cannot together break a rule that each checks alone (conflicting roles, duplicates, deactivation).
+     */
+    void lockSubjects(Collection<String> subjectIds);
 
     /** Newest first. Every filter is optional ({@code null} = any). */
     List<RoleAssignment> search(String subjectId, String roleCode, RoleAssignment.Status status);

@@ -35,6 +35,31 @@
           }
         }
       ]
+    },
+    {
+      "id": "7d0c1a3e-5b2f-4c1d-9e8a-100000000001",
+      "clientId": "itms-directory-feed",
+      "name": "Directory feed service account (SEC-007). LOCAL DEVELOPMENT ONLY: the secret is set by tools/dev/up.sh",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "fullScopeAllowed": false,
+      "protocolMappers": [
+        {
+          "name": "itms-api audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "itms-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
     }
   ],
   "users": [
@@ -64,6 +89,12 @@
       "lastName": "Checker",
       "email": "dev.checker@itms.invalid",
       "id": "7d0c1a3e-5b2f-4c1d-9e8a-000000000003"
+    },
+    {
+      "id": "7d0c1a3e-5b2f-4c1d-9e8a-000000000010",
+      "username": "service-account-itms-directory-feed",
+      "enabled": true,
+      "serviceAccountClientId": "itms-directory-feed"
     }
   ]
 }

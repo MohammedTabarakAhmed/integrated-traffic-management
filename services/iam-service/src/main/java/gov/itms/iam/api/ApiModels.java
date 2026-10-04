@@ -1,6 +1,8 @@
 package gov.itms.iam.api;
 
 import gov.itms.iam.application.IamService.RoleApprovalLimits;
+import gov.itms.iam.application.IamService.RoleConflictViolation;
+import gov.itms.iam.application.IamService.SubjectDeactivation;
 import gov.itms.iam.application.RoleRepository.RoleVersion;
 import gov.itms.iam.domain.Actor;
 import gov.itms.iam.domain.ApprovalLimit;
@@ -10,6 +12,7 @@ import gov.itms.iam.domain.Codes;
 import gov.itms.iam.domain.Permission;
 import gov.itms.iam.domain.Role;
 import gov.itms.iam.domain.RoleAssignment;
+import gov.itms.iam.domain.RoleConflict;
 import gov.itms.platform.security.Authorisation;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
@@ -169,6 +172,38 @@ final class ApiModels {
     }
 
     record ReasonRequest(@NotNull @Size(min = 3, max = 500) String reason) {
+    }
+
+    record RoleConflictDto(UUID id, String roleA, String roleB, String reason, RoleConflict.Status status,
+                           ActorDto createdBy, Instant createdAt, ActorDto retiredBy, Instant retiredAt,
+                           String retirementReason) {
+        static RoleConflictDto of(RoleConflict c) {
+            return new RoleConflictDto(c.id(), c.roleA(), c.roleB(), c.reason(), c.status(),
+                    ActorDto.of(c.createdBy()), c.createdAt(), ActorDto.of(c.retiredBy()), c.retiredAt(),
+                    c.retirementReason());
+        }
+    }
+
+    record CreateRoleConflictRequest(
+            @NotNull @Pattern(regexp = Codes.ROLE_CODE) String roleA,
+            @NotNull @Pattern(regexp = Codes.ROLE_CODE) String roleB,
+            @NotNull @Size(min = 3, max = 500) String reason) {
+    }
+
+    record RoleConflictViolationDto(UUID conflictId, String roleA, String roleB, String subjectId,
+                                    String subjectUsername, List<UUID> assignmentIds) {
+        static RoleConflictViolationDto of(RoleConflictViolation v) {
+            return new RoleConflictViolationDto(v.conflict().id(), v.conflict().roleA(), v.conflict().roleB(),
+                    v.subjectId(), v.subjectUsername(), v.assignmentIds());
+        }
+    }
+
+    record SubjectDeactivationDto(String subjectId, Instant deactivatedAt, int revokedCount,
+                                  List<RoleAssignmentDto> revoked) {
+        static SubjectDeactivationDto of(SubjectDeactivation d) {
+            return new SubjectDeactivationDto(d.subjectId(), d.deactivatedAt(), d.revoked().size(),
+                    d.revoked().stream().map(RoleAssignmentDto::of).toList());
+        }
     }
 
     record GrantDto(String roleCode, List<String> permissions, ScopesDto scopes, Instant validTo,

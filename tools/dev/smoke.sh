@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # End-to-end smoke test against the running local stack, with real Keycloak tokens:
 # grants come from iam-service, not the token (ADR-022) -> maker submits a change -> maker cannot approve ->
-# checker approves (CC-114) -> item readable -> maker delegates their role to the checker and revokes it (CC-004).
+# checker approves (CC-114) -> item readable -> maker delegates their role to the checker and revokes it (CC-004)
+# -> the directory feed deactivates a throw-away leaver (SEC-007).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 set -a; source infra/local/.env; set +a
@@ -62,11 +63,12 @@ versions=$(curl -sf -H "Authorization: Bearer $CHECKER" "$API/v1/reference-lists
 echo "7. Grants carry approval limits (CC-003); the maker delegates their role to the checker for an hour (CC-004)"
 ADMIN_TOKEN=$(token dev.iam-admin "$DEV_IAM_ADMIN_PASSWORD")
 sub() { printf '%s' "$1" | "$PY" -c "import base64,json,sys; p=sys.stdin.read().split('.')[1]; print(json.loads(base64.urlsafe_b64decode(p+'='*(-len(p)%4)))['sub'])"; }
-MAKER_SUB=$(sub "$MAKER"); CHECKER_SUB=$(sub "$CHECKER")
+CHECKER_SUB=$(sub "$CHECKER")
 has_limits=$(curl -sf -H "Authorization: Bearer $MAKER" "$IAM/v1/me/authorisation" | json_field "['grants'][0].__contains__('approvalLimits')")
 [[ "$has_limits" == True ]] || { echo "FAIL: grants have no approvalLimits field"; exit 1; }
-source_id=$(curl -sf -H "Authorization: Bearer $ADMIN_TOKEN" \
-  "$IAM/v1/role-assignments?subjectId=$MAKER_SUB&roleCode=REFDATA_MAKER&status=ACTIVE" | json_field "['items'][0]['id']")
+# The maker finds their own assignment id without any IAM permission (GET /v1/me/assignments).
+source_id=$(curl -sf -H "Authorization: Bearer $MAKER" "$IAM/v1/me/assignments" | "$PY" -c "import json,sys; \
+print([a['id'] for a in json.load(sys.stdin)['items'] if a['roleCode']=='REFDATA_MAKER' and a['source']=='DIRECT'][0])")
 until=$("$PY" -c "import datetime as d; print((d.datetime.now(d.timezone.utc)+d.timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%SZ'))")
 delegation_id=$(curl -sf -H "Authorization: Bearer $MAKER" -H 'Content-Type: application/json' -H 'X-Channel: BACKOFFICE' \
   "$IAM/v1/delegations" \
@@ -80,5 +82,26 @@ curl -sf -o /dev/null -H "Authorization: Bearer $MAKER" -H 'Content-Type: applic
   "$IAM/v1/delegations/$delegation_id/revocations" -d '{"reason":"smoke test done"}'
 roles=$(curl -sf -H "Authorization: Bearer $CHECKER" "$IAM/v1/me/authorisation" | "$PY" -c "import json,sys; print(sorted(g['roleCode'] for g in json.load(sys.stdin)['grants']))")
 [[ "$roles" != *REFDATA_MAKER* ]] || { echo "FAIL: delegate still holds the role: $roles"; exit 1; }
+
+echo "9. The directory feed (client credentials) deactivates a throw-away leaver; a repeat call revokes nothing (SEC-007)"
+FEED=$(curl -sf "$TOKEN_URL" -d grant_type=client_credentials -d client_id=itms-directory-feed \
+  --data-urlencode "client_secret=$DEV_DIRECTORY_FEED_SECRET" \
+  | "$PY" -c "import json,sys; print(json.load(sys.stdin)['access_token'])")
+LEAVER="smoke-leaver-$(date +%s)"
+curl -sf -o /dev/null -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' -H 'X-Channel: BACKOFFICE' \
+  "$IAM/v1/role-assignments" \
+  -d "{\"subjectId\":\"$LEAVER\",\"roleCode\":\"REFDATA_MAKER\",\"scopes\":{\"regions\":[\"*\"],\"centres\":[\"*\"],\"modules\":[\"*\"]},\"reason\":\"smoke test leaver\"}"
+deactivate() {
+  curl -sf -H "Authorization: Bearer $FEED" -H 'Content-Type: application/json' -H 'X-Channel: BACKOFFICE' \
+    "$IAM/v1/subjects/$LEAVER/deactivations" -d '{"reason":"smoke test: left the Authority"}' | json_field "['revokedCount']"
+}
+count=$(deactivate)
+[[ "$count" == 1 ]] || { echo "FAIL: expected 1 revocation, got $count"; exit 1; }
+count=$(deactivate)
+[[ "$count" == 0 ]] || { echo "FAIL: repeat call revoked $count"; exit 1; }
+active=$(curl -sf -H "Authorization: Bearer $FEED" "$IAM/v1/role-assignments?subjectId=$LEAVER&status=ACTIVE" | json_field "['items'].__len__()")
+[[ "$active" == 0 ]] || { echo "FAIL: leaver still has $active active assignments"; exit 1; }
+status=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $FEED" "$IAM/v1/roles")
+[[ "$status" == 403 ]] || { echo "FAIL: the feed should not read roles, got $status"; exit 1; }
 
 echo "SMOKE OK"

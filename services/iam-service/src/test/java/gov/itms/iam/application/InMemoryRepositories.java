@@ -4,6 +4,7 @@ import gov.itms.iam.domain.ApprovalLimit;
 import gov.itms.iam.domain.Permission;
 import gov.itms.iam.domain.Role;
 import gov.itms.iam.domain.RoleAssignment;
+import gov.itms.iam.domain.RoleConflict;
 import gov.itms.platform.audit.AuditRecorder;
 import gov.itms.platform.security.CurrentActor;
 import java.time.Instant;
@@ -110,6 +111,13 @@ final class InMemoryRepositories {
             rows.put(a.id(), a);
         }
 
+        final List<String> locked = new ArrayList<>();
+
+        @Override
+        public void lockSubjects(Collection<String> subjectIds) {
+            locked.addAll(subjectIds.stream().sorted().toList());
+        }
+
         @Override
         public List<RoleAssignment> search(String subjectId, String roleCode, RoleAssignment.Status status) {
             return rows.values().stream()
@@ -145,6 +153,38 @@ final class InMemoryRepositories {
         public void replace(String roleCode, List<ApprovalLimit> limits, String actorId, Instant at) {
             rows.put(roleCode, List.copyOf(limits));
             history.add(roleCode + " by " + actorId + ": " + limits);
+        }
+    }
+
+    static final class RoleConflicts implements RoleConflictRepository {
+        final Map<UUID, RoleConflict> rows = new LinkedHashMap<>();
+
+        @Override
+        public void insert(RoleConflict c) {
+            boolean activeTwin = rows.values().stream().anyMatch(x -> x.status() == RoleConflict.Status.ACTIVE
+                    && x.roleA().equals(c.roleA()) && x.roleB().equals(c.roleB()));
+            if (activeTwin) {
+                throw new IllegalStateException("uq_role_conflict_active");
+            }
+            rows.put(c.id(), c);
+        }
+
+        @Override
+        public Optional<RoleConflict> findForUpdate(UUID id) {
+            return Optional.ofNullable(rows.get(id));
+        }
+
+        @Override
+        public void saveRetirement(RoleConflict c) {
+            rows.put(c.id(), c);
+        }
+
+        @Override
+        public List<RoleConflict> search(RoleConflict.Status status) {
+            return rows.values().stream()
+                    .filter(c -> status == null || c.status() == status)
+                    .sorted(Comparator.comparing(RoleConflict::createdAt).reversed())
+                    .toList();
         }
     }
 

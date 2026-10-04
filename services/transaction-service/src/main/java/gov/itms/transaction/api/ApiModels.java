@@ -2,6 +2,7 @@ package gov.itms.transaction.api;
 
 import gov.itms.transaction.application.ServiceDefinitionRepository.ServiceVersion;
 import gov.itms.transaction.application.TransactionService.NewTransaction;
+import gov.itms.transaction.application.TransactionService.TransactionPage;
 import gov.itms.transaction.domain.Actor;
 import gov.itms.transaction.domain.Availability;
 import gov.itms.transaction.domain.AvailabilityRule;
@@ -199,6 +200,12 @@ final class ApiModels {
                     SubjectDto.of(t.subject()), t.applicantFileNumber(), t.homeRegion(), t.region(), t.channel(),
                     t.status(), t.paymentRequired(), t.createdAt(), ActorDto.of(t.createdBy()), t.submittedAt(),
                     t.lastChange().changedAt(), t.version());
+        }
+    }
+
+    record TransactionPageDto(List<TransactionDto> items, String nextCursor) {
+        static TransactionPageDto of(TransactionPage page) {
+            return new TransactionPageDto(page.items().stream().map(TransactionDto::of).toList(), page.nextCursor());
         }
     }
 

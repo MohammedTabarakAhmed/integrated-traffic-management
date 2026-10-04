@@ -4,7 +4,8 @@
 # checker approves (CC-114) -> item readable -> maker delegates their role to the checker and revokes it (CC-004)
 # -> the directory feed deactivates a throw-away leaver (SEC-007) -> a manager reviews and revokes access (SEC-007)
 # -> a service is defined and disabled per region and channel through catalogue maker-checker (CC-020, CC-026)
-# -> a transaction of that service is opened, refused as a duplicate and submitted (CC-021..CC-023, CC-027).
+# -> a transaction of that service is opened, refused as a duplicate and submitted (CC-021..CC-023, CC-027)
+# -> it is found as the newest of its applicant's transactions (CC-025).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 set -a; source infra/local/.env; set +a
@@ -191,5 +192,12 @@ reasons=$(curl -sf -H "Authorization: Bearer $CHECKER" "$TXN/v1/transactions/$re
 [[ "$state" == IN_REVIEW && "$reasons" == CREATED,SUBMITTED,ZERO_FEE_PAYMENT_SKIPPED ]] \
   || { echo "FAIL: status $state, history $reasons"; exit 1; }
 echo "   $ref: $state ($reasons)"
+
+echo "13. Tracking (CC-025): the newest of the applicant's transactions is the one just submitted"
+# TF-SMOKE collects one transaction per run; limit=1 keeps the check to this run's (the newest).
+newest=$(curl -sf -H "Authorization: Bearer $CHECKER" "$TXN/v1/transactions?applicantFileNumber=TF-SMOKE&limit=1" \
+  | "$PY" -c "import json,sys; i=json.load(sys.stdin)['items'][0]; print(i['reference'], i['status'])")
+[[ "$newest" == "$ref IN_REVIEW" ]] || { echo "FAIL: newest transaction of TF-SMOKE is $newest"; exit 1; }
+echo "   TF-SMOKE: $newest"
 
 echo "SMOKE OK"

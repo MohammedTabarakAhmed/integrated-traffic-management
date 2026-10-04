@@ -15,7 +15,8 @@ info:
     Every status change is kept in an append-only status history with user, channel, time, reason and previous status
     (CC-023). This version lets staff create, submit and cancel a transaction; payment, review, return-for-information,
     decision, fulfilment and expiry transitions are commands of the services built later (payments, workflow,
-    scheduler). The channel is the `X-Channel` header (set by the gateway or BFF); a transaction cannot be created or
+    scheduler). A transaction is tracked by its reference or through the applicant's list, whatever channel it was
+    opened through (CC-025; staff-assisted until customers can sign in, Q-050). The channel is the `X-Channel` header (set by the gateway or BFF); a transaction cannot be created or
     changed without a known channel.
 
     Availability of a service for (region, channel, date): the service must be offered in that region and on that
@@ -261,6 +262,41 @@ paths:
         '409': { $ref: '#/components/responses/Problem' }
 
   /v1/transactions:
+    get:
+      tags: [Transactions]
+      operationId: listApplicantTransactions
+      summary: An applicant's transactions, newest first (CC-025, staff-assisted; the view is audited, CC-120)
+      description: |
+        Every transaction where `applicantFileNumber` is the applicant, whatever channel it was opened through
+        (CC-025). Cursor pagination (API_SPECIFICATION §5): pass `nextCursor` back as `cursor` until it is null.
+        Transactions outside the caller's region and module scopes are left out, so a page may hold fewer than
+        `limit` items while `nextCursor` is still set. Until customers can sign in, tracking is done by staff on the
+        customer's behalf (Q-050).
+      x-itms-permission: transaction.read
+      parameters:
+        - name: applicantFileNumber
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/BusinessNumber' }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/TransactionStatus' }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - name: cursor
+          in: query
+          schema: { type: string, maxLength: 100 }
+      responses:
+        '200':
+          description: One page of transactions
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransactionPage' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
     post:
       tags: [Transactions]
       operationId: createTransaction
@@ -724,6 +760,15 @@ components:
           type: integer
           format: int64
           description: Number of status changes so far, the creation included
+    TransactionPage:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Transaction' } }
+        nextCursor:
+          description: Opaque; pass it back as `cursor` for the next page. Null on the last page.
+          oneOf: [ { type: string }, { type: 'null' } ]
     StatusChange:
       type: object
       additionalProperties: false

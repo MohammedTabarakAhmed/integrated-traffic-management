@@ -212,6 +212,55 @@ class TransactionServiceTest {
     }
 
     @Test
+    @Tag("CC-025")
+    @Tag("CC-120")
+    @DisplayName("CC-025/CC-120: an applicant's transactions, newest first, page by page, in scope only, view audited")
+    void tracking() {
+        List<String> refs = new java.util.ArrayList<>();
+        for (int i = 1; i <= 5; i++) {
+            clock.now = NOW.plusSeconds(i);
+            refs.add(service.create(new NewTransaction("CERT", CAR, "TF7", "R1", i == 3 ? "R2" : null), counter())
+                    .reference().toString());
+        }
+        service.create(new NewTransaction("CERT", CAR, "TF8", "R1", null), counter());
+        List<String> newestFirst = refs.reversed();
+
+        TransactionService.TransactionPage first = service.byApplicant("TF7", null, null, 2, counter());
+        assertThat(first.items()).extracting(t -> t.reference().toString()).containsExactlyElementsOf(
+                newestFirst.subList(0, 2));
+        TransactionService.TransactionPage second = service.byApplicant("TF7", null, first.nextCursor(), 2, counter());
+        assertThat(second.items()).extracting(t -> t.reference().toString())
+                .containsExactlyElementsOf(newestFirst.subList(2, 4));
+        TransactionService.TransactionPage last = service.byApplicant("TF7", null, second.nextCursor(), 2, counter());
+        assertThat(last.items()).extracting(t -> t.reference().toString()).containsExactly(newestFirst.get(4));
+        assertThat(last.nextCursor()).isNull();
+        assertThat(service.byApplicant("TF7", null, null, null, counter()).items()).hasSize(5);
+
+        // Out of scope (R2) is left out, but paging goes on past it.
+        Caller r1Only = new Caller(CLERK, Channel.BACKOFFICE, (p, region, module) -> "R1".equals(region));
+        TransactionService.TransactionPage scoped = service.byApplicant("TF7", null, first.nextCursor(), 2, r1Only);
+        assertThat(scoped.items()).extracting(t -> t.reference().toString()).containsExactly(newestFirst.get(3));
+        assertThat(scoped.nextCursor()).isNotNull();
+
+        // Status filter; tracking works whatever channel the transaction was opened through.
+        service.submit(refs.get(0), caller(Channel.PORTAL));
+        assertThat(service.byApplicant("TF7", TransactionStatus.IN_REVIEW, null, 10, caller(null)).items())
+                .extracting(t -> t.reference().toString()).containsExactly(refs.get(0));
+        assertThat(audit.entries.getLast().action()).isEqualTo("TRANSACTION_LIST_VIEWED");
+        assertThat(audit.entries.getLast().entityId()).isEqualTo("TF7");
+        assertThat(audit.entries.getLast().newValue()).isEqualTo(java.util.Map.of("references", List.of(refs.get(0))));
+
+        assertThatThrownBy(() -> service.byApplicant("TF7", null, null, 0, counter())).satisfies(code("LIMIT_INVALID"));
+        assertThatThrownBy(() -> service.byApplicant("TF7", null, null, 201, counter()))
+                .satisfies(code("LIMIT_INVALID"));
+        assertThatThrownBy(() -> service.byApplicant("tf7", null, null, 10, counter()))
+                .satisfies(code("BUSINESS_NUMBER_INVALID"));
+        assertThatThrownBy(() -> service.byApplicant("TF7", null, "junk", 10, counter()))
+                .satisfies(code("CURSOR_INVALID"));
+        assertThat(service.byApplicant("TF9", null, null, 10, counter()).items()).isEmpty();
+    }
+
+    @Test
     @Tag("CC-001")
     @DisplayName("CC-001: each permission must reach the region and module; otherwise the transaction is not found")
     void scopes() {

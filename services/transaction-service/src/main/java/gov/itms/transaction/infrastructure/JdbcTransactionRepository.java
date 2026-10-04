@@ -8,6 +8,7 @@ import gov.itms.transaction.domain.StatusChange;
 import gov.itms.transaction.domain.StatusReason;
 import gov.itms.transaction.domain.Subject;
 import gov.itms.transaction.domain.Transaction;
+import gov.itms.transaction.domain.TransactionCursor;
 import gov.itms.transaction.domain.TransactionReference;
 import gov.itms.transaction.domain.TransactionStatus;
 import java.sql.ResultSet;
@@ -161,6 +162,24 @@ class JdbcTransactionRepository implements TransactionRepository {
             throw new DomainException(DomainException.Kind.CONFLICT, "TRANSACTION_CHANGED",
                     "the transaction was changed by someone else; reload it and try again", List.of("CC-022"));
         }
+    }
+
+    @Override
+    public List<Transaction> findByApplicant(String applicantFileNumber, TransactionStatus status,
+                                             TransactionCursor after, int limit) {
+        // Row comparison on (created_at, id) follows ix_transaction_applicant (V3), newest first.
+        String sql = SELECT + " where t.applicant_file_number = :applicant"
+                + (status == null ? "" : " and t.status = :status")
+                + (after == null ? "" : " and (t.created_at, t.id) < (:afterAt, :afterId)")
+                + " order by t.created_at desc, t.id desc limit :limit";
+        var query = jdbc.sql(sql).param("applicant", applicantFileNumber).param("limit", limit);
+        if (status != null) {
+            query = query.param("status", status.name());
+        }
+        if (after != null) {
+            query = query.param("afterAt", Timestamp.from(after.createdAt())).param("afterId", after.id());
+        }
+        return query.query((rs, n) -> map(rs)).list();
     }
 
     @Override

@@ -9,7 +9,9 @@ import gov.itms.transaction.domain.ServiceDefinition;
 import gov.itms.transaction.domain.StatusChange;
 import gov.itms.transaction.domain.Subject;
 import gov.itms.transaction.domain.Transaction;
+import gov.itms.transaction.domain.TransactionCursor;
 import gov.itms.transaction.domain.TransactionReference;
+import gov.itms.transaction.domain.TransactionStatus;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -210,6 +212,19 @@ final class InMemoryRepositories {
         @Override
         public List<StatusChange> history(UUID transactionId) {
             return List.copyOf(history.getOrDefault(transactionId, List.of()));
+        }
+
+        @Override
+        public List<Transaction> findByApplicant(String applicantFileNumber, TransactionStatus status,
+                                                 TransactionCursor after, int limit) {
+            Comparator<Transaction> newestFirst = Comparator.comparing(Transaction::createdAt)
+                    .thenComparing(Transaction::id).reversed();
+            return rows.values().stream()
+                    .filter(t -> t.applicantFileNumber().equals(applicantFileNumber))
+                    .filter(t -> status == null || t.status() == status)
+                    .filter(t -> after == null || t.createdAt().isBefore(after.createdAt())
+                            || (t.createdAt().equals(after.createdAt()) && t.id().compareTo(after.id()) < 0))
+                    .sorted(newestFirst).limit(limit).map(Transactions::copy).toList();
         }
 
         static Transaction copy(Transaction t) {

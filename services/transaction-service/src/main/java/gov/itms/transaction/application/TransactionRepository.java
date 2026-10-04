@@ -3,7 +3,9 @@ package gov.itms.transaction.application;
 import gov.itms.transaction.domain.StatusChange;
 import gov.itms.transaction.domain.Subject;
 import gov.itms.transaction.domain.Transaction;
+import gov.itms.transaction.domain.TransactionCursor;
 import gov.itms.transaction.domain.TransactionReference;
+import gov.itms.transaction.domain.TransactionStatus;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -33,6 +35,13 @@ public interface TransactionRepository {
 
     /** Saves the transaction's {@link Transaction#lastChange()}; the stored version must be one less. */
     void saveStatus(Transaction transaction);
+
+    /**
+     * Up to {@code limit} transactions of the applicant, newest first by (created at, id), after {@code after}
+     * ({@code null} = from the newest), optionally only in {@code status} (CC-025).
+     */
+    List<Transaction> findByApplicant(String applicantFileNumber, TransactionStatus status, TransactionCursor after,
+                                      int limit);
 
     /** Every status change, oldest first (CC-023). */
     List<StatusChange> history(UUID transactionId);

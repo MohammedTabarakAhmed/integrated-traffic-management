@@ -196,6 +196,23 @@ class TransactionDomainTest {
     }
 
     @Test
+    @Tag("CC-025")
+    @DisplayName("CC-025: a page cursor round-trips with microsecond precision; anything else is refused")
+    void cursor() {
+        TransactionCursor cursor = new TransactionCursor(Instant.parse("2026-10-05T08:00:00.123456Z"),
+                UUID.fromString("0192f0a0-0000-7000-8000-000000000001"));
+        assertThat(TransactionCursor.decode(cursor.encode())).isEqualTo(cursor);
+        assertThat(cursor.encode()).matches("^[A-Za-z0-9_-]+$");
+        String forged = java.util.Base64.getUrlEncoder().withoutPadding()
+                .encodeToString("0001:0192f0a0-0000-7000-8000-000000000001".getBytes());
+        for (String bad : new String[] {"", "not base64!", "bm9jb2xvbg", forged,
+                java.util.Base64.getUrlEncoder().encodeToString("12:not-a-uuid".getBytes())}) {
+            assertThatThrownBy(() -> TransactionCursor.decode(bad)).as(bad).satisfies(code("CURSOR_INVALID"));
+        }
+        assertThatThrownBy(() -> TransactionCursor.decode(null)).satisfies(code("CURSOR_INVALID"));
+    }
+
+    @Test
     @Tag("CC-027")
     @DisplayName("CC-027: subjects and applicants use one upper-case spelling")
     void subjects() {

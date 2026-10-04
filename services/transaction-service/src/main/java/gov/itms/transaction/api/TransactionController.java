@@ -9,11 +9,13 @@ import gov.itms.transaction.api.ApiModels.Collection;
 import gov.itms.transaction.api.ApiModels.CreateTransactionRequest;
 import gov.itms.transaction.api.ApiModels.StatusChangeDto;
 import gov.itms.transaction.api.ApiModels.TransactionDto;
+import gov.itms.transaction.api.ApiModels.TransactionPageDto;
 import gov.itms.transaction.application.Caller;
 import gov.itms.transaction.application.TransactionService;
 import gov.itms.transaction.domain.Actor;
 import gov.itms.transaction.domain.Channel;
 import gov.itms.transaction.domain.Transaction;
+import gov.itms.transaction.domain.TransactionStatus;
 import jakarta.validation.Valid;
 import java.net.URI;
 import java.util.Arrays;
@@ -24,6 +26,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -48,6 +51,15 @@ class TransactionController {
         Transaction created = service.create(body.toDomain(), caller());
         return ResponseEntity.created(URI.create("/v1/transactions/" + created.reference()))
                 .body(TransactionDto.of(created));
+    }
+
+    @GetMapping
+    @PreAuthorize("hasAuthority('transaction.read')")
+    TransactionPageDto byApplicant(@RequestParam String applicantFileNumber,
+                                   @RequestParam(required = false) TransactionStatus status,
+                                   @RequestParam(required = false) Integer limit,
+                                   @RequestParam(required = false) String cursor) {
+        return TransactionPageDto.of(service.byApplicant(applicantFileNumber, status, cursor, limit, caller()));
     }
 
     @GetMapping("/{reference}")

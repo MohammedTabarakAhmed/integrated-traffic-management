@@ -117,7 +117,16 @@ class TransactionApiIT {
         }
         MvcResult result = mvc.perform(builder).andReturn();
 
-        SimpleRequest.Builder req = new SimpleRequest.Builder(method, path).withHeader("Authorization", "Bearer t");
+        int qs = path.indexOf('?');
+        String requestPath = qs > 0 ? path.substring(0, qs) : path;
+        SimpleRequest.Builder req = new SimpleRequest.Builder(method, requestPath)
+                .withHeader("Authorization", "Bearer t");
+        if (qs > 0) {
+            for (String pair : path.substring(qs + 1).split("&")) {
+                String[] kv = pair.split("=", 2);
+                req.withQueryParam(kv[0], kv[1]);
+            }
+        }
         if (payload != null) {
             req.withContentType("application/json").withBody(payload);
         }
@@ -128,8 +137,8 @@ class TransactionApiIT {
                 .build();
         ValidationReport report = result.getResponse().getStatus() < 400
                 ? contract.validate(req.build(), response)
-                : contract.validateResponse(path, method, response);
-        assertThat(report.getMessages()).as("OpenAPI contract for %s %s -> %d", method, path,
+                : contract.validateResponse(requestPath, method, response);
+        assertThat(report.getMessages()).as("OpenAPI contract for %s %s -> %d", method, requestPath,
                 result.getResponse().getStatus()).isEmpty();
         return result;
     }
@@ -351,6 +360,52 @@ class TransactionApiIT {
         assertThat(body(getAs("/v1/transactions/" + ref, officer())).get("status").asString()).isEqualTo("DRAFT");
         assertThat(body(postVia("/v1/transactions/" + ref + "/submissions", null, officer(), "PORTAL"))
                 .get("status").asString()).isEqualTo("IN_REVIEW");
+    }
+
+    @Test
+    @Tag("CC-025")
+    @Tag("CC-120")
+    @DisplayName("CC-025/CC-120: an applicant's transactions are tracked page by page, whatever the channel; views audited")
+    void tracking() throws Exception {
+        define("ITX_TRACK", null, true, true);
+        List<String> refs = new java.util.ArrayList<>();
+        for (String channel : List.of("BACKOFFICE", "PORTAL", "BACKOFFICE")) {
+            Map<String, Object> request = newTransaction("ITX_TRACK", "VEHICLE", "VIN-TRK", "R1", null);
+            request.put("applicantFileNumber", "TF-TRACK");
+            MvcResult r = postVia("/v1/transactions", request, officer(), channel);
+            assertThat(r.getResponse().getStatus()).as(r.getResponse().getContentAsString()).isEqualTo(201);
+            refs.add(body(r).get("reference").asString());
+        }
+
+        JsonNode first = body(getAs("/v1/transactions?applicantFileNumber=TF-TRACK&limit=2", reader()));
+        assertThat(first.get("items")).extracting(n -> n.get("reference").asString())
+                .containsExactly(refs.get(2), refs.get(1));
+        assertThat(first.get("items").get(1).get("channel").asString()).isEqualTo("PORTAL");
+        String cursor = first.get("nextCursor").asString();
+        JsonNode second = body(getAs("/v1/transactions?applicantFileNumber=TF-TRACK&limit=2&cursor=" + cursor,
+                reader()));
+        assertThat(second.get("items")).extracting(n -> n.get("reference").asString()).containsExactly(refs.get(0));
+        assertThat(second.get("nextCursor").isNull()).isTrue();
+
+        postAs("/v1/transactions/" + refs.get(1) + "/submissions", null, officer());
+        JsonNode inReview = body(getAs("/v1/transactions?applicantFileNumber=TF-TRACK&status=IN_REVIEW", reader()));
+        assertThat(inReview.get("items")).extracting(n -> n.get("reference").asString()).containsExactly(refs.get(1));
+        assertThat(body(getAs("/v1/transactions?applicantFileNumber=TF-NOBODY", reader())).get("items")).isEmpty();
+
+        String audited = db.sql("select new_value::text from audit_outbox where action = 'TRANSACTION_LIST_VIEWED'"
+                + " and entity_id = 'TF-TRACK' order by occurred_at limit 1").query(String.class).single();
+        assertThat(audited).contains(refs.get(2), refs.get(1)).doesNotContain(refs.get(0));
+
+        MvcResult badCursor = getAs("/v1/transactions?applicantFileNumber=TF-TRACK&cursor=junk", reader());
+        assertThat(badCursor.getResponse().getStatus()).isEqualTo(422);
+        assertThat(body(badCursor).get("code").asString()).isEqualTo("CURSOR_INVALID");
+        MvcResult badLimit = getAs("/v1/transactions?applicantFileNumber=TF-TRACK&limit=500", reader());
+        assertThat(body(badLimit).get("code").asString()).isEqualTo("LIMIT_INVALID");
+        assertThat(getAs("/v1/transactions?applicantFileNumber=tf-track", reader()).getResponse().getStatus())
+                .isEqualTo(422);
+        assertThat(getAs("/v1/transactions", reader()).getResponse().getStatus()).isEqualTo(400);
+        assertThat(getAs("/v1/transactions?applicantFileNumber=TF-TRACK", citizen()).getResponse().getStatus())
+                .isEqualTo(403);
     }
 
     @Test

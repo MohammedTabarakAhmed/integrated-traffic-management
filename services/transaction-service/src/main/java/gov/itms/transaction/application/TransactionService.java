@@ -8,7 +8,9 @@ import gov.itms.transaction.domain.ServiceDefinition;
 import gov.itms.transaction.domain.StatusChange;
 import gov.itms.transaction.domain.Subject;
 import gov.itms.transaction.domain.Transaction;
+import gov.itms.transaction.domain.TransactionCursor;
 import gov.itms.transaction.domain.TransactionReference;
+import gov.itms.transaction.domain.TransactionStatus;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -38,6 +40,10 @@ public class TransactionService {
     public static final String CANCEL = "transaction.cancel";
     public static final String READ = "transaction.read";
     static final String ENTITY = "Transaction";
+    /** Audit entity of a list view: the applicant whose transactions were shown. */
+    static final String ENTITY_LIST = "ApplicantTransactions";
+    static final int DEFAULT_PAGE = 50;
+    static final int MAX_PAGE = 200;
 
     private final ServiceDefinitionRepository services;
     private final AvailabilityRuleRepository rules;
@@ -134,6 +140,35 @@ public class TransactionService {
         Transaction transaction = visible(transactions.find(TransactionReference.parse(reference)), READ, caller);
         audit.record("TRANSACTION_VIEWED", ENTITY, reference, null, null, null);
         return transaction;
+    }
+
+    /** One page of an applicant's transactions; {@code nextCursor} is {@code null} on the last page. */
+    public record TransactionPage(List<Transaction> items, String nextCursor) {
+    }
+
+    /**
+     * An applicant's transactions, newest first, whatever channel they were opened through (CC-025; staff-assisted,
+     * Q-050). Transactions outside the caller's scopes are left out of the page; the transactions shown are audited
+     * as one view (CC-120).
+     */
+    @Transactional
+    public TransactionPage byApplicant(String applicantFileNumber, TransactionStatus status, String cursor,
+                                       Integer limit, Caller caller) {
+        String applicant = Subject.businessNumber("applicantFileNumber", applicantFileNumber);
+        int size = limit == null ? DEFAULT_PAGE : limit;
+        if (size < 1 || size > MAX_PAGE) {
+            throw new DomainException(DomainException.Kind.VALIDATION, "LIMIT_INVALID",
+                    "limit must be between 1 and " + MAX_PAGE, List.of("CC-025"), MAX_PAGE);
+        }
+        TransactionCursor after = cursor == null ? null : TransactionCursor.decode(cursor);
+        List<Transaction> rows = transactions.findByApplicant(applicant, status, after, size + 1);
+        List<Transaction> scanned = rows.subList(0, Math.min(size, rows.size()));
+        String next = rows.size() > size ? TransactionCursor.after(scanned.get(size - 1)).encode() : null;
+        List<Transaction> visible = scanned.stream()
+                .filter(t -> caller.scopes().allows(READ, t.region(), t.module())).toList();
+        audit.record("TRANSACTION_LIST_VIEWED", ENTITY_LIST, applicant, null,
+                Map.of("references", visible.stream().map(t -> t.reference().toString()).toList()), null);
+        return new TransactionPage(visible, next);
     }
 
     /** Every status change, oldest first (CC-023). */

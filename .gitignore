@@ -10,7 +10,8 @@ __pycache__/
 *.pyc
 .pytest_cache/
 
-# IDE
+# IDE / personal tool settings
+.local/settings.local.json
 .idea/
 .vscode/
 *.iml
@@ -28,3 +29,6 @@ secrets/
 # Original BRD binary: authoritative copy lives with the Authority; markdown extracts are tracked
 main_doc/
 ~$*
+
+# Generated local dev secrets
+infra/local/.env

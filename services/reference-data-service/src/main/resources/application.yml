@@ -1,0 +1,43 @@
+# reference-data-service configuration. All environment-specific values come from environment variables
+# (NFR-042, SEC-004); nothing secret is stored here.
+spring:
+  application:
+    name: reference-data-service
+  datasource:
+    url: ${REFDATA_DB_URL}
+    username: ${REFDATA_DB_USER}
+    password: ${REFDATA_DB_PASSWORD}
+  flyway:
+    locations: classpath:db/platform,classpath:db/migration
+  messages:
+    basename: messages
+    fallback-to-system-locale: false
+  threads:
+    virtual:
+      enabled: true
+
+itms:
+  security:
+    issuer: ${ITMS_OIDC_ISSUER}
+    jwk-set-uri: ${ITMS_OIDC_JWKS_URI}
+    audience: itms-api
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+
+server:
+  error:
+    include-stacktrace: never
+    include-message: never
+
+logging:
+  pattern:
+    level: "%5p [${spring.application.name},%X{correlationId:-}]"

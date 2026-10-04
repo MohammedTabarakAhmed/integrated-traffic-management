@@ -1,0 +1,116 @@
+{
+  "realm": "itms",
+  "displayName": "ITMS (LOCAL DEVELOPMENT ONLY)",
+  "enabled": true,
+  "sslRequired": "external",
+  "bruteForceProtected": true,
+  "failureFactor": 5,
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 900,
+  "roles": {
+    "realm": [
+      {
+        "name": "REFDATA_MAKER",
+        "description": "Prepares reference data changes (CC-114 maker)",
+        "composite": true,
+        "composites": {
+          "client": { "itms-api": ["refdata.read", "refdata.change.submit", "refdata.change.read"] }
+        }
+      },
+      {
+        "name": "REFDATA_CHECKER",
+        "description": "Approves or rejects reference data changes (CC-114 checker)",
+        "composite": true,
+        "composites": {
+          "client": { "itms-api": ["refdata.read", "refdata.change.read", "refdata.change.approve", "refdata.history.read"] }
+        }
+      }
+    ],
+    "client": {
+      "itms-api": [
+        { "name": "refdata.read", "description": "Read reference data" },
+        { "name": "refdata.history.read", "description": "Read reference item history (CC-121)" },
+        { "name": "refdata.change.submit", "description": "Submit reference data changes" },
+        { "name": "refdata.change.read", "description": "Read reference data changes" },
+        { "name": "refdata.change.approve", "description": "Approve or reject reference data changes" }
+      ]
+    }
+  },
+  "clients": [
+    {
+      "clientId": "itms-api",
+      "name": "ITMS APIs (resource server)",
+      "enabled": true,
+      "bearerOnly": true,
+      "publicClient": false
+    },
+    {
+      "clientId": "itms-dev-cli",
+      "name": "Local developer CLI (password grant is for LOCAL DEVELOPMENT ONLY; never enable in shared environments)",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "fullScopeAllowed": true,
+      "protocolMappers": [
+        {
+          "name": "itms-api audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "itms-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        },
+        {
+          "name": "permissions",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-client-role-mapper",
+          "config": {
+            "usermodel.clientRoleMapping.clientId": "itms-api",
+            "claim.name": "permissions",
+            "multivalued": "true",
+            "jsonType.label": "String",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "claim.name": "roles",
+            "multivalued": "true",
+            "jsonType.label": "String",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "dev.maker",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Dev",
+      "lastName": "Maker",
+      "email": "dev.maker@itms.invalid",
+      "realmRoles": ["REFDATA_MAKER"]
+    },
+    {
+      "username": "dev.checker",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Dev",
+      "lastName": "Checker",
+      "email": "dev.checker@itms.invalid",
+      "realmRoles": ["REFDATA_CHECKER"]
+    }
+  ]
+}

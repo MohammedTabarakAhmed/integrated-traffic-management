@@ -1,0 +1,415 @@
+openapi: 3.1.0
+info:
+  title: ITMS Reference Data Service
+  version: 1.0.0
+  description: |
+    One reference data manager for all code lists (CC-110): codes, names in both languages (CC-012), active flag,
+    effective dates, external codes per integration partner, optional regional variants (CC-112) and parent
+    hierarchies. Every change goes through maker-checker approval and is audited (CC-114, CC-002, CC-120).
+    Item history supports reconstructing any past state (DAT-002, CC-121).
+    Only GET/POST are used (INT-003); business actions are POSTs to sub-resources.
+servers:
+  - url: /
+security:
+  - bearerAuth: []
+tags:
+  - name: Reference lists
+  - name: Changes (maker-checker)
+
+paths:
+  /v1/reference-lists:
+    get:
+      tags: [Reference lists]
+      operationId: listReferenceLists
+      summary: List all code lists
+      x-itms-permission: refdata.read
+      responses:
+        '200':
+          description: Code lists
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReferenceListCollection' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+
+  /v1/reference-lists/{listCode}/items:
+    get:
+      tags: [Reference lists]
+      operationId: listReferenceItems
+      summary: Items of a list that are in force on a date
+      description: |
+        Returns items whose effective period contains `asOf` (default today). When `region` is given, a regional
+        variant replaces the national item with the same code (CC-112). Inactive items are excluded unless
+        `includeInactive=true`.
+      x-itms-permission: refdata.read
+      parameters:
+        - $ref: '#/components/parameters/ListCode'
+        - name: asOf
+          in: query
+          schema: { type: string, format: date }
+        - $ref: '#/components/parameters/Region'
+        - name: includeInactive
+          in: query
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: Items
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReferenceItemCollection' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/reference-lists/{listCode}/items/{itemCode}:
+    get:
+      tags: [Reference lists]
+      operationId: getReferenceItem
+      summary: One item (regional variant if it exists for the region, else national)
+      x-itms-permission: refdata.read
+      parameters:
+        - $ref: '#/components/parameters/ListCode'
+        - $ref: '#/components/parameters/ItemCode'
+        - $ref: '#/components/parameters/Region'
+      responses:
+        '200':
+          description: Item
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReferenceItem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/reference-lists/{listCode}/items/{itemCode}/history:
+    get:
+      tags: [Reference lists]
+      operationId: getReferenceItemHistory
+      summary: Full version history of an item (DAT-002, CC-121)
+      x-itms-permission: refdata.history.read
+      parameters:
+        - $ref: '#/components/parameters/ListCode'
+        - $ref: '#/components/parameters/ItemCode'
+        - name: region
+          in: query
+          description: Region of the variant; omit for the national item.
+          schema: { $ref: '#/components/schemas/Code' }
+      responses:
+        '200':
+          description: Versions, oldest first
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ItemVersionCollection' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/reference-data-changes:
+    post:
+      tags: [Changes (maker-checker)]
+      operationId: submitChange
+      summary: Submit a change for approval (maker)
+      x-itms-permission: refdata.change.submit
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SubmitChangeRequest' }
+      responses:
+        '201':
+          description: Change submitted, pending approval
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Change' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [Changes (maker-checker)]
+      operationId: listChanges
+      summary: List changes, optionally by status
+      x-itms-permission: refdata.change.read
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/ChangeStatus' }
+      responses:
+        '200':
+          description: Changes, newest first
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChangeCollection' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+
+  /v1/reference-data-changes/{changeId}:
+    get:
+      tags: [Changes (maker-checker)]
+      operationId: getChange
+      x-itms-permission: refdata.change.read
+      parameters:
+        - $ref: '#/components/parameters/ChangeId'
+      responses:
+        '200':
+          description: Change
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Change' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/reference-data-changes/{changeId}/approvals:
+    post:
+      tags: [Changes (maker-checker)]
+      operationId: approveChange
+      summary: Approve and apply a pending change (checker; must not be the maker, CC-002)
+      x-itms-permission: refdata.change.approve
+      parameters:
+        - $ref: '#/components/parameters/ChangeId'
+      responses:
+        '200':
+          description: Change approved and applied
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Change' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/reference-data-changes/{changeId}/rejections:
+    post:
+      tags: [Changes (maker-checker)]
+      operationId: rejectChange
+      summary: Reject a pending change (checker; must not be the maker)
+      x-itms-permission: refdata.change.approve
+      parameters:
+        - $ref: '#/components/parameters/ChangeId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RejectChangeRequest' }
+      responses:
+        '200':
+          description: Change rejected
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Change' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    ListCode:
+      name: listCode
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/Code' }
+    ItemCode:
+      name: itemCode
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/Code' }
+    Region:
+      name: region
+      in: query
+      schema: { $ref: '#/components/schemas/Code' }
+    ChangeId:
+      name: changeId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid bearer token
+    Problem:
+      description: Problem details (RFC 9457, API_SPECIFICATION §3)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+
+  schemas:
+    Code:
+      type: string
+      pattern: '^[A-Z0-9_]{1,40}$'
+    BilingualName:
+      type: object
+      additionalProperties: false
+      required: [nl, en]
+      properties:
+        nl: { type: string, minLength: 1, maxLength: 200, description: National language (RTL) }
+        en: { type: string, minLength: 1, maxLength: 200 }
+    ExternalCodes:
+      type: object
+      description: Partner code → this item's code in that partner's system (CC-110)
+      propertyNames: { pattern: '^[A-Z0-9_]{1,40}$' }
+      additionalProperties: { type: string, minLength: 1, maxLength: 64 }
+    ReferenceList:
+      type: object
+      additionalProperties: false
+      required: [code, name]
+      properties:
+        code: { $ref: '#/components/schemas/Code' }
+        name: { $ref: '#/components/schemas/BilingualName' }
+        parentListCode: { oneOf: [ { $ref: '#/components/schemas/Code' }, { type: 'null' } ] }
+    ReferenceListCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/ReferenceList' } }
+    ReferenceItem:
+      type: object
+      additionalProperties: false
+      required: [listCode, code, name, active, effectiveFrom, externalCodes, sortOrder, version]
+      properties:
+        listCode: { $ref: '#/components/schemas/Code' }
+        code: { $ref: '#/components/schemas/Code' }
+        regionCode: { oneOf: [ { $ref: '#/components/schemas/Code' }, { type: 'null' } ] }
+        name: { $ref: '#/components/schemas/BilingualName' }
+        active: { type: boolean }
+        effectiveFrom: { type: string, format: date }
+        effectiveTo: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
+        parentCode: { oneOf: [ { $ref: '#/components/schemas/Code' }, { type: 'null' } ] }
+        externalCodes: { $ref: '#/components/schemas/ExternalCodes' }
+        sortOrder: { type: integer }
+        version: { type: integer, format: int64 }
+    ReferenceItemCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/ReferenceItem' } }
+    ItemVersion:
+      type: object
+      additionalProperties: false
+      description: One historical version of an item and the period during which it was current (DAT-002).
+      required: [listCode, code, name, active, effectiveFrom, version, validFrom, changedBy]
+      properties:
+        validFrom: { type: string, format: date-time }
+        validTo: { oneOf: [ { type: string, format: date-time }, { type: 'null' } ] }
+        changedBy: { type: string }
+        changeId: { oneOf: [ { type: string, format: uuid }, { type: 'null' } ] }
+        listCode: { $ref: '#/components/schemas/Code' }
+        code: { $ref: '#/components/schemas/Code' }
+        regionCode: { oneOf: [ { $ref: '#/components/schemas/Code' }, { type: 'null' } ] }
+        name: { $ref: '#/components/schemas/BilingualName' }
+        active: { type: boolean }
+        effectiveFrom: { type: string, format: date }
+        effectiveTo: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
+        parentCode: { oneOf: [ { $ref: '#/components/schemas/Code' }, { type: 'null' } ] }
+        externalCodes: { $ref: '#/components/schemas/ExternalCodes' }
+        sortOrder: { type: integer }
+        version: { type: integer, format: int64 }
+    ItemVersionCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/ItemVersion' } }
+    ChangeType:
+      type: string
+      enum: [CREATE_LIST, CREATE_ITEM, UPDATE_ITEM]
+    ChangeStatus:
+      type: string
+      enum: [PENDING_APPROVAL, APPROVED, REJECTED]
+    SubmitChangeRequest:
+      type: object
+      additionalProperties: false
+      required: [changeType, listCode, name, reason]
+      description: |
+        CREATE_LIST: listCode, name, optional parentListCode.
+        CREATE_ITEM / UPDATE_ITEM: listCode, itemCode, name, effectiveFrom, optional regionCode, active (default true),
+        effectiveTo, parentCode (required when the list has a parent list), externalCodes, sortOrder.
+        UPDATE_ITEM also needs baseVersion (the item version the maker saw).
+      properties:
+        changeType: { $ref: '#/components/schemas/ChangeType' }
+        listCode: { $ref: '#/components/schemas/Code' }
+        itemCode: { $ref: '#/components/schemas/Code' }
+        regionCode: { $ref: '#/components/schemas/Code' }
+        name: { $ref: '#/components/schemas/BilingualName' }
+        parentListCode: { $ref: '#/components/schemas/Code' }
+        active: { type: boolean }
+        effectiveFrom: { type: string, format: date }
+        effectiveTo: { type: string, format: date }
+        parentCode: { $ref: '#/components/schemas/Code' }
+        externalCodes: { $ref: '#/components/schemas/ExternalCodes' }
+        sortOrder: { type: integer, minimum: 0, maximum: 100000 }
+        baseVersion: { type: integer, format: int64, minimum: 1 }
+        reason: { type: string, minLength: 3, maxLength: 500 }
+    RejectChangeRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 3, maxLength: 500 }
+    Actor:
+      type: object
+      additionalProperties: false
+      required: [id]
+      properties:
+        id: { type: string }
+        username: { oneOf: [ { type: string }, { type: 'null' } ] }
+    Change:
+      type: object
+      additionalProperties: false
+      required: [id, changeType, status, listCode, name, reason, maker, submittedAt]
+      properties:
+        id: { type: string, format: uuid }
+        changeType: { $ref: '#/components/schemas/ChangeType' }
+        status: { $ref: '#/components/schemas/ChangeStatus' }
+        listCode: { $ref: '#/components/schemas/Code' }
+        itemCode: { oneOf: [ { $ref: '#/components/schemas/Code' }, { type: 'null' } ] }
+        regionCode: { oneOf: [ { $ref: '#/components/schemas/Code' }, { type: 'null' } ] }
+        name: { $ref: '#/components/schemas/BilingualName' }
+        parentListCode: { oneOf: [ { $ref: '#/components/schemas/Code' }, { type: 'null' } ] }
+        active: { oneOf: [ { type: boolean }, { type: 'null' } ] }
+        effectiveFrom: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
+        effectiveTo: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
+        parentCode: { oneOf: [ { $ref: '#/components/schemas/Code' }, { type: 'null' } ] }
+        externalCodes: { oneOf: [ { $ref: '#/components/schemas/ExternalCodes' }, { type: 'null' } ] }
+        sortOrder: { oneOf: [ { type: integer }, { type: 'null' } ] }
+        baseVersion: { oneOf: [ { type: integer, format: int64 }, { type: 'null' } ] }
+        reason: { type: string }
+        maker: { $ref: '#/components/schemas/Actor' }
+        submittedAt: { type: string, format: date-time }
+        checker: { oneOf: [ { $ref: '#/components/schemas/Actor' }, { type: 'null' } ] }
+        decidedAt: { oneOf: [ { type: string, format: date-time }, { type: 'null' } ] }
+        decisionReason: { oneOf: [ { type: string }, { type: 'null' } ] }
+    ChangeCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Change' } }
+    Problem:
+      type: object
+      required: [status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        code: { type: string }
+        detail: { type: string }
+        instance: { type: string }
+        correlationId: { type: string }
+        requirementRefs: { type: array, items: { type: string } }
+        errors: { type: array, items: { type: object } }

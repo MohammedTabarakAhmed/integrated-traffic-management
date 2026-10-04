@@ -1,6 +1,7 @@
 package gov.itms.transaction.api;
 
 import gov.itms.transaction.application.ServiceDefinitionRepository.ServiceVersion;
+import gov.itms.transaction.application.TransactionService.NewTransaction;
 import gov.itms.transaction.domain.Actor;
 import gov.itms.transaction.domain.Availability;
 import gov.itms.transaction.domain.AvailabilityRule;
@@ -12,6 +13,11 @@ import gov.itms.transaction.domain.Codes;
 import gov.itms.transaction.domain.DomainException;
 import gov.itms.transaction.domain.ServiceDefinition;
 import gov.itms.transaction.domain.ServiceSpec;
+import gov.itms.transaction.domain.StatusChange;
+import gov.itms.transaction.domain.StatusReason;
+import gov.itms.transaction.domain.Subject;
+import gov.itms.transaction.domain.Transaction;
+import gov.itms.transaction.domain.TransactionStatus;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -154,6 +160,53 @@ final class ApiModels {
                     c.baseVersion(), RuleSpecDto.of(c.rule()), c.ruleId(), c.endDate(), c.reason(),
                     ActorDto.of(c.maker()), c.submittedAt(), ActorDto.of(c.checker()), c.decidedAt(),
                     c.decisionReason());
+        }
+    }
+
+    // ------------------------------------------------------------------ transactions (CC-021..CC-023, CC-027)
+
+    record SubjectDto(@NotNull Subject.Type type, @NotNull @Pattern(regexp = Subject.BUSINESS_NUMBER) String id) {
+        static SubjectDto of(Subject s) {
+            return new SubjectDto(s.type(), s.id());
+        }
+
+        Subject toDomain() {
+            return new Subject(type, id);
+        }
+    }
+
+    record CreateTransactionRequest(
+            @NotNull @Pattern(regexp = Codes.SERVICE_CODE) String serviceCode,
+            @NotNull @Valid SubjectDto subject,
+            @NotNull @Pattern(regexp = Subject.BUSINESS_NUMBER) String applicantFileNumber,
+            @NotNull @Pattern(regexp = Codes.CODE) String homeRegion,
+            @Pattern(regexp = Codes.CODE) String region) {
+
+        NewTransaction toDomain() {
+            return new NewTransaction(serviceCode, subject.toDomain(), applicantFileNumber, homeRegion, region);
+        }
+    }
+
+    record CancelTransactionRequest(@NotBlank @Size(min = 3, max = 500) String reason) {
+    }
+
+    record TransactionDto(String reference, String serviceCode, long serviceVersion, String module, SubjectDto subject,
+                          String applicantFileNumber, String homeRegion, String region, Channel channel,
+                          TransactionStatus status, boolean paymentRequired, Instant createdAt, ActorDto createdBy,
+                          Instant submittedAt, Instant statusChangedAt, long version) {
+        static TransactionDto of(Transaction t) {
+            return new TransactionDto(t.reference().toString(), t.serviceCode(), t.serviceVersion(), t.module(),
+                    SubjectDto.of(t.subject()), t.applicantFileNumber(), t.homeRegion(), t.region(), t.channel(),
+                    t.status(), t.paymentRequired(), t.createdAt(), ActorDto.of(t.createdBy()), t.submittedAt(),
+                    t.lastChange().changedAt(), t.version());
+        }
+    }
+
+    record StatusChangeDto(long sequence, TransactionStatus previousStatus, TransactionStatus status,
+                           StatusReason reason, String note, ActorDto actor, Channel channel, Instant changedAt) {
+        static StatusChangeDto of(StatusChange c) {
+            return new StatusChangeDto(c.sequence(), c.previousStatus(), c.status(), c.reason(), c.note(),
+                    ActorDto.of(c.actor()), c.channel(), c.changedAt());
         }
     }
 }

@@ -89,6 +89,8 @@ grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker REFDATA_CHECKER
 # Service catalogue maker-checker (CC-020, CC-026, CC-114; ADR-028).
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker CATALOGUE_MAKER
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker CATALOGUE_CHECKER
+# Counter staff for transactions (CC-021..CC-027; ADR-029).
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker TRANSACTION_OFFICER
 # dev.checker is also the development access reviewer ("manager", SEC-007, ADR-026); dev.iam-admin, the IT
 # administrator, opens and closes reviews.
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker ACCESS_REVIEWER

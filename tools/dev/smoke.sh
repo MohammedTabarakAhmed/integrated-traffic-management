@@ -3,7 +3,8 @@
 # grants come from iam-service, not the token (ADR-022) -> maker submits a change -> maker cannot approve ->
 # checker approves (CC-114) -> item readable -> maker delegates their role to the checker and revokes it (CC-004)
 # -> the directory feed deactivates a throw-away leaver (SEC-007) -> a manager reviews and revokes access (SEC-007)
-# -> a service is defined and disabled per region and channel through catalogue maker-checker (CC-020, CC-026).
+# -> a service is defined and disabled per region and channel through catalogue maker-checker (CC-020, CC-026)
+# -> a transaction of that service is opened, refused as a duplicate and submitted (CC-021..CC-023, CC-027).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 set -a; source infra/local/.env; set +a
@@ -169,5 +170,26 @@ off=$(curl -sf -H "Authorization: Bearer $MAKER" "$TXN/v1/services/$SVC/availabi
 on=$(curl -sf -H "Authorization: Bearer $MAKER" "$TXN/v1/services/$SVC/availability?region=R2&channel=PORTAL" | json_field "['reason']")
 [[ "$off" == DISABLED_BY_RULE && "$on" == OFFERED ]] || { echo "FAIL: availability R1=$off R2=$on"; exit 1; }
 echo "   $SVC: R1/PORTAL $off, R2/PORTAL $on"
+
+echo "12. Transactions (CC-021, CC-022, CC-023, CC-027): the officer opens one, a duplicate is refused, submission skips payment"
+# Uses the fresh service of step 11 (no fee, any region, one open transaction per subject); nothing to clean up.
+year=$(date -u +%Y)
+new_txn="{\"serviceCode\":\"$SVC\",\"subject\":{\"type\":\"VEHICLE\",\"id\":\"SMKVIN-$(date +%s)\"},\"applicantFileNumber\":\"TF-SMOKE\",\"homeRegion\":\"R1\"}"
+res=$(post_txn "$CHECKER" /v1/transactions "$new_txn")
+[[ "$(status_of "$res")" == 201 ]] || { echo "FAIL: opening a transaction returned $(status_of "$res"): $(body_of "$res")"; exit 1; }
+ref=$(body_of "$res" | json_field "['reference']")
+[[ "$ref" == "$SVC-R1-$year-0000001" ]] || { echo "FAIL: unexpected reference $ref"; exit 1; }
+res=$(post_txn "$CHECKER" /v1/transactions "$new_txn")
+[[ "$(status_of "$res")" == 409 ]] || { echo "FAIL: a duplicate should be refused, got $(status_of "$res")"; exit 1; }
+status=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $MAKER" "$TXN/v1/transactions/$ref")
+[[ "$status" == 403 ]] || { echo "FAIL: the maker has no transaction permission, expected 403, got $status"; exit 1; }
+res=$(post_txn "$CHECKER" "/v1/transactions/$ref/submissions" "")
+[[ "$(status_of "$res")" == 200 ]] || { echo "FAIL: submission returned $(status_of "$res"): $(body_of "$res")"; exit 1; }
+state=$(body_of "$res" | json_field "['status']")
+reasons=$(curl -sf -H "Authorization: Bearer $CHECKER" "$TXN/v1/transactions/$ref/status-history" \
+  | "$PY" -c "import json,sys; print(','.join(i['reason'] for i in json.load(sys.stdin)['items']))")
+[[ "$state" == IN_REVIEW && "$reasons" == CREATED,SUBMITTED,ZERO_FEE_PAYMENT_SKIPPED ]] \
+  || { echo "FAIL: status $state, history $reasons"; exit 1; }
+echo "   $ref: $state ($reasons)"
 
 echo "SMOKE OK"

@@ -7,8 +7,16 @@ info:
     module, eligible customer types, channels, required documents, fee, rule and workflow references, SLA and the
     regions where it is offered. Administrators enable or disable a service per region and per channel with
     effective dates (CC-026). Every catalogue change goes through maker-checker approval and is audited (CC-114,
-    CC-002, CC-120); definitions keep a full version history (DAT-002, CC-121). Transactions (CC-021 to CC-027) come
-    in a later slice.
+    CC-002, CC-120); definitions keep a full version history (DAT-002, CC-121).
+
+    Transactions (CC-021..CC-023, CC-027, CC-113; ADR-029): a request for a catalogue service about one subject
+    (traffic file, vehicle, driving licence or plate). Each gets a reference `<ServiceCode>-<Region>-<YYYY>-<Sequence>`
+    (CC-021; a 7-digit sequence per service, region and year, Q-003) and follows the lifecycle of CC-022 / LLD §2.1.
+    Every status change is kept in an append-only status history with user, channel, time, reason and previous status
+    (CC-023). This version lets staff create, submit and cancel a transaction; payment, review, return-for-information,
+    decision, fulfilment and expiry transitions are commands of the services built later (payments, workflow,
+    scheduler). The channel is the `X-Channel` header (set by the gateway or BFF); a transaction cannot be created or
+    changed without a known channel.
 
     Availability of a service for (region, channel, date): the service must be offered in that region and on that
     channel by its definition; then the availability rule in force with the most specific match decides
@@ -29,6 +37,7 @@ security:
 tags:
   - name: Service catalogue
   - name: Catalogue changes (maker-checker)
+  - name: Transactions
 
 paths:
   /v1/services:
@@ -251,6 +260,132 @@ paths:
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
 
+  /v1/transactions:
+    post:
+      tags: [Transactions]
+      operationId: createTransaction
+      summary: Open a transaction in Draft (CC-021, CC-022, CC-027, CC-113)
+      description: |
+        Opens a Draft transaction of `serviceCode` about `subject` and gives it a reference (CC-021). Refused when:
+        the service does not exist (422 `UNKNOWN_SERVICE`); the request has no known `X-Channel` (422
+        `CHANNEL_REQUIRED`); the service is not available in `region` on the channel today (422
+        `SERVICE_NOT_AVAILABLE`, CC-026, CC-112); the service may only be used in the applicant's home region and
+        `region` is another one (422 `HOME_REGION_ONLY`, CC-113); the caller's grant of `transaction.create` does not
+        reach the region and the service's module (403 `SCOPE_EXCEEDED`, CC-001); the subject already has an open
+        transaction of this service and the service does not allow several (409 `DUPLICATE_OPEN_TRANSACTION`, CC-027).
+        `region` defaults to `homeRegion` (Q-003). Until the traffic file service exists, `homeRegion` is stated by
+        the calling channel and recorded (Q-046).
+      x-itms-permission: transaction.create
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateTransactionRequest' }
+      responses:
+        '201':
+          description: Draft transaction created
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Transaction' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/transactions/{reference}:
+    get:
+      tags: [Transactions]
+      operationId: getTransaction
+      summary: A transaction by reference (the view is audited, CC-120)
+      description: A transaction outside the caller's region and module scopes answers 404, as if it did not exist.
+      x-itms-permission: transaction.read
+      parameters:
+        - $ref: '#/components/parameters/Reference'
+      responses:
+        '200':
+          description: Transaction
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Transaction' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/transactions/{reference}/status-history:
+    get:
+      tags: [Transactions]
+      operationId: getTransactionStatusHistory
+      summary: Every status change of a transaction, oldest first (CC-023; the view is audited, CC-120)
+      x-itms-permission: transaction.read
+      parameters:
+        - $ref: '#/components/parameters/Reference'
+      responses:
+        '200':
+          description: Status changes
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusChangeCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/transactions/{reference}/submissions:
+    post:
+      tags: [Transactions]
+      operationId: submitTransaction
+      summary: Submit a Draft transaction (CC-022)
+      description: |
+        Draft → Submitted, then at once, by the system: → Pending payment when the service has a fee, or → In review
+        when it has none, recording that the payment steps were skipped (Q-004). Availability and the home-region rule
+        are checked again at submission (Q-049). Eligibility rules and holds (CC-032) are added with the rules and hold
+        services. A transaction that is not a Draft answers 409 `ILLEGAL_TRANSITION`.
+      x-itms-permission: transaction.create
+      parameters:
+        - $ref: '#/components/parameters/Reference'
+      responses:
+        '200':
+          description: Transaction after submission
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Transaction' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/transactions/{reference}/cancellations:
+    post:
+      tags: [Transactions]
+      operationId: cancelTransaction
+      summary: Cancel a transaction in Draft or Pending payment (CC-022, LLD §2.1)
+      x-itms-permission: transaction.cancel
+      parameters:
+        - $ref: '#/components/parameters/Reference'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CancelTransactionRequest' }
+      responses:
+        '200':
+          description: Transaction cancelled
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Transaction' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -269,6 +404,11 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+    Reference:
+      name: reference
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/TransactionReference' }
 
   responses:
     Unauthorized:
@@ -496,6 +636,114 @@ components:
       required: [items]
       properties:
         items: { type: array, items: { $ref: '#/components/schemas/CatalogueChange' } }
+    TransactionReference:
+      type: string
+      description: |
+        `<ServiceCode>-<Region>-<YYYY>-<Sequence>` (CC-021): the service code, the region where the transaction is
+        handled, the year it was opened (UTC, Q-006) and a 7-digit sequence per service, region and year (Q-003).
+      pattern: '^[A-Z][A-Z0-9_]{1,19}-[A-Z0-9_]{1,40}-[0-9]{4}-[0-9]{7}$'
+      maxLength: 74
+      example: VL_RENEW-R1-2026-0000001
+    BusinessNumber:
+      type: string
+      description: |
+        Interim format of a business number (traffic file number, VIN, licence number, plate number) until the owning
+        services define theirs (Q-046): 1-40 characters of A-Z, 0-9 and -, starting with a letter or digit.
+      pattern: '^[A-Z0-9][A-Z0-9-]{0,39}$'
+    TransactionStatus:
+      type: string
+      description: CC-022 lifecycle (LLD §2.1)
+      enum: [DRAFT, SUBMITTED, PENDING_PAYMENT, PAID, IN_REVIEW, RETURNED_FOR_INFO, APPROVED, REJECTED, COMPLETED,
+             CANCELLED, EXPIRED]
+    StatusReason:
+      type: string
+      description: |
+        Why the status changed (CC-023). `ZERO_FEE_PAYMENT_SKIPPED` records that a service without a fee skipped
+        Pending payment and Paid (Q-004).
+      enum: [CREATED, SUBMITTED, PAYMENT_REQUIRED, ZERO_FEE_PAYMENT_SKIPPED, PAYMENT_CONFIRMED, REVIEW_STARTED,
+             RETURNED_FOR_INFO, INFO_PROVIDED, APPROVED, REJECTED, FULFILLED, CANCELLED, EXPIRED]
+    Subject:
+      type: object
+      additionalProperties: false
+      description: What the transaction is about (CC-027 "person, vehicle, licence"; DATA_MODEL master entities).
+      required: [type, id]
+      properties:
+        type:
+          type: string
+          enum: [TRAFFIC_FILE, VEHICLE, DRIVING_LICENCE, PLATE]
+        id: { $ref: '#/components/schemas/BusinessNumber' }
+    CreateTransactionRequest:
+      type: object
+      additionalProperties: false
+      required: [serviceCode, subject, applicantFileNumber, homeRegion]
+      properties:
+        serviceCode: { $ref: '#/components/schemas/ServiceCode' }
+        subject: { $ref: '#/components/schemas/Subject' }
+        applicantFileNumber: { $ref: '#/components/schemas/BusinessNumber' }
+        homeRegion:
+          $ref: '#/components/schemas/Code'
+          description: Region where the applicant's traffic file was opened (CC-113; stated by the channel, Q-046)
+        region:
+          $ref: '#/components/schemas/Code'
+          description: Region where the transaction is handled; default `homeRegion` (Q-003)
+    CancelTransactionRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 3, maxLength: 500 }
+    Transaction:
+      type: object
+      additionalProperties: false
+      required: [reference, serviceCode, serviceVersion, module, subject, applicantFileNumber, homeRegion, region,
+                 channel, status, paymentRequired, createdAt, createdBy, statusChangedAt, version]
+      properties:
+        reference: { $ref: '#/components/schemas/TransactionReference' }
+        serviceCode: { $ref: '#/components/schemas/ServiceCode' }
+        serviceVersion:
+          type: integer
+          format: int64
+          description: Version of the service definition the transaction was opened under
+        module: { $ref: '#/components/schemas/Code' }
+        subject: { $ref: '#/components/schemas/Subject' }
+        applicantFileNumber: { $ref: '#/components/schemas/BusinessNumber' }
+        homeRegion: { $ref: '#/components/schemas/Code' }
+        region: { $ref: '#/components/schemas/Code' }
+        channel:
+          $ref: '#/components/schemas/Channel'
+          description: Channel through which the transaction was opened
+        status: { $ref: '#/components/schemas/TransactionStatus' }
+        paymentRequired:
+          type: boolean
+          description: The service had a fee when the transaction was opened (Q-004, Q-049)
+        createdAt: { type: string, format: date-time }
+        createdBy: { $ref: '#/components/schemas/Actor' }
+        submittedAt: { oneOf: [ { type: string, format: date-time }, { type: 'null' } ] }
+        statusChangedAt: { type: string, format: date-time }
+        version:
+          type: integer
+          format: int64
+          description: Number of status changes so far, the creation included
+    StatusChange:
+      type: object
+      additionalProperties: false
+      description: One status change (CC-023). The system acts as actor `SYSTEM` for automatic steps.
+      required: [sequence, status, reason, actor, channel, changedAt]
+      properties:
+        sequence: { type: integer, format: int64 }
+        previousStatus: { oneOf: [ { $ref: '#/components/schemas/TransactionStatus' }, { type: 'null' } ] }
+        status: { $ref: '#/components/schemas/TransactionStatus' }
+        reason: { $ref: '#/components/schemas/StatusReason' }
+        note: { oneOf: [ { type: string }, { type: 'null' } ] }
+        actor: { $ref: '#/components/schemas/Actor' }
+        channel: { $ref: '#/components/schemas/Channel' }
+        changedAt: { type: string, format: date-time }
+    StatusChangeCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/StatusChange' } }
     Problem:
       type: object
       required: [status, code]

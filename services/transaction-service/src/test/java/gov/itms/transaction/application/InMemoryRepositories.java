@@ -6,6 +6,10 @@ import gov.itms.transaction.domain.AvailabilityRule;
 import gov.itms.transaction.domain.CatalogueChange;
 import gov.itms.transaction.domain.DomainException;
 import gov.itms.transaction.domain.ServiceDefinition;
+import gov.itms.transaction.domain.StatusChange;
+import gov.itms.transaction.domain.Subject;
+import gov.itms.transaction.domain.Transaction;
+import gov.itms.transaction.domain.TransactionReference;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -148,6 +152,70 @@ final class InMemoryRepositories {
         @Override
         public void saveDecision(CatalogueChange change) {
             rows.put(change.id(), change);
+        }
+    }
+
+    /** Keeps copies, as the database keeps only what was saved; mimics the sequence and the CC-027 unique index. */
+    static final class Transactions implements TransactionRepository {
+        final Map<String, Transaction> rows = new LinkedHashMap<>();
+        final Map<UUID, List<StatusChange>> history = new LinkedHashMap<>();
+        final Map<String, Long> sequences = new LinkedHashMap<>();
+
+        @Override
+        public long nextSequence(String serviceCode, String region, int year) {
+            return sequences.merge(serviceCode + "|" + region + "|" + year, 1L, Long::sum);
+        }
+
+        @Override
+        public Optional<Transaction> findOpen(String serviceCode, Subject subject) {
+            return rows.values().stream().filter(t -> t.serviceCode().equals(serviceCode)
+                    && t.subject().equals(subject) && t.status().isOpen()).findFirst().map(Transactions::copy);
+        }
+
+        @Override
+        public void insert(Transaction t) {
+            boolean duplicate = !t.allowsConcurrentOpen() && rows.values().stream().anyMatch(o ->
+                    !o.allowsConcurrentOpen() && o.serviceCode().equals(t.serviceCode())
+                            && o.subject().equals(t.subject()) && o.status().isOpen());
+            if (duplicate) {
+                throw new DomainException(DomainException.Kind.CONFLICT, "DUPLICATE_OPEN_TRANSACTION", "duplicate",
+                        List.of("CC-027"), t.serviceCode(), "");
+            }
+            rows.put(t.reference().toString(), copy(t));
+            history.computeIfAbsent(t.id(), k -> new ArrayList<>()).add(t.lastChange());
+        }
+
+        @Override
+        public Optional<Transaction> find(TransactionReference reference) {
+            return Optional.ofNullable(rows.get(reference.toString())).map(Transactions::copy);
+        }
+
+        @Override
+        public Optional<Transaction> findForUpdate(TransactionReference reference) {
+            return find(reference);
+        }
+
+        @Override
+        public void saveStatus(Transaction t) {
+            Transaction stored = rows.get(t.reference().toString());
+            StatusChange change = t.lastChange();
+            if (stored == null || stored.version() != change.sequence() - 1
+                    || stored.status() != change.previousStatus()) {
+                throw new IllegalStateException("version check failed");
+            }
+            rows.put(t.reference().toString(), copy(t));
+            history.get(t.id()).add(change);
+        }
+
+        @Override
+        public List<StatusChange> history(UUID transactionId) {
+            return List.copyOf(history.getOrDefault(transactionId, List.of()));
+        }
+
+        static Transaction copy(Transaction t) {
+            return new Transaction(t.id(), t.reference(), t.serviceVersion(), t.module(), t.feeCode(),
+                    t.allowsConcurrentOpen(), t.subject(), t.applicantFileNumber(), t.homeRegion(), t.channel(),
+                    t.createdAt(), t.createdBy(), t.submittedAt(), t.lastChange());
         }
     }
 

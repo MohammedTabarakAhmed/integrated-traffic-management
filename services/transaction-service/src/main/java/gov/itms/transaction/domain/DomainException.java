@@ -8,7 +8,7 @@ import java.util.List;
  */
 public class DomainException extends RuntimeException {
 
-    public enum Kind { VALIDATION, NOT_FOUND, CONFLICT, SEGREGATION_OF_DUTIES }
+    public enum Kind { VALIDATION, NOT_FOUND, CONFLICT, SEGREGATION_OF_DUTIES, OUT_OF_SCOPE }
 
     private final Kind kind;
     private final String code;

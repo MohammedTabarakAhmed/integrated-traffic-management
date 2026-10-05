@@ -35,6 +35,18 @@ itms:
       interval: ${ITMS_DRAFT_EXPIRY_INTERVAL:15m}
       batch-size: ${ITMS_DRAFT_EXPIRY_BATCH_SIZE:100}
       max-batches: ${ITMS_DRAFT_EXPIRY_MAX_BATCHES:50}
+  # API_SPECIFICATION §2, ADR-032: state-changing transaction POSTs need an Idempotency-Key; a retry with the same key
+  # and request replays the stored response. Retention and lock timeout are set per environment (Q-052).
+  idempotency:
+    enabled: true
+    paths:
+      - /v1/transactions
+      - /v1/transactions/*/submissions
+      - /v1/transactions/*/cancellations
+    retention: ${ITMS_IDEMPOTENCY_RETENTION:24h}
+    lock-timeout: ${ITMS_IDEMPOTENCY_LOCK_TIMEOUT:30s}
+    cleanup-interval: ${ITMS_IDEMPOTENCY_CLEANUP_INTERVAL:15m}
+    cleanup-batch-size: ${ITMS_IDEMPOTENCY_CLEANUP_BATCH_SIZE:500}
 
 management:
   endpoints:

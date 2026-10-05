@@ -5,7 +5,8 @@
 # -> the directory feed deactivates a throw-away leaver (SEC-007) -> a manager reviews and revokes access (SEC-007)
 # -> a service is defined and disabled per region and channel through catalogue maker-checker (CC-020, CC-026)
 # -> a transaction of that service is opened, refused as a duplicate and submitted (CC-021..CC-023, CC-027)
-# -> it is found as the newest of its applicant's transactions (CC-025).
+# -> it is found as the newest of its applicant's transactions (CC-025) -> a retry with the same Idempotency-Key is
+# replayed, not repeated (ADR-032).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 set -a; source infra/local/.env; set +a
@@ -145,9 +146,10 @@ echo "11. Service catalogue (CC-020, CC-026, CC-114): maker defines a service, c
 # A fresh service code per run; a failed run leaves at most one pending change for that throw-away code (harmless).
 TXN=http://localhost:8083
 SVC="SMK_$(date +%s)"
-post_txn() { # token path body -> prints "<status> <body>"
+new_key() { printf 'smk-%s-%s' "$(date +%s%N)" "$RANDOM"; }
+post_txn() { # token path body [idempotency-key] -> prints "<status> <body>"; a new key per call unless one is given
   curl -s -w '\n%{http_code}' -H "Authorization: Bearer $1" -H 'Content-Type: application/json' -H 'X-Channel: BACKOFFICE' \
-    "$TXN$2" -d "$3"
+    -H "Idempotency-Key: ${4:-$(new_key)}" "$TXN$2" -d "$3"
 }
 status_of() { printf '%s' "$1" | tail -n 1; }
 body_of() { printf '%s' "$1" | sed '$d'; }
@@ -204,9 +206,27 @@ echo "14. Draft expiry (CC-024): the job is the only SYSTEM actor; a request thr
 # Expiry itself needs a 30-day-old Draft, so it is proven by TransactionApiIT.draftExpiry; here only the channel rule.
 sys_txn="{\"serviceCode\":\"$SVC\",\"subject\":{\"type\":\"VEHICLE\",\"id\":\"SMKSYS-$(date +%s)\"},\"applicantFileNumber\":\"TF-SMOKE\",\"homeRegion\":\"R1\"}"
 res=$(curl -s -w '\n%{http_code}' -H "Authorization: Bearer $CHECKER" -H 'Content-Type: application/json' \
-  -H 'X-Channel: SYSTEM' "$TXN/v1/transactions" -d "$sys_txn")
+  -H 'X-Channel: SYSTEM' -H "Idempotency-Key: $(new_key)" "$TXN/v1/transactions" -d "$sys_txn")
 [[ "$(status_of "$res")" == 422 && "$(body_of "$res" | json_field "['code']")" == CHANNEL_REQUIRED ]] \
   || { echo "FAIL: X-Channel SYSTEM should be refused with 422 CHANNEL_REQUIRED, got $(status_of "$res"): $(body_of "$res")"; exit 1; }
 echo "   X-Channel SYSTEM: 422 CHANNEL_REQUIRED"
+
+echo "15. Idempotency-Key (ADR-032): a retry with the same key replays the response; no key is refused"
+idem_txn="{\"serviceCode\":\"$SVC\",\"subject\":{\"type\":\"VEHICLE\",\"id\":\"SMKIDM-$(date +%s)\"},\"applicantFileNumber\":\"TF-SMOKE-IDEM\",\"homeRegion\":\"R1\"}"
+key=$(new_key)
+res=$(post_txn "$CHECKER" /v1/transactions "$idem_txn" "$key")
+[[ "$(status_of "$res")" == 201 ]] || { echo "FAIL: opening with a key returned $(status_of "$res"): $(body_of "$res")"; exit 1; }
+first=$(body_of "$res" | json_field "['reference']")
+replayed=$(curl -s -D - -o /dev/null -H "Authorization: Bearer $CHECKER" -H 'Content-Type: application/json' \
+  -H 'X-Channel: BACKOFFICE' -H "Idempotency-Key: $key" "$TXN/v1/transactions" -d "$idem_txn" \
+  | tr -d '\r' | awk 'tolower($1) == "idempotent-replayed:" {print $2}')
+res=$(post_txn "$CHECKER" /v1/transactions "$idem_txn" "$key")
+[[ "$replayed" == true && "$(status_of "$res")" == 201 && "$(body_of "$res" | json_field "['reference']")" == "$first" ]] \
+  || { echo "FAIL: retry should replay $first (Idempotent-Replayed=$replayed), got $(status_of "$res"): $(body_of "$res")"; exit 1; }
+res=$(curl -s -w '\n%{http_code}' -H "Authorization: Bearer $CHECKER" -H 'Content-Type: application/json' \
+  -H 'X-Channel: BACKOFFICE' "$TXN/v1/transactions/$first/cancellations" -d '{"reason":"smoke without key"}')
+[[ "$(status_of "$res")" == 400 && "$(body_of "$res" | json_field "['code']")" == IDEMPOTENCY_KEY_REQUIRED ]] \
+  || { echo "FAIL: no key should be refused with 400 IDEMPOTENCY_KEY_REQUIRED, got $(status_of "$res"): $(body_of "$res")"; exit 1; }
+echo "   $first replayed; no key: 400 IDEMPOTENCY_KEY_REQUIRED"
 
 echo "SMOKE OK"

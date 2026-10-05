@@ -314,6 +314,8 @@ paths:
         `region` defaults to `homeRegion` (Q-003). Until the traffic file service exists, `homeRegion` is stated by
         the calling channel and recorded (Q-046).
       x-itms-permission: transaction.create
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -321,9 +323,10 @@ paths:
             schema: { $ref: '#/components/schemas/CreateTransactionRequest' }
       responses:
         '201':
-          description: Draft transaction created
+          description: Draft transaction created (or, on a retry with the same Idempotency-Key, the stored response)
           headers:
             Location: { schema: { type: string } }
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Transaction' }
@@ -385,9 +388,12 @@ paths:
       x-itms-permission: transaction.create
       parameters:
         - $ref: '#/components/parameters/Reference'
+        - $ref: '#/components/parameters/IdempotencyKey'
       responses:
         '200':
           description: Transaction after submission
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Transaction' }
@@ -406,6 +412,7 @@ paths:
       x-itms-permission: transaction.cancel
       parameters:
         - $ref: '#/components/parameters/Reference'
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -414,6 +421,8 @@ paths:
       responses:
         '200':
           description: Transaction cancelled
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Transaction' }
@@ -447,6 +456,24 @@ components:
       in: path
       required: true
       schema: { $ref: '#/components/schemas/TransactionReference' }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Chosen by the client, new for every intended action, and sent again unchanged on a retry (API_SPECIFICATION
+        §2, ADR-032). It belongs to the signed-in caller. A retry with the same key and the same request (method,
+        path and body) gets the stored successful response again, marked `Idempotent-Replayed: true`, and the action
+        is not repeated. The same key with another request answers 409 `IDEMPOTENCY_KEY_REUSED`; while the first
+        request still runs, 409 `IDEMPOTENCY_REQUEST_IN_PROGRESS` with `Retry-After`. A missing key answers 400
+        `IDEMPOTENCY_KEY_REQUIRED`, a malformed one 400 `IDEMPOTENCY_KEY_INVALID`. Only successful responses are kept
+        (for the configured retention, 24 hours by default); after a refusal or error the key may be used again.
+      schema: { type: string, pattern: '^[A-Za-z0-9._:-]{8,128}$' }
+
+  headers:
+    IdempotentReplayed:
+      description: '`true` when the response is the stored response of an earlier request with the same Idempotency-Key'
+      schema: { type: string, enum: ['true'] }
 
   responses:
     Unauthorized:

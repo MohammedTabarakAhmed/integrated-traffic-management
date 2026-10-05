@@ -11,6 +11,7 @@ import com.atlassian.oai.validator.model.Request;
 import com.atlassian.oai.validator.model.SimpleRequest;
 import com.atlassian.oai.validator.model.SimpleResponse;
 import com.atlassian.oai.validator.report.ValidationReport;
+import gov.itms.platform.idempotency.IdempotencyCleanupJob;
 import gov.itms.transaction.infrastructure.DraftExpiryJob;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
@@ -21,6 +22,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
@@ -74,6 +76,8 @@ class TransactionApiIT {
     DataSource dataSource;
     @Autowired
     DraftExpiryJob draftExpiryJob;
+    @Autowired
+    IdempotencyCleanupJob idempotencyCleanupJob;
 
     @BeforeAll
     static void loadContract() {
@@ -111,13 +115,24 @@ class TransactionApiIT {
 
     // ------------------------------------------------------------------ helpers with contract validation
 
+    /** Transaction POSTs get a new Idempotency-Key per call (ADR-032); {@link #postWithKey} chooses one. */
     private MvcResult call(MockHttpServletRequestBuilder builder, Request.Method method, String path, Object body,
                            RequestPostProcessor who, String channel) throws Exception {
+        String key = method == Request.Method.POST && path.startsWith("/v1/transactions")
+                ? "it-" + UUID.randomUUID() : null;
+        return call(builder, method, path, body, who, channel, key);
+    }
+
+    private MvcResult call(MockHttpServletRequestBuilder builder, Request.Method method, String path, Object body,
+                           RequestPostProcessor who, String channel, String idempotencyKey) throws Exception {
         String payload = body == null ? null : json.writeValueAsString(body);
         builder.with(who).header("X-Correlation-Id", "txn-it-transactions")
                 .accept(MediaType.APPLICATION_JSON, MediaType.APPLICATION_PROBLEM_JSON);
         if (channel != null) {
             builder.header("X-Channel", channel);
+        }
+        if (idempotencyKey != null) {
+            builder.header("Idempotency-Key", idempotencyKey);
         }
         if (payload != null) {
             builder.contentType(MediaType.APPLICATION_JSON).content(payload);
@@ -128,6 +143,9 @@ class TransactionApiIT {
         String requestPath = qs > 0 ? path.substring(0, qs) : path;
         SimpleRequest.Builder req = new SimpleRequest.Builder(method, requestPath)
                 .withHeader("Authorization", "Bearer t");
+        if (idempotencyKey != null) {
+            req.withHeader("Idempotency-Key", idempotencyKey);
+        }
         if (qs > 0) {
             for (String pair : path.substring(qs + 1).split("&")) {
                 String[] kv = pair.split("=", 2);
@@ -164,6 +182,10 @@ class TransactionApiIT {
 
     private MvcResult postVia(String path, Object body, RequestPostProcessor who, String channel) throws Exception {
         return call(post(path), Request.Method.POST, path, body, who, channel);
+    }
+
+    private MvcResult postWithKey(String path, Object body, RequestPostProcessor who, String key) throws Exception {
+        return call(post(path), Request.Method.POST, path, body, who, "BACKOFFICE", key);
     }
 
     /** Defines a service through maker-checker, offered in R1 and R2 on BACKOFFICE and PORTAL. */
@@ -456,6 +478,7 @@ class TransactionApiIT {
                 .getResponse().getStatus()).isEqualTo(400);
 
         MvcResult arabic = mvc.perform(post("/v1/transactions").with(officer()).header("Accept-Language", "ar")
+                .header("Idempotency-Key", "it-arabic-" + UUID.randomUUID())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json.writeValueAsString(newTransaction("ITX_AUTH", "VEHICLE", "VIN-Z", "R1", null)))
                 .accept(MediaType.APPLICATION_JSON, MediaType.APPLICATION_PROBLEM_JSON)).andReturn();
@@ -589,6 +612,102 @@ class TransactionApiIT {
                 .isInstanceOf(DataAccessException.class).hasMessageContaining("ck_transaction_channels");
         assertThatThrownBy(() -> backdatedDraft("ITX_EXP", 900_004, "VIN-EXP6", 1, "SYSTEM"))
                 .isInstanceOf(DataAccessException.class).hasMessageContaining("ck_transaction_channels");
+    }
+
+    @Test
+    @Tag("FN-004")
+    @Tag("CC-027")
+    @DisplayName("ADR-032 (FN-004 pattern): a retry with the same Idempotency-Key replays the response instead of acting twice")
+    void idempotencyKey() throws Exception {
+        define("ITX_IDEM", "FEE", true, false);
+        Map<String, Object> open = newTransaction("ITX_IDEM", "VEHICLE", "VIN-IDEM", "R1", null);
+        String openKey = "it-idem-open-" + UUID.randomUUID();
+
+        // Create, then a retry (lost response): same reference, Location and body; one transaction, one audit record.
+        MvcResult first = postWithKey("/v1/transactions", open, officer(), openKey);
+        assertThat(first.getResponse().getStatus()).as(first.getResponse().getContentAsString()).isEqualTo(201);
+        assertThat(first.getResponse().getHeader("Idempotent-Replayed")).isNull();
+        String ref = body(first).get("reference").asString();
+        MvcResult retry = postWithKey("/v1/transactions", open, officer(), openKey);
+        assertThat(retry.getResponse().getStatus()).isEqualTo(201);
+        assertThat(retry.getResponse().getHeader("Idempotent-Replayed")).isEqualTo("true");
+        assertThat(retry.getResponse().getHeader("Location")).isEqualTo("/v1/transactions/" + ref);
+        assertThat(body(retry)).isEqualTo(body(first));
+        assertThat(db.sql("select count(*) from service_transaction where service_code = 'ITX_IDEM'")
+                .query(Long.class).single()).isEqualTo(1);
+        assertThat(db.sql("select count(*) from audit_outbox where action = 'TRANSACTION_CREATED' and entity_id = :ref")
+                .param("ref", ref).query(Long.class).single()).isEqualTo(1);
+
+        // What is stored: the caller, a SHA-256 of the request, the 2xx response, kept for the configured 24 hours.
+        Map<String, Object> row = db.sql("select principal_id, request_hash, response_status,"
+                        + " extract(epoch from expires_at - locked_at) as kept from idempotency_key"
+                        + " where idempotency_key = :k")
+                .param("k", openKey).query().singleRow();
+        assertThat(row.get("principal_id")).isEqualTo("u-officer");
+        assertThat((String) row.get("request_hash")).hasSize(64);
+        assertThat(row.get("response_status")).isEqualTo(201);
+        assertThat(((Number) row.get("kept")).longValue()).isEqualTo(24 * 3600);
+
+        // The same key for another request is refused; another caller's same key is theirs, not a replay (CC-027
+        // then refuses the duplicate).
+        Map<String, Object> other = newTransaction("ITX_IDEM", "VEHICLE", "VIN-IDEM2", "R1", null);
+        MvcResult reused = postWithKey("/v1/transactions", other, officer(), openKey);
+        assertThat(reused.getResponse().getStatus()).isEqualTo(409);
+        assertThat(body(reused).get("code").asString()).isEqualTo("IDEMPOTENCY_KEY_REUSED");
+        MvcResult otherCaller = postWithKey("/v1/transactions", open,
+                user("u-officer2", "officer2", "transaction.create"), openKey);
+        assertThat(otherCaller.getResponse().getStatus()).isEqualTo(409);
+        assertThat(body(otherCaller).get("code").asString()).isEqualTo("DUPLICATE_OPEN_TRANSACTION");
+
+        // Submission retried: replayed, not an ILLEGAL_TRANSITION, and the history has the steps once.
+        String submitKey = "it-idem-submit-" + UUID.randomUUID();
+        MvcResult submitted = postWithKey("/v1/transactions/" + ref + "/submissions", null, officer(), submitKey);
+        assertThat(body(submitted).get("status").asString()).isEqualTo("PENDING_PAYMENT");
+        MvcResult resubmitted = postWithKey("/v1/transactions/" + ref + "/submissions", null, officer(), submitKey);
+        assertThat(resubmitted.getResponse().getStatus()).isEqualTo(200);
+        assertThat(resubmitted.getResponse().getHeader("Idempotent-Replayed")).isEqualTo("true");
+        assertThat(body(resubmitted)).isEqualTo(body(submitted));
+        assertThat(db.sql("select count(*) from transaction_status_history h join service_transaction t"
+                + " on t.id = h.transaction_id where t.reference = :ref").param("ref", ref).query(Long.class).single())
+                .isEqualTo(3);
+
+        // A refused request keeps nothing, so the key may be retried; a missing or malformed key is refused first.
+        String failedKey = "it-idem-failed-" + UUID.randomUUID();
+        MvcResult notFound = postWithKey("/v1/transactions/ITX_IDEM-R1-" + YEAR + "-0999999/submissions", null,
+                officer(), failedKey);
+        assertThat(notFound.getResponse().getStatus()).isEqualTo(404);
+        assertThat(db.sql("select count(*) from idempotency_key where idempotency_key = :k").param("k", failedKey)
+                .query(Long.class).single()).isZero();
+        MvcResult missing = postWithKey("/v1/transactions/" + ref + "/cancellations", Map.of("reason", "no key"),
+                officer(), null);
+        assertThat(missing.getResponse().getStatus()).isEqualTo(400);
+        assertThat(body(missing).get("code").asString()).isEqualTo("IDEMPOTENCY_KEY_REQUIRED");
+        MvcResult malformed = postWithKey("/v1/transactions/" + ref + "/cancellations", Map.of("reason", "bad key"),
+                officer(), "short");
+        assertThat(body(malformed).get("code").asString()).isEqualTo("IDEMPOTENCY_KEY_INVALID");
+        MvcResult arabic = mvc.perform(post("/v1/transactions/" + ref + "/cancellations").with(officer())
+                .header("Accept-Language", "ar").header("X-Channel", "BACKOFFICE")
+                .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"no key\"}")).andReturn();
+        assertThat(body(arabic).get("detail").asString()).startsWith("أرسل الترويسة Idempotency-Key");
+        assertThat(status(ref)).isEqualTo("PENDING_PAYMENT");
+
+        // After the retention the key is cleaned up and forgotten: the retry acts again and CC-027 refuses it.
+        db.sql("update idempotency_key set expires_at = now() - interval '1 second',"
+                + " locked_at = now() - interval '1 day' where idempotency_key = :k").param("k", openKey).update();
+        assertThat(idempotencyCleanupJob.run()).isGreaterThanOrEqualTo(1);
+        MvcResult afterRetention = postWithKey("/v1/transactions", open, officer(), openKey);
+        assertThat(afterRetention.getResponse().getStatus()).isEqualTo(409);
+        assertThat(body(afterRetention).get("code").asString()).isEqualTo("DUPLICATE_OPEN_TRANSACTION");
+
+        // The database keeps only well-formed keys and only successful responses.
+        assertThatThrownBy(() -> db.sql("insert into idempotency_key (principal_id, idempotency_key, request_hash,"
+                + " lock_token, locked_at, expires_at, response_status, completed_at) values ('u', 'it-db-check-1',"
+                + " repeat('a', 64), 't', now(), now() + interval '1 hour', 500, now())").update())
+                .isInstanceOf(DataAccessException.class).hasMessageContaining("ck_idempotency_response");
+        assertThatThrownBy(() -> db.sql("insert into idempotency_key (principal_id, idempotency_key, request_hash,"
+                + " lock_token, locked_at, expires_at) values ('u', 'bad key', repeat('a', 64), 't', now(),"
+                + " now() + interval '1 hour')").update())
+                .isInstanceOf(DataAccessException.class).hasMessageContaining("ck_idempotency_key_format");
     }
 
     private String backdatedDraft(String serviceCode, int sequence, String subjectId, int daysAgo) {

@@ -1,2 +1,3 @@
 gov.itms.platform.security.ItmsSecurityAutoConfiguration
 gov.itms.platform.ItmsPlatformAutoConfiguration
+gov.itms.platform.idempotency.IdempotencyAutoConfiguration

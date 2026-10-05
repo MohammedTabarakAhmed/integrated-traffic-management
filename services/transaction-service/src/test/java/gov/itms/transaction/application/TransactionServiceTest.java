@@ -24,7 +24,11 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
@@ -45,7 +49,25 @@ class TransactionServiceTest {
     private InMemoryRepositories.Transactions transactions;
     private InMemoryRepositories.Audit audit;
     private MutableClock clock;
+    private Eligibility eligibility;
     private TransactionService service;
+
+    /** hold-eligibility-service as the port sees it: blocks per subject, every call recorded (CC-032). */
+    static final class Eligibility implements EligibilityChecker {
+        final Map<Subject, Block> blocked = new HashMap<>();
+        final List<String> calls = new ArrayList<>();
+        boolean unavailable;
+
+        @Override
+        public List<Block> check(String serviceCode, List<Subject> subjects, Channel channel) {
+            calls.add(serviceCode + " " + subjects + " " + channel);
+            if (unavailable) {
+                throw new DomainException(DomainException.Kind.UNAVAILABLE, "ELIGIBILITY_UNAVAILABLE", "down",
+                        List.of("CC-032"));
+            }
+            return subjects.stream().map(blocked::get).filter(Objects::nonNull).distinct().toList();
+        }
+    }
 
     /** A clock the test can move, for the yearly reset of the sequence. */
     static final class MutableClock extends Clock {
@@ -74,7 +96,8 @@ class TransactionServiceTest {
         transactions = new InMemoryRepositories.Transactions();
         audit = new InMemoryRepositories.Audit();
         clock = new MutableClock();
-        service = new TransactionService(services, rules, transactions, audit, clock);
+        eligibility = new Eligibility();
+        service = new TransactionService(services, rules, transactions, eligibility, audit, clock);
         define("VL_RENEW", "VL_RENEW_FEE", true, false);
         define("DL_FREE", null, true, false);
         define("VL_LOCAL", null, false, false);
@@ -159,6 +182,50 @@ class TransactionServiceTest {
         assertThatThrownBy(() -> service.expireDrafts(Duration.ZERO, 10)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> service.expireDrafts(period, 0)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> service.expireDrafts(null, 10)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @Tag("CC-032")
+    @DisplayName("CC-032: holds on the subject or the applicant's file block submission; the Draft stays a Draft")
+    void eligibilityBeforeSubmission() {
+        String ref = create("VL_RENEW", CAR, "R1", null).reference().toString();
+        Subject file = new Subject(Subject.Type.TRAFFIC_FILE, "TF1");
+        EligibilityChecker.Block fines = new EligibilityChecker.Block("UNPAID_FINES", "PAY_FINES", "Pay the fines.");
+        EligibilityChecker.Block masked = new EligibilityChecker.Block("RESTRICTED", "CONTACT_AUTHORITY",
+                "Contact the Authority.");
+        eligibility.blocked.put(file, fines);
+        eligibility.blocked.put(CAR, masked);
+        audit.entries.clear();
+
+        assertThatThrownBy(() -> service.submit(ref, caller(Channel.PORTAL)))
+                .isInstanceOfSatisfying(EligibilityBlockedException.class, e -> {
+                    assertThat(e.code()).isEqualTo("ELIGIBILITY_BLOCKED");
+                    assertThat(e.kind()).isEqualTo(DomainException.Kind.VALIDATION);
+                    assertThat(e.requirementRefs()).containsExactly("CC-032");
+                    assertThat(e.blocks()).containsExactly(masked, fines);
+                });
+        assertThat(eligibility.calls).containsExactly("VL_RENEW " + List.of(CAR, file) + " PORTAL");
+        assertThat(transactions.rows.get(ref).status()).isEqualTo(TransactionStatus.DRAFT);
+        assertThat(audit.entries).isEmpty();
+
+        eligibility.unavailable = true;
+        assertThatThrownBy(() -> service.submit(ref, counter())).satisfies(code("ELIGIBILITY_UNAVAILABLE"));
+        assertThat(transactions.rows.get(ref).status()).isEqualTo(TransactionStatus.DRAFT);
+
+        eligibility.unavailable = false;
+        eligibility.blocked.clear();
+        assertThat(service.submit(ref, counter()).status()).isEqualTo(TransactionStatus.PENDING_PAYMENT);
+
+        // A transaction about the applicant's own file is checked once, for that file.
+        eligibility.calls.clear();
+        String own = create("DL_FREE", file, "R1", null).reference().toString();
+        service.submit(own, counter());
+        assertThat(eligibility.calls).containsExactly("DL_FREE " + List.of(file) + " BACKOFFICE");
+
+        // Not a Draft: refused before hold-eligibility-service is asked.
+        eligibility.calls.clear();
+        assertThatThrownBy(() -> service.submit(own, counter())).satisfies(code("ILLEGAL_TRANSITION"));
+        assertThat(eligibility.calls).isEmpty();
     }
 
     @Test

@@ -139,6 +139,11 @@ services:
       ITMS_OIDC_JWKS_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/certs
       ITMS_AUTHORISATION_SOURCE: iam
       ITMS_IAM_URL: http://iam-service:8080
+      # Eligibility at submission (CC-032, ADR-034): own client-credentials account; secret set by tools/dev/up.sh.
+      ITMS_ELIGIBILITY_URL: http://hold-eligibility-service:8080
+      ITMS_OIDC_TOKEN_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/token
+      ITMS_SERVICE_CLIENT_ID: itms-transaction-service
+      ITMS_SERVICE_CLIENT_SECRET: ${DEV_TRANSACTION_SERVICE_SECRET:?run tools/dev/up.sh}
     ports:
       - "127.0.0.1:8083:8080"
     depends_on:

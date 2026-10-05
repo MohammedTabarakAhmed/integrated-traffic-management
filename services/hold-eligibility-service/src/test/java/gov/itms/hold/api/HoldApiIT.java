@@ -14,6 +14,7 @@ import com.atlassian.oai.validator.report.ValidationReport;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -351,5 +352,113 @@ class HoldApiIT {
                 + " version = version + 1" + where).update())
                 .isInstanceOf(DataAccessException.class);
         assertThat(db.sql("select status from hold" + where).query(String.class).single()).isEqualTo("ACTIVE");
+    }
+
+    // ------------------------------------------------------------------ eligibility (CC-032)
+
+    /** transaction-service's own account: ELIGIBILITY_CHECKER (iam V9). */
+    private static RequestPostProcessor submissionService() {
+        return user("u-txn-svc", "service-account-itms-transaction-service", "ELIGIBILITY_CHECKER",
+                "eligibility.check");
+    }
+
+    private MvcResult check(String serviceCode, List<Map<String, String>> subjects, RequestPostProcessor who,
+                            String language) throws Exception {
+        Map<String, Object> request = new HashMap<>();
+        request.put("serviceCode", serviceCode);
+        request.put("subjects", subjects);
+        return call(post("/v1/eligibility-checks").header("Accept-Language", language), Request.Method.POST,
+                "/v1/eligibility-checks", request, who, "PORTAL", null);
+    }
+
+    private static Map<String, String> subject(String type, String id) {
+        return Map.of("type", type, "id", id);
+    }
+
+    @Test
+    @Tag("CC-032")
+    @Tag("CC-120")
+    @DisplayName("CC-032: holds in force block the service with a customer-safe reason and next step in the "
+            + "caller's language; masked types say only RESTRICTED (Q-053); every subject checked is audited")
+    void eligibilityChecks() throws Exception {
+        placeOk(hold("VIN-ELIG", "VIOLATIONS"));
+        Map<String, Object> circular = hold("VIN-ELIG", "POLICE");
+        circular.put("holdType", "POLICE_CIRCULAR");
+        circular.put("source", "POLICE");
+        circular.put("reason", "wanted in case 2026/77");
+        circular.put("blockedServices", List.of("*"));
+        placeOk(circular);
+        Map<String, Object> future = hold("VIN-ELIG", "VEHICLE");
+        future.put("holdType", "FAILED_INSPECTION");
+        future.put("startDate", TODAY.plusDays(2).toString());
+        placeOk(future);
+        Map<String, Object> onFile = hold("VIN-UNUSED", "VIOLATIONS");
+        onFile.put("subject", subject("TRAFFIC_FILE", "TF-ELIG"));
+        onFile.put("sourceRef", "FINE/ELIG-1");
+        placeOk(onFile);
+
+        MvcResult blocked = check("VL_RENEW", List.of(subject("VEHICLE", "VIN-ELIG"),
+                subject("TRAFFIC_FILE", "TF-ELIG")), submissionService(), "en");
+        assertThat(blocked.getResponse().getStatus()).as(blocked.getResponse().getContentAsString()).isEqualTo(200);
+        JsonNode e = body(blocked);
+        assertThat(e.get("eligible").asBoolean()).isFalse();
+        assertThat(e.get("serviceCode").asString()).isEqualTo("VL_RENEW");
+        assertThat(e.get("checkedOn").asString()).isEqualTo(TODAY.toString());
+        assertThat(e.get("blocks")).hasSize(2);
+        Map<String, JsonNode> byReason = new HashMap<>();
+        e.get("blocks").forEach(b -> byReason.put(b.get("reasonCode").asString(), b));
+        assertThat(byReason.get("UNPAID_FINES").get("nextStep").asString()).isEqualTo("PAY_FINES");
+        assertThat(byReason.get("UNPAID_FINES").get("message").asString())
+                .isEqualTo("There are unpaid fines on this record. Pay the outstanding fines, then try again.");
+        assertThat(byReason.get("RESTRICTED").get("nextStep").asString()).isEqualTo("CONTACT_AUTHORITY");
+        String text = blocked.getResponse().getContentAsString(StandardCharsets.UTF_8);
+        assertThat(text).as("no hold details reach the customer")
+                .doesNotContain("POLICE", "wanted", "2026/77", "unpaid fines on the vehicle", "VIOLATIONS");
+
+        MvcResult arabic = check("VL_RENEW", List.of(subject("VEHICLE", "VIN-ELIG")), submissionService(), "ar");
+        List<String> arabicMessages = new ArrayList<>();
+        body(arabic).get("blocks").forEach(b -> arabicMessages.add(b.get("message").asString()));
+        assertThat(arabicMessages).contains("يوجد قيد على هذا السجل يمنع تقديم هذه الخدمة. "
+                        + "تواصل مع الهيئة أو قم بزيارة أحد مراكز الخدمة للمساعدة.");
+
+        MvcResult otherService = check("DL_ISSUE", List.of(subject("TRAFFIC_FILE", "TF-ELIG")), submissionService(),
+                "en");
+        assertThat(body(otherService).get("eligible").asBoolean()).isTrue();
+        assertThat(body(otherService).get("blocks")).isEmpty();
+
+        assertThat(db.sql("select count(*) from audit_outbox where action = 'ELIGIBILITY_CHECKED'"
+                + " and entity_type = 'SubjectEligibility' and entity_id = 'VEHICLE:VIN-ELIG'")
+                .query(Long.class).single()).isEqualTo(2);
+        assertThat(db.sql("select count(*) from audit_outbox where action = 'ELIGIBILITY_CHECKED'"
+                + " and entity_id = 'TRAFFIC_FILE:TF-ELIG' and actor_id = 'u-txn-svc'")
+                .query(Long.class).single()).isEqualTo(2);
+    }
+
+    @Test
+    @Tag("CC-032")
+    @Tag("CC-001")
+    @DisplayName("CC-032/CC-001: a check needs eligibility.check and a valid request")
+    void eligibilityCheckRules() throws Exception {
+        MvcResult forbidden = check("VL_RENEW", List.of(subject("VEHICLE", "VIN-RULES")), officer(), "en");
+        assertThat(forbidden.getResponse().getStatus()).isEqualTo(403);
+
+        List<Map<String, String>> six = new ArrayList<>();
+        for (int i = 0; i < 6; i++) {
+            six.add(subject("VEHICLE", "VIN-R" + i));
+        }
+        for (Object[] bad : new Object[][] {
+                {"*", List.of(subject("VEHICLE", "VIN-RULES"))},
+                {"VL_RENEW", List.of()},
+                {"VL_RENEW", six},
+                {"VL_RENEW", List.of(subject("VEHICLE", "vin-lower"))}}) {
+            @SuppressWarnings("unchecked")
+            MvcResult r = check((String) bad[0], (List<Map<String, String>>) bad[1], submissionService(), "en");
+            assertThat(r.getResponse().getStatus()).as(String.valueOf(bad[1])).isEqualTo(400);
+            assertThat(code(r)).isEqualTo("VALIDATION_FAILED");
+        }
+        MvcResult twice = check("VL_RENEW", List.of(subject("VEHICLE", "VIN-RULES"), subject("VEHICLE", "VIN-RULES")),
+                submissionService(), "en");
+        assertThat(twice.getResponse().getStatus()).isEqualTo(422);
+        assertThat(code(twice)).isEqualTo("LIST_DUPLICATES");
     }
 }

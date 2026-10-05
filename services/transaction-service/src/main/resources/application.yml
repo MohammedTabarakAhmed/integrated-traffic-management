@@ -35,6 +35,17 @@ itms:
       interval: ${ITMS_DRAFT_EXPIRY_INTERVAL:15m}
       batch-size: ${ITMS_DRAFT_EXPIRY_BATCH_SIZE:100}
       max-batches: ${ITMS_DRAFT_EXPIRY_MAX_BATCHES:50}
+  # Calls to other services through their APIs (ADR-034), each with this service's own client-credentials account
+  # at the identity provider (INT-004). The secret comes from the environment only (SEC-004).
+  clients:
+    # CC-032: eligibility before submission, hold-eligibility-service POST /v1/eligibility-checks. Its account needs
+    # the iam role ELIGIBILITY_CHECKER. Without an answer a submission is refused (503 ELIGIBILITY_UNAVAILABLE).
+    eligibility:
+      base-url: ${ITMS_ELIGIBILITY_URL}
+      token-uri: ${ITMS_OIDC_TOKEN_URI}
+      client-id: ${ITMS_SERVICE_CLIENT_ID:itms-transaction-service}
+      client-secret: ${ITMS_SERVICE_CLIENT_SECRET}
+      timeout: ${ITMS_ELIGIBILITY_TIMEOUT:2s}
   # API_SPECIFICATION §2, ADR-032: state-changing transaction POSTs need an Idempotency-Key; a retry with the same key
   # and request replays the stored response. Retention and lock timeout are set per environment (Q-052).
   idempotency:

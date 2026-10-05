@@ -60,6 +60,31 @@
           }
         }
       ]
+    },
+    {
+      "id": "7d0c1a3e-5b2f-4c1d-9e8a-100000000002",
+      "clientId": "itms-transaction-service",
+      "name": "transaction-service's own account for service-to-service calls (CC-032, ADR-034). LOCAL DEVELOPMENT ONLY: the secret is set by tools/dev/up.sh",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "fullScopeAllowed": false,
+      "protocolMappers": [
+        {
+          "name": "itms-api audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "itms-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
     }
   ],
   "users": [
@@ -95,6 +120,12 @@
       "username": "service-account-itms-directory-feed",
       "enabled": true,
       "serviceAccountClientId": "itms-directory-feed"
+    },
+    {
+      "id": "7d0c1a3e-5b2f-4c1d-9e8a-000000000011",
+      "username": "service-account-itms-transaction-service",
+      "enabled": true,
+      "serviceAccountClientId": "itms-transaction-service"
     }
   ]
 }

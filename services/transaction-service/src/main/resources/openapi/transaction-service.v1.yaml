@@ -383,8 +383,13 @@ paths:
       description: |
         Draft → Submitted, then at once, by the system: → Pending payment when the service has a fee, or → In review
         when it has none, recording that the payment steps were skipped (Q-004). Availability and the home-region rule
-        are checked again at submission (Q-049). Eligibility rules and holds (CC-032) are added with the rules and hold
-        services. A transaction that is not a Draft answers 409 `ILLEGAL_TRANSITION`.
+        are checked again at submission (Q-049). Eligibility (CC-032, ADR-034): hold-eligibility-service is asked
+        whether a hold in force blocks the service for the transaction's subject or the applicant's traffic file; if
+        so the answer is 422 `ELIGIBILITY_BLOCKED`, `detail` gives every reason and next step in plain language in
+        the caller's language, `blocks` lists them (sensitive hold types only as `RESTRICTED` / `CONTACT_AUTHORITY`,
+        Q-053) and the transaction stays a Draft. When eligibility cannot be checked the submission is refused with
+        503 `ELIGIBILITY_UNAVAILABLE` (fail closed). Rule-based eligibility (rules-service) follows with that service.
+        A transaction that is not a Draft answers 409 `ILLEGAL_TRANSITION`.
       x-itms-permission: transaction.create
       parameters:
         - $ref: '#/components/parameters/Reference'
@@ -403,6 +408,7 @@ paths:
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
 
   /v1/transactions/{reference}/cancellations:
     post:
@@ -838,3 +844,17 @@ components:
         correlationId: { type: string }
         requirementRefs: { type: array, items: { type: string } }
         errors: { type: array, items: { type: object } }
+        nextStep:
+          type: string
+          description: '`ELIGIBILITY_BLOCKED` only (CC-032): the next step of the first reason, as a code'
+        blocks:
+          type: array
+          description: '`ELIGIBILITY_BLOCKED` only (CC-032): every reason the service is blocked, as the customer may see it'
+          items:
+            type: object
+            additionalProperties: false
+            required: [reasonCode, nextStep, message]
+            properties:
+              reasonCode: { type: string, description: 'A disclosed hold type code, or `RESTRICTED`' }
+              nextStep: { type: string }
+              message: { type: string }

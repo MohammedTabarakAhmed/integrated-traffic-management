@@ -21,7 +21,7 @@ class DraftExpiryJobTest {
         final List<String> calls = new ArrayList<>();
 
         FakeTransactions(Object... answers) {
-            super(null, null, null, null, null);
+            super(null, null, null, null, null, null);
             this.answers.addAll(List.of(answers));
         }
 

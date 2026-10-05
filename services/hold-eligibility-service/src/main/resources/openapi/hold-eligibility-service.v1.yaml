@@ -18,8 +18,13 @@ info:
     reading `hold.read`, each in a grant that reaches the hold's module. A hold outside the caller's modules answers
     404, as if it did not exist, and is left out of lists.
 
-    Not yet in this version: eligibility checks before submission (CC-032), holds placed and lifted by external
-    agencies' messages (CC-033) and single-transaction overrides (CC-034).
+    Eligibility checks (CC-032; ADR-034): `POST /v1/eligibility-checks` answers whether holds in force block a service
+    for up to five subjects, with a customer-safe reason and next step per block. Hold types the Authority has not
+    chosen to disclose (configuration `itms.eligibility.disclosed-hold-types`; Q-053) are shown only as `RESTRICTED`
+    with `CONTACT_AUTHORITY`. transaction-service calls it at submission with its own service account.
+
+    Not yet in this version: rule-based eligibility (rules-service, CC-050..CC-053), holds placed and lifted by
+    external agencies' messages (CC-033) and single-transaction overrides (CC-034).
 
     The channel is the `X-Channel` header (set by the gateway or BFF); a hold cannot be placed or lifted without a
     known channel. Placing and lifting need an `Idempotency-Key` (ADR-032).
@@ -35,6 +40,7 @@ security:
   - bearerAuth: []
 tags:
   - name: Holds
+  - name: Eligibility
 
 paths:
   /v1/holds:
@@ -166,6 +172,36 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/eligibility-checks:
+    post:
+      tags: [Eligibility]
+      operationId: checkEligibility
+      summary: May a service be submitted for these subjects? (CC-032)
+      description: |
+        Evaluates every hold in force today on the subjects (the transaction's subject and its parties, at most five,
+        each once), whatever module owns the hold, and answers 200 with `eligible` and, when blocked, one entry per
+        distinct reason. The answer never names holds, their sources or reasons: a disclosed hold type is shown by its
+        code and configured next step; every other type as `RESTRICTED` / `CONTACT_AUTHORITY` (Q-053). `message` is
+        the plain-language text in the `Accept-Language` of the request (CC-010, CH-053). Each subject checked is
+        audited as `ELIGIBILITY_CHECKED`, with the holds that blocked it (CC-120). Rule-based eligibility
+        (rules-service) is not part of this version.
+      x-itms-permission: eligibility.check
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EligibilityCheckRequest' }
+      responses:
+        '200':
+          description: The eligibility on the service's current day
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Eligibility' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
 
 components:
@@ -331,6 +367,48 @@ components:
       required: [items]
       properties:
         items: { type: array, items: { $ref: '#/components/schemas/HoldVersion' } }
+    ServiceCode:
+      type: string
+      description: Service code of transaction-service's catalogue (CC-020)
+      pattern: '^[A-Z][A-Z0-9_]{1,19}$'
+    EligibilityCheckRequest:
+      type: object
+      additionalProperties: false
+      required: [serviceCode, subjects]
+      properties:
+        serviceCode: { $ref: '#/components/schemas/ServiceCode' }
+        subjects:
+          type: array
+          minItems: 1
+          maxItems: 5
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/Subject' }
+    EligibilityBlock:
+      type: object
+      additionalProperties: false
+      required: [reasonCode, nextStep, message]
+      properties:
+        reasonCode:
+          type: string
+          description: A disclosed hold type code, or `RESTRICTED` for any other hold
+          pattern: '^[A-Z0-9_]{1,40}$'
+        nextStep:
+          type: string
+          description: What the customer can do, as a code (e.g. `PAY_FINES`, `CONTACT_AUTHORITY`)
+          pattern: '^[A-Z0-9_]{1,40}$'
+        message: { type: string, description: 'Reason and next step in plain language (CH-053)' }
+    Eligibility:
+      type: object
+      additionalProperties: false
+      required: [serviceCode, checkedOn, eligible, blocks]
+      properties:
+        serviceCode: { $ref: '#/components/schemas/ServiceCode' }
+        checkedOn: { type: string, format: date, description: 'The day the holds were evaluated (Q-053)' }
+        eligible: { type: boolean }
+        blocks:
+          type: array
+          description: Empty when eligible; otherwise one entry per distinct reason
+          items: { $ref: '#/components/schemas/EligibilityBlock' }
     Problem:
       type: object
       required: [status, code]

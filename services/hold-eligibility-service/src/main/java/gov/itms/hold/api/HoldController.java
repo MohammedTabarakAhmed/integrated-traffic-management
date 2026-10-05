@@ -7,18 +7,10 @@ import gov.itms.hold.api.ApiModels.LiftHoldRequest;
 import gov.itms.hold.api.ApiModels.PlaceHoldRequest;
 import gov.itms.hold.application.Caller;
 import gov.itms.hold.application.HoldService;
-import gov.itms.hold.domain.Actor;
-import gov.itms.hold.domain.Channel;
 import gov.itms.hold.domain.Hold;
 import gov.itms.hold.domain.Subject;
-import gov.itms.platform.security.Authorisation;
-import gov.itms.platform.security.CurrentActor;
-import gov.itms.platform.security.CurrentActorProvider;
-import gov.itms.platform.security.ScopeTarget;
 import jakarta.validation.Valid;
 import java.net.URI;
-import java.util.Arrays;
-import java.util.List;
 import java.util.UUID;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -39,11 +31,11 @@ import org.springframework.web.bind.annotation.RestController;
 class HoldController {
 
     private final HoldService service;
-    private final CurrentActorProvider actors;
+    private final Callers callers;
 
-    HoldController(HoldService service, CurrentActorProvider actors) {
+    HoldController(HoldService service, Callers callers) {
         this.service = service;
-        this.actors = actors;
+        this.callers = callers;
     }
 
     @PostMapping
@@ -79,24 +71,7 @@ class HoldController {
         return HoldDto.of(service.lift(id, body.reason(), caller()), service.today());
     }
 
-    /** The channel comes from {@code X-Channel}; anything else than a channel of {@link Channel} counts as none. */
     private Caller caller() {
-        CurrentActor current = actors.current();
-        Authorisation authorisation = actors.authorisation();
-        Channel channel = Arrays.stream(Channel.values()).filter(c -> c.name().equals(current.channel())).findFirst()
-                .orElse(null);
-        return new Caller(new Actor(current.userId(), current.username()), channel, new Caller.Grants() {
-            @Override
-            public boolean allows(String permission, String module) {
-                return authorisation.allows(permission, new ScopeTarget(null, null, module));
-            }
-
-            @Override
-            public boolean allowsThroughRole(String permission, List<String> roles, String module) {
-                ScopeTarget target = new ScopeTarget(null, null, module);
-                return authorisation.grants().stream().anyMatch(g -> roles.contains(g.roleCode())
-                        && g.permissions().contains(permission) && g.scopes().allows(target));
-            }
-        });
+        return callers.current();
     }
 }

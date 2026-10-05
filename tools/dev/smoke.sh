@@ -6,7 +6,8 @@
 # -> a service is defined and disabled per region and channel through catalogue maker-checker (CC-020, CC-026)
 # -> a transaction of that service is opened, refused as a duplicate and submitted (CC-021..CC-023, CC-027)
 # -> it is found as the newest of its applicant's transactions (CC-025) -> a retry with the same Idempotency-Key is
-# replayed, not repeated (ADR-032) -> a hold is placed on a vehicle and lifted by its role (CC-030).
+# replayed, not repeated (ADR-032) -> a hold is placed on a vehicle and lifted by its role (CC-030) -> holds block a
+# submission with the customer's reasons and next steps, sensitive ones masked, until lifted (CC-032).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 set -a; source infra/local/.env; set +a
@@ -248,5 +249,34 @@ res=$(post_hold "$CHECKER" "/v1/holds/$hold_id/lifts" '{"reason":"smoke test lif
 versions=$(curl -sf -H "Authorization: Bearer $CHECKER" "$HOLDS/v1/holds/$hold_id/history" | json_field "['items'].__len__()")
 [[ "$versions" == 2 ]] || { echo "FAIL: expected 2 versions, got $versions"; exit 1; }
 echo "   $hold_vin: hold $hold_id placed and lifted (2 versions)"
+
+echo "17. Eligibility (CC-032): holds block a submission with reasons and next steps (a police circular masked); lifted, it goes through"
+# transaction-service asks hold-eligibility-service with its own service account (ELIGIBILITY_CHECKER). A throw-away
+# vehicle per run; both holds end lifted and the transaction ends In review, so nothing is left in force or open.
+elig_vin="SMKELG-$(date +%s)"
+place_on() { # holdType -> hold id
+  local r
+  r=$(post_hold "$CHECKER" /v1/holds "{\"subject\":{\"type\":\"VEHICLE\",\"id\":\"$elig_vin\"},\"holdType\":\"$1\",\"module\":\"VIOLATIONS\",\"source\":\"VIOLATIONS\",\"reason\":\"smoke wanted case $1\",\"blockedServices\":[\"$SVC\"],\"liftableByRoles\":[\"HOLD_OFFICER\"]}")
+  [[ "$(status_of "$r")" == 201 ]] || { echo "FAIL: placing $1 returned $(status_of "$r"): $(body_of "$r")" >&2; exit 1; }
+  body_of "$r" | json_field "['id']"
+}
+fines_id=$(place_on UNPAID_FINES)
+circular_id=$(place_on POLICE_CIRCULAR)
+res=$(post_txn "$CHECKER" /v1/transactions "{\"serviceCode\":\"$SVC\",\"subject\":{\"type\":\"VEHICLE\",\"id\":\"$elig_vin\"},\"applicantFileNumber\":\"TF-SMOKE-ELIG\",\"homeRegion\":\"R1\"}")
+[[ "$(status_of "$res")" == 201 ]] || { echo "FAIL: opening returned $(status_of "$res"): $(body_of "$res")"; exit 1; }
+elig_ref=$(body_of "$res" | json_field "['reference']")
+res=$(post_txn "$CHECKER" "/v1/transactions/$elig_ref/submissions" "")
+blocked=$(body_of "$res" | "$PY" -c "import json,sys; d=json.load(sys.stdin); print(d.get('code'), ','.join(sorted(b['reasonCode'] + '/' + b['nextStep'] for b in d.get('blocks', []))))")
+[[ "$(status_of "$res")" == 422 && "$blocked" == "ELIGIBILITY_BLOCKED RESTRICTED/CONTACT_AUTHORITY,UNPAID_FINES/PAY_FINES" ]] \
+  || { echo "FAIL: submission should be blocked, got $(status_of "$res"): $(body_of "$res")"; exit 1; }
+if body_of "$res" | grep -qi -e wanted -e POLICE; then echo "FAIL: hold details reached the customer: $(body_of "$res")"; exit 1; fi
+for id in "$fines_id" "$circular_id"; do
+  res=$(post_hold "$CHECKER" "/v1/holds/$id/lifts" '{"reason":"smoke test lift"}')
+  [[ "$(status_of "$res")" == 200 ]] || { echo "FAIL: lifting $id returned $(status_of "$res")"; exit 1; }
+done
+res=$(post_txn "$CHECKER" "/v1/transactions/$elig_ref/submissions" "")
+[[ "$(status_of "$res")" == 200 && "$(body_of "$res" | json_field "['status']")" == IN_REVIEW ]] \
+  || { echo "FAIL: submission after lifting returned $(status_of "$res"): $(body_of "$res")"; exit 1; }
+echo "   $elig_ref: blocked ($blocked), then submitted once the holds were lifted"
 
 echo "SMOKE OK"

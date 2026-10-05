@@ -35,6 +35,8 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.dao.DataAccessException;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -61,6 +63,17 @@ class TransactionApiIT {
     @Container
     @ServiceConnection
     static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:17-alpine");
+
+    /** The identity provider and hold-eligibility-service, for eligibility at submission (CC-032). */
+    static final EligibilityStub ELIGIBILITY = new EligibilityStub();
+
+    @DynamicPropertySource
+    static void eligibilityClient(DynamicPropertyRegistry registry) {
+        registry.add("itms.clients.eligibility.base-url", ELIGIBILITY::baseUrl);
+        registry.add("itms.clients.eligibility.token-uri", () -> ELIGIBILITY.baseUrl() + "/token");
+        registry.add("itms.clients.eligibility.client-id", () -> EligibilityStub.CLIENT_ID);
+        registry.add("itms.clients.eligibility.client-secret", () -> EligibilityStub.CLIENT_SECRET);
+    }
 
     private static final LocalDate TODAY = LocalDate.now(ZoneOffset.UTC);
     private static final int YEAR = TODAY.getYear();
@@ -735,5 +748,68 @@ class TransactionApiIT {
     private String status(String reference) {
         return db.sql("select status from service_transaction where reference = :ref").param("ref", reference)
                 .query(String.class).single();
+    }
+
+    @Test
+    @Tag("CC-032")
+    @Tag("CC-022")
+    @DisplayName("CC-032: holds block submission with every reason and next step in the caller's language; the "
+            + "transaction stays a Draft; no answer means no submission (503)")
+    void eligibilityAtSubmission() throws Exception {
+        define("ITX_ELIG", "FEE", true, false);
+        String ref = openOk("ITX_ELIG", "BLOCKED-1");
+        ELIGIBILITY.received.clear();
+
+        MvcResult blocked = call(post("/v1/transactions/" + ref + "/submissions").header("Accept-Language", "en"),
+                Request.Method.POST, "/v1/transactions/" + ref + "/submissions", null, officer(), "PORTAL");
+        assertThat(blocked.getResponse().getStatus()).as(blocked.getResponse().getContentAsString()).isEqualTo(422);
+        JsonNode problem = body(blocked);
+        assertThat(problem.get("code").asString()).isEqualTo("ELIGIBILITY_BLOCKED");
+        assertThat(problem.get("detail").asString()).isEqualTo("There are unpaid fines. Pay them, then try again. "
+                + "A restriction applies. Contact the Authority.");
+        assertThat(problem.get("nextStep").asString()).isEqualTo("PAY_FINES");
+        assertThat(problem.get("blocks")).hasSize(2);
+        assertThat(problem.get("blocks").get(1).get("reasonCode").asString()).isEqualTo("RESTRICTED");
+        assertThat(problem.get("blocks").get(1).get("nextStep").asString()).isEqualTo("CONTACT_AUTHORITY");
+        assertThat(problem.get("requirementRefs").toString()).contains("CC-032");
+
+        // Asked with transaction-service's own token, the request's channel and language, for the subject and the
+        // applicant's traffic file.
+        EligibilityStub.Received asked = ELIGIBILITY.received.getFirst();
+        assertThat(asked.authorisation()).isEqualTo("Bearer " + EligibilityStub.TOKEN);
+        assertThat(asked.channel()).isEqualTo("PORTAL");
+        assertThat(asked.language()).isEqualTo("en");
+        assertThat(asked.correlationId()).isEqualTo("txn-it-transactions");
+        assertThat(asked.body().get("serviceCode").asString()).isEqualTo("ITX_ELIG");
+        assertThat(asked.body().get("subjects")).hasSize(2);
+        assertThat(asked.body().get("subjects").get(0).get("type").asString()).isEqualTo("VEHICLE");
+        assertThat(asked.body().get("subjects").get(0).get("id").asString()).isEqualTo("BLOCKED-1");
+        assertThat(asked.body().get("subjects").get(1).get("type").asString()).isEqualTo("TRAFFIC_FILE");
+        assertThat(asked.body().get("subjects").get(1).get("id").asString()).isEqualTo("TF-1001");
+
+        MvcResult arabic = call(post("/v1/transactions/" + ref + "/submissions").header("Accept-Language", "ar"),
+                Request.Method.POST, "/v1/transactions/" + ref + "/submissions", null, officer(), "BACKOFFICE");
+        assertThat(body(arabic).get("detail").asString()).isEqualTo("توجد مخالفات غير مدفوعة. تواصل مع الهيئة.");
+
+        JsonNode draft = body(getAs("/v1/transactions/" + ref, reader()));
+        assertThat(draft.get("status").asString()).isEqualTo("DRAFT");
+        assertThat(draft.get("version").asLong()).isEqualTo(1);
+        assertThat(db.sql("select count(*) from audit_outbox where entity_id = :ref and action = 'TRANSACTION_SUBMITTED'")
+                .param("ref", ref).query(Long.class).single()).isZero();
+        assertThat(db.sql("select count(*) from transaction_status_history h join service_transaction t"
+                + " on t.id = h.transaction_id where t.reference = :ref").param("ref", ref).query(Long.class).single())
+                .isEqualTo(1);
+
+        // hold-eligibility-service cannot answer: refused, still a Draft.
+        String down = openOk("ITX_ELIG", "DOWN-1");
+        MvcResult unavailable = postAs("/v1/transactions/" + down + "/submissions", null, officer());
+        assertThat(unavailable.getResponse().getStatus()).isEqualTo(503);
+        assertThat(body(unavailable).get("code").asString()).isEqualTo("ELIGIBILITY_UNAVAILABLE");
+        assertThat(body(getAs("/v1/transactions/" + down, reader())).get("status").asString()).isEqualTo("DRAFT");
+
+        // Eligible: submitted as before; a refused submission keeps nothing under its Idempotency-Key.
+        String clear = openOk("ITX_ELIG", "VIN-ELIG-OK");
+        assertThat(body(postAs("/v1/transactions/" + clear + "/submissions", null, officer())).get("status")
+                .asString()).isEqualTo("PENDING_PAYMENT");
     }
 }

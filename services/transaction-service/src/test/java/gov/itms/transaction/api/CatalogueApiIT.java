@@ -50,7 +50,11 @@ import tools.jackson.databind.ObjectMapper;
         "itms.security.jwk-set-uri=https://idp.test/realms/itms/protocol/openid-connect/certs",
         // Grants from token claims: this test covers the catalogue, not where grants come from (ADR-022 is covered
         // by the platform tests and by iam-service).
-        "itms.security.authorisation-source=token-claims"})
+        "itms.security.authorisation-source=token-claims",
+        // Never called here: submission (and so eligibility, CC-032) is covered by TransactionApiIT.
+        "itms.clients.eligibility.base-url=http://127.0.0.1:9",
+        "itms.clients.eligibility.token-uri=http://127.0.0.1:9/token",
+        "itms.clients.eligibility.client-secret=unused"})
 @AutoConfigureMockMvc
 @Testcontainers
 class CatalogueApiIT {

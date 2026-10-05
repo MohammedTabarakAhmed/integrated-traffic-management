@@ -8,7 +8,8 @@ import java.util.List;
  */
 public class DomainException extends RuntimeException {
 
-    public enum Kind { VALIDATION, NOT_FOUND, CONFLICT, SEGREGATION_OF_DUTIES, OUT_OF_SCOPE }
+    /** {@code UNAVAILABLE}: a service this rule depends on could not answer, so the action is refused (fail closed). */
+    public enum Kind { VALIDATION, NOT_FOUND, CONFLICT, SEGREGATION_OF_DUTIES, OUT_OF_SCOPE, UNAVAILABLE }
 
     private final Kind kind;
     private final String code;

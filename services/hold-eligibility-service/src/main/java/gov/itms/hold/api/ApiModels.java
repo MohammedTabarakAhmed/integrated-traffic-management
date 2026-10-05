@@ -4,6 +4,7 @@ import gov.itms.hold.application.HoldRepository.HoldVersion;
 import gov.itms.hold.domain.Actor;
 import gov.itms.hold.domain.Channel;
 import gov.itms.hold.domain.Codes;
+import gov.itms.hold.domain.Eligibility;
 import gov.itms.hold.domain.Hold;
 import gov.itms.hold.domain.HoldStatus;
 import gov.itms.hold.domain.Subject;
@@ -96,5 +97,24 @@ final class ApiModels {
     }
 
     record Collection<T>(List<T> items) {
+    }
+
+    /** CC-032: may {@code serviceCode} be submitted for these subjects (the transaction's subject and its parties)? */
+    record EligibilityCheckRequest(
+            @NotNull @Pattern(regexp = Codes.SERVICE_CODE) String serviceCode,
+            @NotNull @Size(min = 1, max = Eligibility.MAX_SUBJECTS) List<@NotNull @Valid SubjectDto> subjects) {
+
+        List<Subject> toDomain() {
+            return subjects.stream().map(SubjectDto::toDomain).toList();
+        }
+    }
+
+    /** One reason the service is blocked, as the customer may be told it, with the text in the caller's language. */
+    record EligibilityBlockDto(String reasonCode, String nextStep, String message) {
+    }
+
+    /** The answer of a check; it never names holds, their sources or their reasons (Q-053). */
+    record EligibilityDto(String serviceCode, LocalDate checkedOn, boolean eligible,
+                          List<EligibilityBlockDto> blocks) {
     }
 }

@@ -55,14 +55,17 @@ public class TransactionService {
     private final ServiceDefinitionRepository services;
     private final AvailabilityRuleRepository rules;
     private final TransactionRepository transactions;
+    private final EligibilityChecker eligibility;
     private final AuditRecorder audit;
     private final Clock clock;
 
     public TransactionService(ServiceDefinitionRepository services, AvailabilityRuleRepository rules,
-                              TransactionRepository transactions, AuditRecorder audit, Clock clock) {
+                              TransactionRepository transactions, EligibilityChecker eligibility, AuditRecorder audit,
+                              Clock clock) {
         this.services = services;
         this.rules = rules;
         this.transactions = transactions;
+        this.eligibility = eligibility;
         this.audit = audit;
         this.clock = clock;
     }
@@ -107,7 +110,10 @@ public class TransactionService {
 
     /**
      * Draft → Submitted, then Pending payment or (no fee) In review with the skip recorded (CC-022, Q-004). The
-     * service must still be available and usable from the home-region rule's point of view (Q-049).
+     * service must still be available and usable from the home-region rule's point of view (Q-049), and eligible
+     * (CC-032): no hold in force may block it for the subject or the applicant's traffic file, otherwise 422
+     * {@code ELIGIBILITY_BLOCKED} with the customer's reasons and next steps and the transaction stays a Draft. The
+     * check runs last, while the Draft is locked, so a second submission waits for it (ADR-034).
      */
     @Transactional
     public Transaction submit(String reference, Caller caller) {
@@ -120,6 +126,11 @@ public class TransactionService {
         Transaction.checkAccess(definition.spec(), Availability.of(definition.spec(),
                 rules.findByService(definition.code()), transaction.region(), channel,
                 LocalDate.ofInstant(now, clock.getZone())), transaction.homeRegion());
+        List<EligibilityChecker.Block> blocks = eligibility.check(transaction.serviceCode(), parties(transaction),
+                channel);
+        if (!blocks.isEmpty()) {
+            throw new EligibilityBlockedException(transaction.serviceCode(), blocks);
+        }
         transactions.saveStatus(transaction);
         transaction.routePayment(channel, now);
         transactions.saveStatus(transaction);
@@ -232,6 +243,12 @@ public class TransactionService {
     }
 
     /** CC-027. The open transaction's reference is shown only to a caller who may read it. */
+    /** Whose holds decide eligibility (CC-032): the subject and, if it is another one, the applicant's file. */
+    static List<Subject> parties(Transaction transaction) {
+        Subject applicant = new Subject(Subject.Type.TRAFFIC_FILE, transaction.applicantFileNumber());
+        return applicant.equals(transaction.subject()) ? List.of(applicant) : List.of(transaction.subject(), applicant);
+    }
+
     private static DomainException duplicate(String serviceCode, Transaction open, Caller caller) {
         String shown = caller.scopes().allows(READ, open.region(), open.module()) ? " (" + open.reference() + ")" : "";
         return new DomainException(DomainException.Kind.CONFLICT, "DUPLICATE_OPEN_TRANSACTION",

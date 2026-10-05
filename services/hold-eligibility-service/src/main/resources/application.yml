@@ -26,6 +26,25 @@ itms:
     iam:
       base-url: ${ITMS_IAM_URL:}
       cache-ttl: ${ITMS_IAM_CACHE_TTL:60s}
+  # CC-032, Q-053 (owner decision 2026-10-05: masked per type): hold types the customer is told about when they block
+  # a service, each with its next step. Any type not listed (court order, police circular, administrative ban,
+  # deceased, external travel restriction, or a new type) is shown only as RESTRICTED with CONTACT_AUTHORITY.
+  # Business configuration, set per environment (ITMS_ELIGIBILITY_DISCLOSED_HOLD_TYPES_<n>_HOLD_TYPE/_NEXT_STEP);
+  # every code needs a customer text in messages*.properties or the service does not start.
+  eligibility:
+    disclosed-hold-types:
+      - hold-type: UNPAID_FINES
+        next-step: PAY_FINES
+      - hold-type: EXPIRED_INSURANCE
+        next-step: RENEW_INSURANCE
+      - hold-type: FAILED_INSPECTION
+        next-step: PASS_INSPECTION
+      - hold-type: MORTGAGE
+        next-step: CLEAR_MORTGAGE
+      - hold-type: IMPOUND
+        next-step: RELEASE_VEHICLE
+      - hold-type: DRIVING_BAN
+        next-step: CONTACT_AUTHORITY
   # API_SPECIFICATION §2, ADR-032: placing and lifting holds need an Idempotency-Key; a retry with the same key and
   # request replays the stored response. Retention and lock timeout are set per environment (Q-052).
   idempotency:

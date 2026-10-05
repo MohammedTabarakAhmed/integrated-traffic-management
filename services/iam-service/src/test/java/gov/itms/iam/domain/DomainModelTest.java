@@ -484,7 +484,8 @@ class DomainModelTest {
 
     @Test
     @Tag("SEC-007")
-    @DisplayName("SEC-007: the review period is configuration (default P3M) and must be positive")
+    @Tag("NFR-042")
+    @DisplayName("SEC-007/NFR-042: the review period is configuration (default P3M), positive and at most a quarter")
     void accessReviewPolicyPeriod() {
         AccessReviewPolicy quarterly = AccessReviewPolicy.parse(" P3M ");
         assertThat(quarterly.period()).isEqualTo(java.time.Period.ofMonths(3));
@@ -492,7 +493,11 @@ class DomainModelTest {
         assertThat(quarterly.dueAfter(NOW)).isEqualTo(Instant.parse("2027-01-04T08:00:00Z"));
         assertThat(AccessReviewPolicy.parse("P1M").reviewedSince(NOW)).isEqualTo(Instant.parse("2026-09-04T08:00:00Z"));
 
-        for (String bad : List.of("P0D", "P0M", "-P3M", "P1M-40D", "three months", "")) {
+        assertThat(AccessReviewPolicy.parse("P92D").period().getDays()).isEqualTo(92);
+        assertThat(AccessReviewPolicy.parse("P2M30D").period().getMonths()).isEqualTo(2);
+        // NFR-042: longer than a quarter is outside the approved range (SEC-007 "every quarter").
+        for (String bad : List.of("P0D", "P0M", "-P3M", "P1M-40D", "three months", "", "P4M", "P3M1D", "P93D",
+                "P1Y", "P2M31D", "P12M")) {
             assertThatThrownBy(() -> AccessReviewPolicy.parse(bad)).as(bad)
                     .isInstanceOf(IllegalArgumentException.class);
         }

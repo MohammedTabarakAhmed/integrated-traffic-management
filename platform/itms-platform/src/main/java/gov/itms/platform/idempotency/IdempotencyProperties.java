@@ -30,8 +30,9 @@ public record IdempotencyProperties(
         if (enabled && paths.isEmpty()) {
             throw new IllegalArgumentException("itms.idempotency.paths must list at least one path when enabled");
         }
-        if (retention == null || retention.isNegative() || retention.isZero()) {
-            throw new IllegalArgumentException("itms.idempotency.retention must be positive");
+        if (retention == null || retention.compareTo(Duration.ofHours(1)) < 0
+                || retention.compareTo(Duration.ofDays(7)) > 0) {
+            throw new IllegalArgumentException("itms.idempotency.retention must be 1 hour to 7 days (NFR-042, Q-056)");
         }
         if (lockTimeout == null || lockTimeout.isNegative() || lockTimeout.isZero()
                 || lockTimeout.compareTo(retention) >= 0) {

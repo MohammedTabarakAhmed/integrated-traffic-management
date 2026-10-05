@@ -16,7 +16,9 @@ services:
     environment:
       POSTGRES_DB: refdata
       POSTGRES_USER: ${REFDATA_DB_USER:?run tools/dev/up.sh}
-      POSTGRES_PASSWORD: ${REFDATA_DB_PASSWORD:?run tools/dev/up.sh}
+      POSTGRES_PASSWORD_FILE: /run/secrets/refdata_db_password
+    secrets:
+      - refdata_db_password
     volumes:
       - refdata-db:/var/lib/postgresql/data
     healthcheck:
@@ -31,7 +33,9 @@ services:
     environment:
       POSTGRES_DB: iam
       POSTGRES_USER: ${IAM_DB_USER:?run tools/dev/up.sh}
-      POSTGRES_PASSWORD: ${IAM_DB_PASSWORD:?run tools/dev/up.sh}
+      POSTGRES_PASSWORD_FILE: /run/secrets/iam_db_password
+    secrets:
+      - iam_db_password
     volumes:
       - iam-db:/var/lib/postgresql/data
     healthcheck:
@@ -45,7 +49,9 @@ services:
     environment:
       POSTGRES_DB: transaction
       POSTGRES_USER: ${TXN_DB_USER:?run tools/dev/up.sh}
-      POSTGRES_PASSWORD: ${TXN_DB_PASSWORD:?run tools/dev/up.sh}
+      POSTGRES_PASSWORD_FILE: /run/secrets/txn_db_password
+    secrets:
+      - txn_db_password
     volumes:
       - transaction-db:/var/lib/postgresql/data
     healthcheck:
@@ -59,7 +65,9 @@ services:
     environment:
       POSTGRES_DB: hold
       POSTGRES_USER: ${HOLD_DB_USER:?run tools/dev/up.sh}
-      POSTGRES_PASSWORD: ${HOLD_DB_PASSWORD:?run tools/dev/up.sh}
+      POSTGRES_PASSWORD_FILE: /run/secrets/hold_db_password
+    secrets:
+      - hold_db_password
     volumes:
       - hold-db:/var/lib/postgresql/data
     healthcheck:
@@ -93,12 +101,14 @@ services:
       <<: *itms-observability
       IAM_DB_URL: jdbc:postgresql://iam-postgres:5432/iam
       IAM_DB_USER: ${IAM_DB_USER}
-      IAM_DB_PASSWORD: ${IAM_DB_PASSWORD}
       ITMS_OIDC_ISSUER: http://localhost:8180/realms/itms
       ITMS_OIDC_JWKS_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/certs
       # First administrator of this environment (fixed id of dev.iam-admin in the local realm).
       ITMS_IAM_BOOTSTRAP_ADMIN_SUBJECT: 7d0c1a3e-5b2f-4c1d-9e8a-000000000001
       ITMS_IAM_BOOTSTRAP_ADMIN_USERNAME: dev.iam-admin
+    secrets:
+      - source: iam_db_password
+        target: spring.datasource.password
     ports:
       - "127.0.0.1:8082:8080"
     depends_on:
@@ -120,11 +130,13 @@ services:
       <<: *itms-observability
       REFDATA_DB_URL: jdbc:postgresql://postgres:5432/refdata
       REFDATA_DB_USER: ${REFDATA_DB_USER}
-      REFDATA_DB_PASSWORD: ${REFDATA_DB_PASSWORD}
       ITMS_OIDC_ISSUER: http://localhost:8180/realms/itms
       ITMS_OIDC_JWKS_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/certs
       ITMS_AUTHORISATION_SOURCE: iam
       ITMS_IAM_URL: http://iam-service:8080
+    secrets:
+      - source: refdata_db_password
+        target: spring.datasource.password
     ports:
       - "127.0.0.1:8081:8080"
     depends_on:
@@ -148,7 +160,6 @@ services:
       <<: *itms-observability
       TXN_DB_URL: jdbc:postgresql://transaction-postgres:5432/transaction
       TXN_DB_USER: ${TXN_DB_USER}
-      TXN_DB_PASSWORD: ${TXN_DB_PASSWORD}
       ITMS_OIDC_ISSUER: http://localhost:8180/realms/itms
       ITMS_OIDC_JWKS_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/certs
       ITMS_AUTHORISATION_SOURCE: iam
@@ -157,7 +168,12 @@ services:
       ITMS_ELIGIBILITY_URL: http://hold-eligibility-service:8080
       ITMS_OIDC_TOKEN_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/token
       ITMS_SERVICE_CLIENT_ID: itms-transaction-service
-      ITMS_SERVICE_CLIENT_SECRET: ${DEV_TRANSACTION_SERVICE_SECRET:?run tools/dev/up.sh}
+      # its secret is the file itms.clients.eligibility.client-secret (below), not an environment variable
+    secrets:
+      - source: txn_db_password
+        target: spring.datasource.password
+      - source: transaction_service_client_secret
+        target: itms.clients.eligibility.client-secret
     ports:
       - "127.0.0.1:8083:8080"
     depends_on:
@@ -181,11 +197,13 @@ services:
       <<: *itms-observability
       HOLD_DB_URL: jdbc:postgresql://hold-postgres:5432/hold
       HOLD_DB_USER: ${HOLD_DB_USER}
-      HOLD_DB_PASSWORD: ${HOLD_DB_PASSWORD}
       ITMS_OIDC_ISSUER: http://localhost:8180/realms/itms
       ITMS_OIDC_JWKS_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/certs
       ITMS_AUTHORISATION_SOURCE: iam
       ITMS_IAM_URL: http://iam-service:8080
+    secrets:
+      - source: hold_db_password
+        target: spring.datasource.password
     ports:
       - "127.0.0.1:8084:8080"
     depends_on:
@@ -248,7 +266,7 @@ services:
     image: grafana/grafana:13.2.3
     environment:
       GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?run tools/dev/up.sh}
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
       GF_AUTH_ANONYMOUS_ENABLED: "false"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
@@ -256,12 +274,31 @@ services:
     volumes:
       - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
       - grafana-data:/var/lib/grafana
+    secrets:
+      - grafana_admin_password
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:
       - prometheus
       - loki
       - tempo
+
+# Secrets (SEC-004, ADR-038): taken from the generated infra/local/.env on the host and mounted as files under
+# /run/secrets/ in the containers, never set as container environment variables. In real environments the secret
+# store delivers the same files (Kubernetes secrets through the external-secrets operator, ADR-014).
+secrets:
+  refdata_db_password:
+    environment: REFDATA_DB_PASSWORD
+  iam_db_password:
+    environment: IAM_DB_PASSWORD
+  txn_db_password:
+    environment: TXN_DB_PASSWORD
+  hold_db_password:
+    environment: HOLD_DB_PASSWORD
+  transaction_service_client_secret:
+    environment: DEV_TRANSACTION_SERVICE_SECRET
+  grafana_admin_password:
+    environment: GRAFANA_ADMIN_PASSWORD
 
 volumes:
   refdata-db:

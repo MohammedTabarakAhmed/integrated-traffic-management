@@ -23,15 +23,18 @@ public record DraftExpiryProperties(
         @DefaultValue("50") int maxBatches) {
 
     public DraftExpiryProperties {
-        if (period == null || period.isNegative() || period.isZero()) {
-            throw new IllegalArgumentException("itms.transaction.draft-expiry.period must be positive (CC-024)");
+        if (period == null || period.compareTo(Duration.ofDays(1)) < 0 || period.compareTo(Duration.ofDays(90)) > 0) {
+            throw new IllegalArgumentException("itms.transaction.draft-expiry.period must be 1 to 90 days "
+                    + "(CC-024, NFR-042, Q-056)");
         }
-        if (interval == null || interval.isNegative() || interval.isZero()) {
-            throw new IllegalArgumentException("itms.transaction.draft-expiry.interval must be positive");
+        if (interval == null || interval.isNegative() || interval.isZero()
+                || interval.compareTo(Duration.ofDays(1)) > 0) {
+            throw new IllegalArgumentException("itms.transaction.draft-expiry.interval must be positive and at most "
+                    + "1 day (NFR-042)");
         }
-        if (batchSize < 1 || batchSize > 1000 || maxBatches < 1) {
+        if (batchSize < 1 || batchSize > 1000 || maxBatches < 1 || maxBatches > 1000) {
             throw new IllegalArgumentException(
-                    "itms.transaction.draft-expiry.batch-size must be 1-1000 and max-batches at least 1");
+                    "itms.transaction.draft-expiry.batch-size and max-batches must be 1-1000 (NFR-042)");
         }
     }
 }

@@ -113,6 +113,7 @@ class IdempotencyKeysTest {
     }
 
     @Test
+    @Tag("NFR-042")
     void propertiesRejectUnsafeValues() {
         assertThat(new IdempotencyProperties(true, List.of("/v1/x"), Duration.ofHours(1), Duration.ofSeconds(5),
                 Duration.ofMinutes(1), 10).paths()).containsExactly("/v1/x");
@@ -122,6 +123,13 @@ class IdempotencyKeysTest {
                 Duration.ofMinutes(1), 10)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new IdempotencyProperties(false, null, Duration.ZERO, Duration.ofSeconds(5),
                 Duration.ofMinutes(1), 10)).isInstanceOf(IllegalArgumentException.class);
+        // NFR-042, Q-056: retention 1 hour to 7 days.
+        assertThatThrownBy(() -> new IdempotencyProperties(false, null, Duration.ofMinutes(59), Duration.ofSeconds(5),
+                Duration.ofMinutes(1), 10)).isInstanceOf(IllegalArgumentException.class).hasMessageContaining("retention");
+        assertThatThrownBy(() -> new IdempotencyProperties(false, null, Duration.ofDays(8), Duration.ofSeconds(5),
+                Duration.ofMinutes(1), 10)).isInstanceOf(IllegalArgumentException.class).hasMessageContaining("retention");
+        assertThat(new IdempotencyProperties(false, null, Duration.ofDays(7), Duration.ofSeconds(5),
+                Duration.ofMinutes(1), 10).retention()).hasDays(7);
         assertThatThrownBy(() -> new IdempotencyProperties(false, null, Duration.ofHours(1), Duration.ofHours(1),
                 Duration.ofMinutes(1), 10)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new IdempotencyProperties(false, null, Duration.ofHours(1), Duration.ofSeconds(5),

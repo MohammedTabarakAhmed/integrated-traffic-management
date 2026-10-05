@@ -36,10 +36,27 @@ public record ItmsSecurityProperties(
      *                        to reach this service
      * @param cacheMaxEntries cache bound (one entry per distinct token)
      */
+    /**
+     * The iam grant lookup (ADR-022). Approved ranges (NFR-042): timeout above 0 and at most 30 s; cache time 0 to
+     * 5 min (a leaver's grants are dropped within it, SEC-007); 1 to 1,000,000 cached tokens.
+     */
     public record Iam(
             String baseUrl,
             @DefaultValue("2s") Duration timeout,
             @DefaultValue("60s") Duration cacheTtl,
             @DefaultValue("10000") int cacheMaxEntries) {
+
+        public Iam {
+            if (timeout == null || timeout.isNegative() || timeout.isZero()
+                    || timeout.compareTo(Duration.ofSeconds(30)) > 0) {
+                throw new IllegalArgumentException("itms.security.iam.timeout must be more than 0 and at most 30s");
+            }
+            if (cacheTtl == null || cacheTtl.isNegative() || cacheTtl.compareTo(Duration.ofMinutes(5)) > 0) {
+                throw new IllegalArgumentException("itms.security.iam.cache-ttl must be 0 to 5m (SEC-007, ADR-022)");
+            }
+            if (cacheMaxEntries < 1 || cacheMaxEntries > 1_000_000) {
+                throw new IllegalArgumentException("itms.security.iam.cache-max-entries must be 1-1000000");
+            }
+        }
     }
 }

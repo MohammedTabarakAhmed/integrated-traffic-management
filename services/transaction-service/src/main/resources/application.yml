@@ -3,6 +3,10 @@
 spring:
   application:
     name: transaction-service
+  # Secrets arrive as files, one per property, named after it (SEC-004, ADR-038): mounted by the platform
+  # (Kubernetes secrets from the secret store; compose secrets locally), never as environment variables.
+  config:
+    import: "optional:configtree:${ITMS_SECRETS_DIR:/run/secrets/}"
   datasource:
     url: ${TXN_DB_URL}
     username: ${TXN_DB_USER}

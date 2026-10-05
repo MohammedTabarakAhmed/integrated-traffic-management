@@ -10,7 +10,7 @@
 # submission with the customer's reasons and next steps, sensitive ones masked, until lifted (CC-032) -> a supervisor
 # overrides a hold for one transaction, which then goes through (CC-034) -> Prometheus scrapes every service, a
 # submission's trace crosses transaction-service and hold-eligibility-service, and every service's logs reach Loki
-# (NFR-040).
+# (NFR-040) -> no ITMS container holds a password or secret in its environment; they read secret files (SEC-004).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 set -a; source infra/local/.env; set +a
@@ -346,5 +346,18 @@ for svc in iam-service reference-data-service transaction-service hold-eligibili
   [[ "$logged" == *"'$svc'"* ]] || { echo "FAIL: no logs from $svc in Loki: $logged"; exit 1; }
 done
 echo "   trace $trace_id: $services; logs from $logged"
+
+echo "20. Secrets (SEC-004): no service or database container has a password or secret in its environment"
+for c in iam-service reference-data-service transaction-service hold-eligibility-service postgres iam-postgres \
+         transaction-postgres hold-postgres grafana; do
+  id=$(docker compose -f infra/local/compose.yaml --env-file infra/local/.env ps -q "$c")
+  leaked=$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$id" \
+    | grep -iE '^[^=]*(PASSWORD|SECRET)[^=]*=' | grep -vE '^[^=]*_FILE=' | cut -d= -f1 || true)
+  [[ -z "$leaked" ]] || { echo "FAIL: $c has secrets in its environment: $leaked"; exit 1; }
+done
+files=$(MSYS_NO_PATHCONV=1 docker compose -f infra/local/compose.yaml --env-file infra/local/.env exec -T transaction-service ls /run/secrets)
+[[ "$files" == *spring.datasource.password* && "$files" == *itms.clients.eligibility.client-secret* ]] \
+  || { echo "FAIL: transaction-service secret files missing: $files"; exit 1; }
+echo "   9 containers checked; services read their secrets from /run/secrets"
 
 echo "SMOKE OK"

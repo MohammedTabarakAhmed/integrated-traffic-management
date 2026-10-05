@@ -71,7 +71,8 @@ class DraftExpiryJobTest {
 
     @Test
     @Tag("CC-024")
-    @DisplayName("CC-024: the period, interval and batch settings are refused when not positive")
+    @Tag("NFR-042")
+    @DisplayName("CC-024/NFR-042: the period, interval and batch settings are refused outside their ranges")
     void configurationIsValidated() {
         Duration day = Duration.ofDays(1);
         assertThatThrownBy(() -> new DraftExpiryProperties(true, Duration.ZERO, day, 1, 1))
@@ -86,6 +87,17 @@ class DraftExpiryJobTest {
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new DraftExpiryProperties(true, day, day, 1, 0))
                 .isInstanceOf(IllegalArgumentException.class);
+        // NFR-042: approved ranges; the Draft period is 1 to 90 days (Q-056).
+        assertThatThrownBy(() -> new DraftExpiryProperties(true, day.minusSeconds(1), day, 1, 1))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("period");
+        assertThatThrownBy(() -> new DraftExpiryProperties(true, Duration.ofDays(91), day, 1, 1))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("period");
+        assertThat(new DraftExpiryProperties(true, Duration.ofDays(90), day, 1, 1).period()).hasDays(90);
+        assertThatThrownBy(() -> new DraftExpiryProperties(true, day, day.plusSeconds(1), 1, 1))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("interval");
+        assertThatThrownBy(() -> new DraftExpiryProperties(true, day, day, 1, 1001))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(new DraftExpiryProperties(true, day, day, 1, 1000).maxBatches()).isEqualTo(1000);
         assertThat(new DraftExpiryProperties(true, day, day, 1000, 1).batchSize()).isEqualTo(1000);
     }
 }

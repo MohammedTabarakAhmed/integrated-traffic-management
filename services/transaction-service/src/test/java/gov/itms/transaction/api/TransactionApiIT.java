@@ -753,6 +753,7 @@ class TransactionApiIT {
     @Test
     @Tag("CC-032")
     @Tag("CC-022")
+    @Tag("NFR-040")
     @DisplayName("CC-032: holds block submission with every reason and next step in the caller's language; the "
             + "transaction stays a Draft; no answer means no submission (503)")
     void eligibilityAtSubmission() throws Exception {
@@ -760,7 +761,10 @@ class TransactionApiIT {
         String ref = openOk("ITX_ELIG", "BLOCKED-1");
         ELIGIBILITY.received.clear();
 
-        MvcResult blocked = call(post("/v1/transactions/" + ref + "/submissions").header("Accept-Language", "en"),
+        // The caller's W3C trace context (as the gateway sends it) continues into the call (NFR-040).
+        String traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
+        MvcResult blocked = call(post("/v1/transactions/" + ref + "/submissions").header("Accept-Language", "en")
+                        .header("traceparent", "00-" + traceId + "-00f067aa0ba902b7-01"),
                 Request.Method.POST, "/v1/transactions/" + ref + "/submissions", null, officer(), "PORTAL");
         assertThat(blocked.getResponse().getStatus()).as(blocked.getResponse().getContentAsString()).isEqualTo(422);
         JsonNode problem = body(blocked);
@@ -780,6 +784,8 @@ class TransactionApiIT {
         assertThat(asked.channel()).isEqualTo("PORTAL");
         assertThat(asked.language()).isEqualTo("en");
         assertThat(asked.correlationId()).isEqualTo("txn-it-transactions");
+        assertThat(asked.traceparent()).matches("00-" + traceId + "-[0-9a-f]{16}-01")
+                .doesNotContain("00f067aa0ba902b7"); // same trace, this service's own client span as parent
         assertThat(asked.body().get("serviceCode").asString()).isEqualTo("ITX_ELIG");
         assertThat(asked.body().get("transactionReference").asString()).isEqualTo(ref);
         assertThat(asked.body().get("subjects")).hasSize(2);

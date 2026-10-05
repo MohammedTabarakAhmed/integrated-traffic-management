@@ -239,7 +239,8 @@ class ReferenceDataApiIT {
 
         assertThat(getAs("/v1/reference-lists/HOLD_TYPE/items/COURT_ORDER/history", maker()).getResponse()
                 .getStatus()).isEqualTo(403);
-        assertThat(mvc.perform(get("/actuator/health")).andReturn().getResponse().getStatus()).isEqualTo(200);
+        // Probes are served on the management port only (ADR-037, ObservabilityIT); the API port has none.
+        assertThat(mvc.perform(get("/actuator/health")).andReturn().getResponse().getStatus()).isEqualTo(404);
     }
 
     @Test

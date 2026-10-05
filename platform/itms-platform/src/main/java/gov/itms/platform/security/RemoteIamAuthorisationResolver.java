@@ -1,6 +1,7 @@
 package gov.itms.platform.security;
 
 import gov.itms.platform.web.CorrelationIdFilter;
+import io.micrometer.observation.ObservationRegistry;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -39,12 +40,14 @@ public class RemoteIamAuthorisationResolver implements AuthorisationResolver {
     private record Cached(Authorisation authorisation, Instant expiresAt) {
     }
 
+    /** Calls are observed through {@code observations}, which also sends the trace context (NFR-040). */
     public RemoteIamAuthorisationResolver(String baseUrl, Duration timeout, Duration cacheTtl, int maxEntries,
-                                          Clock clock) {
+                                          Clock clock, ObservationRegistry observations) {
         JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(
                 java.net.http.HttpClient.newBuilder().connectTimeout(timeout).build());
         factory.setReadTimeout(timeout);
-        this.client = RestClient.builder().baseUrl(Objects.requireNonNull(baseUrl)).requestFactory(factory).build();
+        this.client = RestClient.builder().baseUrl(Objects.requireNonNull(baseUrl)).requestFactory(factory)
+                .observationRegistry(observations).build();
         this.cacheTtl = cacheTtl;
         this.maxEntries = maxEntries;
         this.clock = clock;

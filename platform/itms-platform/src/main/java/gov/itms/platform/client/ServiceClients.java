@@ -1,6 +1,7 @@
 package gov.itms.platform.client;
 
 import gov.itms.platform.web.CorrelationIdFilter;
+import io.micrometer.observation.ObservationRegistry;
 import java.net.http.HttpClient;
 import java.time.Clock;
 import java.time.Duration;
@@ -18,7 +19,9 @@ import org.springframework.web.client.RestClient;
  *   <li>the calling service's own bearer token ({@link ServiceTokenProvider}); the target service resolves that
  *       account's grants from iam-service like any other caller's, so a service account has only the roles granted
  *       to it;</li>
- *   <li>the current correlation id ({@code X-Correlation-Id}), so the call can be traced end to end;</li>
+ *   <li>the current correlation id ({@code X-Correlation-Id}) and the W3C trace context ({@code traceparent}, from
+ *       the observation registry), so the call can be traced end to end (NFR-040, ADR-037); each call is also
+ *       measured as {@code http.client.requests};</li>
  *   <li>the current request's language ({@code Accept-Language}), unless the call sets one, so customer-facing
  *       messages come back in the customer's language (CC-010).</li>
  * </ul>
@@ -29,13 +32,19 @@ public final class ServiceClients {
     private ServiceClients() {
     }
 
-    /** A client of {@code properties.baseUrl()}, with timeouts on every call and token. */
-    public static RestClient create(ServiceClientProperties properties, Clock clock) {
+    /**
+     * A client of {@code properties.baseUrl()}, with timeouts on every call and token; calls (token requests
+     * included) are observed through {@code observations}.
+     */
+    public static RestClient create(ServiceClientProperties properties, Clock clock,
+                                    ObservationRegistry observations) {
         JdkClientHttpRequestFactory factory = requestFactory(properties.timeout());
         ServiceTokenProvider tokens = new ServiceTokenProvider(
-                RestClient.builder().baseUrl(properties.tokenUri()).requestFactory(factory).build(),
+                RestClient.builder().baseUrl(properties.tokenUri()).requestFactory(factory)
+                        .observationRegistry(observations).build(),
                 properties.clientId(), properties.clientSecret(), clock);
-        return create(RestClient.builder().baseUrl(properties.baseUrl()).requestFactory(factory), tokens);
+        return create(RestClient.builder().baseUrl(properties.baseUrl()).requestFactory(factory)
+                .observationRegistry(observations), tokens);
     }
 
     /** A client built on {@code target} (for example bound to a mock server in tests). */

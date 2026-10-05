@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # One-command local startup (BRD reader's guide: "README that starts the whole system with one command").
 #   tools/dev/up.sh          build + start PostgreSQL (one per service), Keycloak (realm "itms"), iam-service,
-#                            reference-data-service, transaction-service and hold-eligibility-service, then grant
-#                            the development roles
-#                            through iam-service
+#                            reference-data-service, transaction-service and hold-eligibility-service, the
+#                            observability stack (OpenTelemetry collector, Tempo, Loki, Prometheus, Grafana; NFR-040),
+#                            then grant the development roles through iam-service
 #   tools/dev/up.sh down     stop the stack (data volumes kept)
 # First run generates infra/local/.env with random development secrets (git-ignored; SEC-004). Missing keys are
 # added to an existing .env.
@@ -34,6 +34,7 @@ wanted = {
     "DEV_CHECKER_PASSWORD": lambda: secrets.token_urlsafe(16),
     "DEV_DIRECTORY_FEED_SECRET": lambda: secrets.token_urlsafe(32),
     "DEV_TRANSACTION_SERVICE_SECRET": lambda: secrets.token_urlsafe(32),
+    "GRAFANA_ADMIN_PASSWORD": lambda: secrets.token_urlsafe(16),
 }
 present = set()
 if os.path.exists(path):
@@ -120,6 +121,9 @@ ITMS local stack is up:
                                                    passwords in $ENV_FILE; clients itms-directory-feed and
                                                    itms-transaction-service use DEV_DIRECTORY_FEED_SECRET and
                                                    DEV_TRANSACTION_SERVICE_SECRET)
+  Grafana                 http://localhost:3000   (user admin; password GRAFANA_ADMIN_PASSWORD in $ENV_FILE;
+                                                   metrics, logs and traces of every service)
+  Prometheus              http://localhost:9090
 Smoke test:               tools/dev/smoke.sh
 Stop:                     tools/dev/up.sh down
 EOF

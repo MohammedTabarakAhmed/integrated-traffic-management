@@ -1,5 +1,7 @@
 package gov.itms.platform.security;
 
+import gov.itms.platform.observability.ManagementRequests;
+import io.micrometer.observation.ObservationRegistry;
 import java.time.Clock;
 import java.util.List;
 import org.slf4j.Logger;
@@ -28,7 +30,8 @@ import tools.jackson.databind.ObjectMapper;
 
 /**
  * Stateless bearer-token security for every ITMS service (SEC-001, CC-001, INT-004). Deny by default: every request
- * except health probes needs a valid token. The token only authenticates; the {@link AuthorisationFilter} then
+ * except health probes and, on the management port only, metrics scraping ({@link ManagementRequests}) needs a valid
+ * token. The token only authenticates; the {@link AuthorisationFilter} then
  * attaches the subject's grants from the configured {@link AuthorisationResolver} (ADR-022). Endpoint permissions
  * are enforced with {@code @PreAuthorize}, data scopes with {@link Authorisation}.
  */
@@ -49,6 +52,7 @@ public class ItmsSecurityAutoConfiguration {
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(a -> a
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
+                        .requestMatchers(new ManagementRequests()).permitAll()
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(o -> o.jwt(j -> j.jwtAuthenticationConverter(converter)))
                 .addFilterAfter(new AuthorisationFilter(resolver, messages, json), BearerTokenAuthenticationFilter.class);
@@ -67,7 +71,8 @@ public class ItmsSecurityAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    AuthorisationResolver itmsAuthorisationResolver(ItmsSecurityProperties properties, ObjectProvider<Clock> clock) {
+    AuthorisationResolver itmsAuthorisationResolver(ItmsSecurityProperties properties, ObjectProvider<Clock> clock,
+                                                    ObjectProvider<ObservationRegistry> observations) {
         if (properties.authorisationSource() == ItmsSecurityProperties.AuthorisationSource.TOKEN_CLAIMS) {
             log.warn("itms.security.authorisation-source=token-claims: permissions are read from the token (interim "
                     + "ADR-018 mode, national scope only). Production must use iam (ADR-022).");
@@ -78,7 +83,7 @@ public class ItmsSecurityAutoConfiguration {
             throw new IllegalStateException("itms.security.iam.base-url must be configured (authorisation-source=iam)");
         }
         return new RemoteIamAuthorisationResolver(iam.baseUrl(), iam.timeout(), iam.cacheTtl(), iam.cacheMaxEntries(),
-                clock.getIfAvailable(Clock::systemUTC));
+                clock.getIfAvailable(Clock::systemUTC), observations.getIfAvailable(() -> ObservationRegistry.NOOP));
     }
 
     @Bean

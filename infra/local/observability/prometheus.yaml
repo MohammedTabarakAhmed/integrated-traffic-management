@@ -1,0 +1,15 @@
+# Prometheus, local development (NFR-040, ADR-008, ADR-037). Scrapes every service's management port
+# (not published on the host; reachable only on the compose network).
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: itms-services
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets:
+          - iam-service:8090
+          - reference-data-service:8090
+          - transaction-service:8090
+          - hold-eligibility-service:8090

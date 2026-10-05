@@ -6,7 +6,9 @@ import gov.itms.platform.client.ServiceClients;
 import gov.itms.transaction.application.CatalogueService;
 import gov.itms.transaction.application.EligibilityChecker;
 import gov.itms.transaction.application.TransactionService;
+import io.micrometer.observation.ObservationRegistry;
 import java.time.Clock;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.context.properties.bind.Binder;
@@ -40,12 +42,14 @@ public class TransactionServiceConfiguration {
      * own client-credentials account ({@code itms.clients.eligibility.*}); start-up fails if a setting is missing.
      */
     @Bean
-    EligibilityChecker eligibilityChecker(Environment environment, Clock clock) {
+    EligibilityChecker eligibilityChecker(Environment environment, Clock clock,
+                                          ObjectProvider<ObservationRegistry> observations) {
         ServiceClientProperties properties = Binder.get(environment)
                 .bind("itms.clients.eligibility", ServiceClientProperties.class)
                 .orElseThrow(() -> new IllegalStateException("itms.clients.eligibility is not configured"))
                 .validate("itms.clients.eligibility");
-        return new RemoteEligibilityChecker(ServiceClients.create(properties, clock));
+        return new RemoteEligibilityChecker(ServiceClients.create(properties, clock,
+                observations.getIfAvailable(() -> ObservationRegistry.NOOP)));
     }
 
     /** Draft expiry (CC-024, ADR-031); on by default, off with {@code itms.transaction.draft-expiry.enabled=false}. */

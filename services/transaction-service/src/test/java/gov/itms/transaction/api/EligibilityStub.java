@@ -26,7 +26,8 @@ final class EligibilityStub {
     static final String TOKEN = "it-service-token";
 
     /** One eligibility request as received. */
-    record Received(String authorisation, String channel, String language, String correlationId, JsonNode body) {
+    record Received(String authorisation, String channel, String language, String correlationId, String traceparent,
+                    JsonNode body) {
     }
 
     final List<Received> received = new CopyOnWriteArrayList<>();
@@ -64,7 +65,8 @@ final class EligibilityStub {
         JsonNode body = json.readTree(exchange.getRequestBody().readAllBytes());
         var headers = exchange.getRequestHeaders();
         received.add(new Received(headers.getFirst("Authorization"), headers.getFirst("X-Channel"),
-                headers.getFirst("Accept-Language"), headers.getFirst("X-Correlation-Id"), body));
+                headers.getFirst("Accept-Language"), headers.getFirst("X-Correlation-Id"),
+                headers.getFirst("traceparent"), body));
         if (!("Bearer " + TOKEN).equals(headers.getFirst("Authorization"))) {
             respond(exchange, 401, "");
             return;

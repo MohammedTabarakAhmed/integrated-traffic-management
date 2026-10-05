@@ -161,7 +161,8 @@ class IamApiIT {
     @DisplayName("CC-001: no token → 401; permissions in the token are ignored; grants come only from assignments")
     void authorisationComesFromAssignments() throws Exception {
         assertThat(mvc.perform(get("/v1/roles")).andReturn().getResponse().getStatus()).isEqualTo(401);
-        assertThat(mvc.perform(get("/actuator/health")).andReturn().getResponse().getStatus()).isEqualTo(200);
+        // Probes are served on the management port only (ADR-037, ObservabilityIT); the API port has none.
+        assertThat(mvc.perform(get("/actuator/health")).andReturn().getResponse().getStatus()).isEqualTo(404);
 
         RequestPostProcessor claimsOnly = jwt().jwt(j -> j.subject("u-claims")
                 .claim("permissions", List.of("iam.role.read", "iam.assignment.manage")));

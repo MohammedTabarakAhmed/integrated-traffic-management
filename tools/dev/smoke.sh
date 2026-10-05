@@ -8,7 +8,9 @@
 # -> it is found as the newest of its applicant's transactions (CC-025) -> a retry with the same Idempotency-Key is
 # replayed, not repeated (ADR-032) -> a hold is placed on a vehicle and lifted by its role (CC-030) -> holds block a
 # submission with the customer's reasons and next steps, sensitive ones masked, until lifted (CC-032) -> a supervisor
-# overrides a hold for one transaction, which then goes through (CC-034).
+# overrides a hold for one transaction, which then goes through (CC-034) -> Prometheus scrapes every service, a
+# submission's trace crosses transaction-service and hold-eligibility-service, and every service's logs reach Loki
+# (NFR-040).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 set -a; source infra/local/.env; set +a
@@ -305,5 +307,44 @@ still=$(curl -sf -H "Authorization: Bearer $CHECKER" "$HOLDS/v1/holds/$ovr_hold"
 res=$(post_hold "$CHECKER" "/v1/holds/$ovr_hold/lifts" '{"reason":"smoke test lift"}')
 [[ "$(status_of "$res")" == 200 ]] || { echo "FAIL: lifting $ovr_hold returned $(status_of "$res")"; exit 1; }
 echo "   $ovr_ref: blocked, overridden by the supervisor for this transaction only, then submitted"
+
+echo "19. Observability (NFR-040): metrics scraped, one trace across services, logs collected centrally"
+GRAFANA=http://localhost:3000
+grafana() { # data-source-uid/path [curl options...]: a data source's API through Grafana (Tempo and Loki are not published)
+  local path=$1; shift
+  curl -sf -u "admin:$GRAFANA_ADMIN_PASSWORD" "$@" "$GRAFANA/api/datasources/proxy/uid/$path"
+}
+up=$(curl -sf --get "http://localhost:9090/api/v1/query" --data-urlencode 'query=up{job="itms-services"}' \
+  | "$PY" -c "import json,sys; r=json.load(sys.stdin)['data']['result']; print(sorted(x['metric']['instance'].split(':')[0] for x in r if x['value'][1]=='1'))")
+[[ "$up" == "['hold-eligibility-service', 'iam-service', 'reference-data-service', 'transaction-service']" ]] \
+  || { echo "FAIL: Prometheus should scrape all four services, up: $up"; exit 1; }
+trace_id=$("$PY" -c "import secrets; print(secrets.token_hex(16))")
+res=$(post_txn "$CHECKER" /v1/transactions "{\"serviceCode\":\"$SVC\",\"subject\":{\"type\":\"VEHICLE\",\"id\":\"SMKOBS-$(date +%s)\"},\"applicantFileNumber\":\"TF-SMOKE-OBS\",\"homeRegion\":\"R1\"}")
+[[ "$(status_of "$res")" == 201 ]] || { echo "FAIL: opening returned $(status_of "$res"): $(body_of "$res")"; exit 1; }
+obs_ref=$(body_of "$res" | json_field "['reference']")
+status=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $CHECKER" -H 'X-Channel: BACKOFFICE' \
+  -H "Idempotency-Key: $(new_key)" -H "traceparent: 00-$trace_id-00f067aa0ba902b7-01" "$TXN/v1/transactions/$obs_ref/submissions")
+[[ "$status" == 200 ]] || { echo "FAIL: traced submission returned $status"; exit 1; }
+services=""
+for _ in $(seq 1 30); do # spans are exported in batches every few seconds
+  services=$(grafana "tempo/api/traces/$trace_id" 2>/dev/null | "$PY" -c "
+import json,sys
+d=json.load(sys.stdin)
+names=set()
+for b in d.get('batches', d.get('resourceSpans', [])):
+    for a in b['resource']['attributes']:
+        if a['key']=='service.name': names.add(a['value']['stringValue'])
+print(sorted(names))" 2>/dev/null || true)
+  [[ "$services" == *hold-eligibility-service* && "$services" == *transaction-service* ]] && break
+  sleep 2
+done
+[[ "$services" == *hold-eligibility-service* && "$services" == *transaction-service* ]] \
+  || { echo "FAIL: trace $trace_id should cross transaction-service and hold-eligibility-service, got: $services"; exit 1; }
+logged=$(grafana "loki/loki/api/v1/query" --get --data-urlencode 'query=sum by (service_name) (count_over_time({service_name=~".+"}[6h]))' \
+  | "$PY" -c "import json,sys; print(sorted(x['metric']['service_name'] for x in json.load(sys.stdin)['data']['result']))")
+for svc in iam-service reference-data-service transaction-service hold-eligibility-service; do
+  [[ "$logged" == *"'$svc'"* ]] || { echo "FAIL: no logs from $svc in Loki: $logged"; exit 1; }
+done
+echo "   trace $trace_id: $services; logs from $logged"
 
 echo "SMOKE OK"

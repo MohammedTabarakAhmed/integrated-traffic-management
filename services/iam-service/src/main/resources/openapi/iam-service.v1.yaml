@@ -68,6 +68,7 @@ paths:
         Permissions are declared by each service's API (`x-itms-permission`) and registered here by migration.
         Roles may only contain catalogue permissions.
       x-itms-permission: iam.permission.read
+      x-itms-scope: national
       responses:
         '200':
           description: Permissions
@@ -83,6 +84,7 @@ paths:
       operationId: listRoles
       summary: All roles
       x-itms-permission: iam.role.read
+      x-itms-scope: national
       responses:
         '200':
           description: Roles
@@ -96,6 +98,7 @@ paths:
       operationId: createRole
       summary: Create a role (CC-005)
       x-itms-permission: iam.role.manage
+      x-itms-scope: national
       requestBody:
         required: true
         content:
@@ -121,6 +124,7 @@ paths:
       operationId: getRole
       summary: One role
       x-itms-permission: iam.role.read
+      x-itms-scope: national
       parameters:
         - $ref: '#/components/parameters/RoleCode'
       responses:
@@ -140,6 +144,7 @@ paths:
         Full replacement of the role definition. `version` must be the version the administrator saw; a stale version
         is refused with 409. Takes effect for every holder of the role at their next authorisation refresh.
       x-itms-permission: iam.role.manage
+      x-itms-scope: national
       parameters:
         - $ref: '#/components/parameters/RoleCode'
       requestBody:
@@ -166,6 +171,7 @@ paths:
       operationId: getRoleHistory
       summary: Every version of a role definition (DAT-002, CC-121)
       x-itms-permission: iam.history.read
+      x-itms-scope: national
       parameters:
         - $ref: '#/components/parameters/RoleCode'
       responses:
@@ -184,6 +190,7 @@ paths:
       operationId: getRoleApprovalLimits
       summary: Approval limits of a role (CC-003)
       x-itms-permission: iam.role.read
+      x-itms-scope: national
       parameters:
         - $ref: '#/components/parameters/RoleCode'
       responses:
@@ -205,6 +212,7 @@ paths:
         cannot change limits of a role they hold (CC-002). Audited with the old and new limits (CC-120); every
         limit keeps a history (DAT-002).
       x-itms-permission: iam.role.manage
+      x-itms-scope: national
       parameters:
         - $ref: '#/components/parameters/RoleCode'
       requestBody:
@@ -232,7 +240,7 @@ paths:
       summary: Role assignments within the caller's scope
       description: Only assignments whose scopes lie within the caller's `iam.assignment.read` scope are returned.
       x-itms-permission: iam.assignment.read
-      x-itms-scope: assignment-scopes
+      x-itms-scope: [region, centre, module]
       parameters:
         - name: subjectId
           in: query
@@ -263,7 +271,7 @@ paths:
         conflicts with one the subject holds (an ACTIVE pair in `/v1/role-conflicts`) is refused with 403
         `ROLE_CONFLICT` (CC-002).
       x-itms-permission: iam.assignment.manage
-      x-itms-scope: assignment-scopes
+      x-itms-scope: [region, centre, module]
       requestBody:
         required: true
         content:
@@ -290,7 +298,7 @@ paths:
       operationId: getRoleAssignment
       summary: One assignment (404 if outside the caller's scope)
       x-itms-permission: iam.assignment.read
-      x-itms-scope: assignment-scopes
+      x-itms-scope: [region, centre, module]
       parameters:
         - $ref: '#/components/parameters/AssignmentId'
       responses:
@@ -309,7 +317,7 @@ paths:
       operationId: revokeRoleAssignment
       summary: Revoke an active assignment, with a reason
       x-itms-permission: iam.assignment.manage
-      x-itms-scope: assignment-scopes
+      x-itms-scope: [region, centre, module]
       parameters:
         - $ref: '#/components/parameters/AssignmentId'
       requestBody:
@@ -339,7 +347,7 @@ paths:
         delegator or holder of the source); others are returned only within the caller's `iam.delegation.read`
         scope. A listed ACTIVE delegation grants nothing outside its period or once its source has ended.
       x-itms-permission: authenticated
-      x-itms-scope: assignment-scopes
+      x-itms-scope: [own, region, centre, module]
       parameters:
         - name: subjectId
           in: query
@@ -365,7 +373,7 @@ paths:
         roles may be delegated is open (Q-033; interim: all). A role that conflicts with one the delegate holds is
         refused with 403 `ROLE_CONFLICT` (CC-002). Audited as `IAM_DELEGATION_CREATED`.
       x-itms-permission: authenticated
-      x-itms-scope: assignment-scopes
+      x-itms-scope: [own, region, centre, module]
       requestBody:
         required: true
         content:
@@ -395,7 +403,7 @@ paths:
         Allowed for the delegator, the holder of the source, or a caller whose `iam.delegation.create` scope covers
         the delegation. Audited as `IAM_DELEGATION_REVOKED`. 404 if the id is not a delegation visible to the caller.
       x-itms-permission: authenticated
-      x-itms-scope: assignment-scopes
+      x-itms-scope: [own, region, centre, module]
       parameters:
         - name: delegationId
           in: path
@@ -425,6 +433,7 @@ paths:
       summary: Configured pairs of conflicting roles (CC-002)
       description: ACTIVE pairs are enforced; RETIRED pairs are kept for history. Newest first.
       x-itms-permission: iam.role.read
+      x-itms-scope: national
       parameters:
         - name: status
           in: query
@@ -449,6 +458,7 @@ paths:
         a pair revokes nothing: current holders of both roles appear in `/v1/role-conflicts/violations`. Which pairs
         apply is a business decision (Q-030; the list starts empty). Audited as `IAM_ROLE_CONFLICT_CREATED`.
       x-itms-permission: iam.role.manage
+      x-itms-scope: national
       requestBody:
         required: true
         content:
@@ -479,7 +489,7 @@ paths:
         start later). Only assignments within the caller's `iam.assignment.read` scope are considered, so a violation
         is listed only when the caller can see an assignment of each role.
       x-itms-permission: iam.assignment.read
-      x-itms-scope: assignment-scopes
+      x-itms-scope: [region, centre, module]
       responses:
         '200':
           description: Violations, by role pair and subject
@@ -496,6 +506,7 @@ paths:
       summary: Retire an ACTIVE pair, with a reason (CC-002)
       description: The pair is no longer enforced but is kept for history. Audited as `IAM_ROLE_CONFLICT_RETIRED`.
       x-itms-permission: iam.role.manage
+      x-itms-scope: national
       parameters:
         - name: conflictId
           in: path
@@ -532,7 +543,7 @@ paths:
         `IAM_SUBJECT_DEACTIVATED`, plus `IAM_ROLE_REVOKED` or `IAM_DELEGATION_REVOKED` per revocation. Disabling the
         sign-in itself is done by the identity provider and directory, not here.
       x-itms-permission: iam.subject.deactivate
-      x-itms-scope: assignment-scopes
+      x-itms-scope: [region, centre, module]
       parameters:
         - name: subjectId
           in: path
@@ -561,7 +572,7 @@ paths:
       summary: Access reviews within the caller's scope, newest first (SEC-007)
       description: Only reviews whose scopes lie within the caller's `iam.review.read` scope are returned.
       x-itms-permission: iam.review.read
-      x-itms-scope: assignment-scopes
+      x-itms-scope: [region, centre, module]
       parameters:
         - name: status
           in: query
@@ -589,7 +600,7 @@ paths:
         `9999-12-31T23:59:59.999999Z` (400 `VALIDATION_FAILED`, RFC 3339 range). Audited as
         `IAM_ACCESS_REVIEW_OPENED`.
       x-itms-permission: iam.review.manage
-      x-itms-scope: assignment-scopes
+      x-itms-scope: [region, centre, module]
       requestBody:
         required: true
         content:
@@ -620,7 +631,7 @@ paths:
         the assignment, if any. Only assignments within the caller's `iam.review.read` scope are listed. Nothing is
         revoked automatically (Q-037).
       x-itms-permission: iam.review.read
-      x-itms-scope: assignment-scopes
+      x-itms-scope: [region, centre, module]
       responses:
         '200':
           description: Assignments overdue for review
@@ -636,7 +647,7 @@ paths:
       operationId: getAccessReview
       summary: One access review with its counts (404 if outside the caller's scope)
       x-itms-permission: iam.review.read
-      x-itms-scope: assignment-scopes
+      x-itms-scope: [region, centre, module]
       parameters:
         - $ref: '#/components/parameters/ReviewId'
       responses:
@@ -661,7 +672,7 @@ paths:
         revoked: NOT_REVIEWED assignments stay on the overdue listing. The caller's `iam.review.manage` scope must
         cover the review's scopes. Audited as `IAM_ACCESS_REVIEW_CLOSED` with the counts and the NOT_REVIEWED items.
       x-itms-permission: iam.review.manage
-      x-itms-scope: assignment-scopes
+      x-itms-scope: [region, centre, module]
       parameters:
         - $ref: '#/components/parameters/ReviewId'
       requestBody:
@@ -692,7 +703,7 @@ paths:
         regional reviewer works the items of a national review in their region. `status` defaults to PENDING.
         A `campaignId` that matches no visible item returns an empty list.
       x-itms-permission: iam.review.read
-      x-itms-scope: assignment-scopes
+      x-itms-scope: [region, centre, module]
       parameters:
         - name: campaignId
           in: query
@@ -729,7 +740,7 @@ paths:
         Decisions after `dueAt` are allowed while the review is open and are marked `decidedLate`. Audited as
         `IAM_ACCESS_REVIEW_DECIDED`.
       x-itms-permission: iam.review.decide
-      x-itms-scope: assignment-scopes
+      x-itms-scope: [region, centre, module]
       parameters:
         - name: itemId
           in: path
@@ -763,6 +774,7 @@ paths:
         `sourceAssignmentId` when they delegate it. `status` defaults to ACTIVE. Newest first. An ACTIVE entry may
         lie outside its validity period; `/v1/me/authorisation` shows what is in force now.
       x-itms-permission: authenticated
+      x-itms-scope: [own]
       parameters:
         - name: status
           in: query
@@ -788,6 +800,7 @@ paths:
         scope is not widened by another assignment. Every ITMS service resolves its callers' permissions from this
         endpoint by forwarding the caller's bearer token (ADR-022). Any authenticated subject may read their own.
       x-itms-permission: authenticated
+      x-itms-scope: [own]
       responses:
         '200':
           description: Effective authorisation

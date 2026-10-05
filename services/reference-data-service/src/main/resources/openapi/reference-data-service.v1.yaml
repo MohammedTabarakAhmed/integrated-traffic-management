@@ -29,6 +29,7 @@ paths:
       operationId: listReferenceLists
       summary: List all code lists
       x-itms-permission: refdata.read
+      x-itms-scope: national
       responses:
         '200':
           description: Code lists
@@ -48,6 +49,7 @@ paths:
         variant replaces the national item with the same code (CC-112). Inactive items are excluded unless
         `includeInactive=true`.
       x-itms-permission: refdata.read
+      x-itms-scope: national
       parameters:
         - $ref: '#/components/parameters/ListCode'
         - name: asOf
@@ -73,6 +75,7 @@ paths:
       operationId: getReferenceItem
       summary: One item (regional variant if it exists for the region, else national)
       x-itms-permission: refdata.read
+      x-itms-scope: national
       parameters:
         - $ref: '#/components/parameters/ListCode'
         - $ref: '#/components/parameters/ItemCode'
@@ -93,6 +96,7 @@ paths:
       operationId: getReferenceItemHistory
       summary: Full version history of an item (DAT-002, CC-121)
       x-itms-permission: refdata.history.read
+      x-itms-scope: national
       parameters:
         - $ref: '#/components/parameters/ListCode'
         - $ref: '#/components/parameters/ItemCode'
@@ -116,6 +120,7 @@ paths:
       operationId: submitChange
       summary: Submit a change for approval (maker)
       x-itms-permission: refdata.change.submit
+      x-itms-scope: national
       requestBody:
         required: true
         content:
@@ -140,6 +145,7 @@ paths:
       operationId: listChanges
       summary: List changes, optionally by status
       x-itms-permission: refdata.change.read
+      x-itms-scope: national
       parameters:
         - name: status
           in: query
@@ -157,7 +163,9 @@ paths:
     get:
       tags: [Changes (maker-checker)]
       operationId: getChange
+      summary: A reference data change request (the view is audited, CC-120)
       x-itms-permission: refdata.change.read
+      x-itms-scope: national
       parameters:
         - $ref: '#/components/parameters/ChangeId'
       responses:
@@ -176,6 +184,7 @@ paths:
       operationId: approveChange
       summary: Approve and apply a pending change (checker; must not be the maker, CC-002)
       x-itms-permission: refdata.change.approve
+      x-itms-scope: national
       parameters:
         - $ref: '#/components/parameters/ChangeId'
       responses:
@@ -196,6 +205,7 @@ paths:
       operationId: rejectChange
       summary: Reject a pending change (checker; must not be the maker)
       x-itms-permission: refdata.change.approve
+      x-itms-scope: national
       parameters:
         - $ref: '#/components/parameters/ChangeId'
       requestBody:

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Portable CI entry point (ADR-013). Identical on a developer machine, GitLab or Jenkins.
-# Stages: traceability -> build+unit+integration+coverage -> SBOM. Security scans: tools/ci/security.sh
+# Stages: traceability -> permissions -> OpenAPI lint -> build+unit+integration+coverage+SAST -> SBOM.
+# Secret scanning and SCA: tools/ci/security.sh
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 export PYTHONIOENCODING=utf-8
@@ -12,9 +13,12 @@ echo "== [1/3] Traceability verifier tests + ledger check (DLV-001)"
 echo "== [1b/3] Permission catalogue consistency (CC-001, CC-005, ADR-022)"
 "$PY" -m unittest discover -s tools/ci -p 'test_*.py'
 "$PY" tools/ci/check_permissions.py
+echo "== [1c/3] OpenAPI lint (API_SPECIFICATION §1-§3, INT-003, SEC-022, ADR-036)"
+"$PY" tools/ci/lint_openapi.py
 
-echo "== [2/3] Maven build: enforcer, unit (Surefire), integration (Failsafe), JaCoCo >= 80% (NFR-050)"
-mvn -B -ntp verify
+echo "== [2/3] Maven build: enforcer, unit (Surefire), integration (Failsafe), JaCoCo >= 80% (NFR-050),"
+echo "   SAST: SpotBugs + FindSecBugs, no finding outside tools/security/spotbugs-exclude.xml (SEC-021, ADR-036)"
+mvn -B -ntp -Psast verify
 
 echo "== [3/3] SBOM (SEC-023)"
 ls target/bom.* 2>/dev/null || echo "SBOM produced per module once modules exist"

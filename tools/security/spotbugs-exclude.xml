@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SpotBugs/FindSecBugs exclusions (SEC-021; ADR-036). Every entry names the finding, where it is and why it is not a
+     defect. Never exclude a whole category or package without a reason reviewed like code. A new finding fails the
+     build until it is fixed or added here with its reason. -->
+<FindBugsFilter xmlns="https://github.com/spotbugs/filter/3.0.0">
+
+  <!-- EI_EXPOSE_REP2 on injected collaborators: the constructor keeps a Spring singleton (repository port, ObjectMapper,
+       RestClient, idempotency key store) given to it by dependency injection. Sharing it is the design, not a leaked
+       internal state. Matched per class and field so a new field is reviewed. -->
+  <Match>
+    <Bug pattern="EI_EXPOSE_REP2"/>
+    <Or>
+      <And><Class name="gov.itms.platform.audit.JdbcAuditRecorder"/><Field name="json"/></And>
+      <And><Class name="gov.itms.platform.client.ServiceTokenProvider"/><Field name="tokenClient"/></And>
+      <And><Class name="gov.itms.platform.idempotency.IdempotencyCleanupJob"/><Field name="keys"/></And>
+      <And><Class name="gov.itms.platform.idempotency.IdempotencyFilter"/><Field name="~json|keys"/></And>
+      <And><Class name="gov.itms.platform.idempotency.IdempotencyKeys"/><Field name="store"/></And>
+      <And><Class name="gov.itms.platform.security.AuthorisationFilter"/><Field name="json"/></And>
+      <And><Class name="gov.itms.hold.application.EligibilityService"/><Field name="holds"/></And>
+      <And><Class name="gov.itms.hold.application.HoldService"/><Field name="holds"/></And>
+      <And><Class name="gov.itms.iam.application.AccessReviewService"/><Field name="~reviews|assignments"/></And>
+      <And><Class name="gov.itms.iam.application.IamService"/><Field name="~roles|assignments|limits|conflicts"/></And>
+      <And><Class name="gov.itms.refdata.application.ReferenceDataService"/><Field name="~lists|items|changes"/></And>
+      <And><Class name="gov.itms.transaction.application.CatalogueService"/><Field name="~services|rules|changes"/></And>
+      <And><Class name="gov.itms.transaction.application.TransactionService"/><Field name="~services|rules|transactions"/></And>
+    </Or>
+  </Match>
+
+  <!-- EI_EXPOSE_REP on records whose collections are already immutable: the compact constructor replaces them with
+       List.copyOf (Codes.distinct/codeList/blockedServices/roles) or Collections.unmodifiableSortedSet
+       (AssignmentScopes.clean, Role.cleanPermissions). SpotBugs cannot see through those helper methods. -->
+  <Match>
+    <Bug pattern="EI_EXPOSE_REP"/>
+    <Or>
+      <And><Class name="gov.itms.hold.domain.Hold$Spec"/><Field name="~blockedServices|liftableByRoles"/></And>
+      <And><Class name="gov.itms.transaction.domain.ServiceSpec"/>
+        <Field name="~customerTypes|channels|requiredDocuments|regions"/></And>
+      <And><Class name="gov.itms.iam.domain.AssignmentScopes"/><Field name="~regions|centres|modules"/></And>
+      <And><Class name="gov.itms.iam.domain.Role"/><Field name="permissions"/></And>
+    </Or>
+  </Match>
+
+  <!-- SPRING_CSRF_PROTECTION_DISABLED: the API is stateless (SessionCreationPolicy.STATELESS) and authenticates only
+       with a bearer token in the Authorization header; no cookie or session authenticates a request, so a cross-site
+       request cannot carry the user's credentials (OWASP CSRF cheat sheet). -->
+  <Match>
+    <Bug pattern="SPRING_CSRF_PROTECTION_DISABLED"/>
+    <Class name="gov.itms.platform.security.ItmsSecurityAutoConfiguration"/>
+  </Match>
+
+  <!-- XSS_SERVLET: the filters write an RFC 9457 problem document serialised by Jackson with content type
+       application/problem+json; no HTML is produced and every value is JSON-escaped. -->
+  <Match>
+    <Bug pattern="XSS_SERVLET"/>
+    <Or>
+      <And><Class name="gov.itms.platform.idempotency.IdempotencyFilter"/><Method name="writeProblem"/></And>
+      <And><Class name="gov.itms.platform.security.AuthorisationFilter"/><Method name="writeUnavailable"/></And>
+    </Or>
+  </Match>
+
+  <!-- UNVALIDATED_REDIRECT: a replay (ADR-032) repeats the Location header of this service's own earlier 2xx response
+       to the same principal and key; it never comes from the request. -->
+  <Match>
+    <Bug pattern="UNVALIDATED_REDIRECT"/>
+    <Class name="gov.itms.platform.idempotency.IdempotencyFilter"/>
+    <Method name="replay"/>
+  </Match>
+
+  <!-- REDOS: ServiceSpec.SLA_PATTERN has only bounded quantifiers (\d{1,4}, \d{1,5}, \d{1,6}) and optional groups that
+       cannot overlap (D, T...H, M), so matching is linear in the input; the SLA field is also length-limited by the
+       OpenAPI schema. -->
+  <Match>
+    <Bug pattern="REDOS"/>
+    <Class name="gov.itms.transaction.domain.ServiceSpec"/>
+  </Match>
+</FindBugsFilter>

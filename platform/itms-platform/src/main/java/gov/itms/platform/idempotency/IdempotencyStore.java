@@ -1,6 +1,8 @@
 package gov.itms.platform.idempotency;
 
 import java.time.Instant;
+import java.util.Arrays;
+import java.util.Objects;
 import java.util.Optional;
 
 /**
@@ -35,7 +37,55 @@ public interface IdempotencyStore {
         }
     }
 
-    /** The parts of a successful response that are replayed. */
-    record StoredResponse(int status, String contentType, String location, byte[] body) {
+    /**
+     * The parts of a successful response that are replayed. The body is copied in and out, so it cannot change after it
+     * is stored. A class rather than a record: SpotBugs misreads a record that copies an array field.
+     */
+    final class StoredResponse {
+
+        private final int status;
+        private final String contentType;
+        private final String location;
+        private final byte[] body;
+
+        StoredResponse(int status, String contentType, String location, byte[] body) {
+            this.status = status;
+            this.contentType = contentType;
+            this.location = location;
+            this.body = body == null ? null : body.clone();
+        }
+
+        int status() {
+            return status;
+        }
+
+        String contentType() {
+            return contentType;
+        }
+
+        String location() {
+            return location;
+        }
+
+        byte[] body() {
+            return body == null ? null : body.clone();
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            return other instanceof StoredResponse o && status == o.status && Objects.equals(contentType, o.contentType)
+                    && Objects.equals(location, o.location) && Arrays.equals(body, o.body);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(status, contentType, location, Arrays.hashCode(body));
+        }
+
+        @Override
+        public String toString() {
+            return "StoredResponse[status=" + status + ", contentType=" + contentType + ", location=" + location
+                    + ", body=" + (body == null ? 0 : body.length) + " bytes]";
+        }
     }
 }

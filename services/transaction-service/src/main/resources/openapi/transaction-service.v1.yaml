@@ -52,6 +52,7 @@ paths:
         Without filters, every service definition. With both `region` and `channel`, only the services available in
         that region on that channel on `date` (default today, in UTC). Giving only one of the two is refused.
       x-itms-permission: authenticated
+      x-itms-scope: national
       parameters:
         - name: region
           in: query
@@ -76,7 +77,9 @@ paths:
     get:
       tags: [Service catalogue]
       operationId: getService
+      summary: A service of the catalogue (CC-020)
       x-itms-permission: authenticated
+      x-itms-scope: national
       parameters:
         - $ref: '#/components/parameters/ServiceCode'
       responses:
@@ -95,6 +98,7 @@ paths:
       operationId: getServiceHistory
       summary: Every version of a service definition, oldest first (DAT-002, CC-121)
       x-itms-permission: catalogue.history.read
+      x-itms-scope: national
       parameters:
         - $ref: '#/components/parameters/ServiceCode'
       responses:
@@ -114,6 +118,7 @@ paths:
       operationId: listAvailabilityRules
       summary: Availability rules of a service, including ended ones (CC-026)
       x-itms-permission: authenticated
+      x-itms-scope: national
       parameters:
         - $ref: '#/components/parameters/ServiceCode'
       responses:
@@ -132,6 +137,7 @@ paths:
       operationId: getAvailability
       summary: Whether a service is available in a region on a channel on a date (CC-026)
       x-itms-permission: authenticated
+      x-itms-scope: national
       parameters:
         - $ref: '#/components/parameters/ServiceCode'
         - name: region
@@ -161,6 +167,7 @@ paths:
       operationId: submitCatalogueChange
       summary: Submit a catalogue change for approval (maker)
       x-itms-permission: catalogue.change.submit
+      x-itms-scope: national
       requestBody:
         required: true
         content:
@@ -185,6 +192,7 @@ paths:
       operationId: listCatalogueChanges
       summary: List catalogue changes, optionally by status
       x-itms-permission: catalogue.change.read
+      x-itms-scope: national
       parameters:
         - name: status
           in: query
@@ -203,7 +211,9 @@ paths:
     get:
       tags: [Catalogue changes (maker-checker)]
       operationId: getCatalogueChange
+      summary: A catalogue change request (the view is audited, CC-120)
       x-itms-permission: catalogue.change.read
+      x-itms-scope: national
       parameters:
         - $ref: '#/components/parameters/ChangeId'
       responses:
@@ -223,6 +233,7 @@ paths:
       operationId: approveCatalogueChange
       summary: Approve and apply a pending change (checker; must not be the maker, CC-002)
       x-itms-permission: catalogue.change.approve
+      x-itms-scope: national
       parameters:
         - $ref: '#/components/parameters/ChangeId'
       responses:
@@ -244,6 +255,7 @@ paths:
       operationId: rejectCatalogueChange
       summary: Reject a pending change (checker; must not be the maker)
       x-itms-permission: catalogue.change.approve
+      x-itms-scope: national
       parameters:
         - $ref: '#/components/parameters/ChangeId'
       requestBody:
@@ -275,6 +287,7 @@ paths:
         `limit` items while `nextCursor` is still set. Until customers can sign in, tracking is done by staff on the
         customer's behalf (Q-050).
       x-itms-permission: transaction.read
+      x-itms-scope: [region, module]
       parameters:
         - name: applicantFileNumber
           in: query
@@ -314,6 +327,7 @@ paths:
         `region` defaults to `homeRegion` (Q-003). Until the traffic file service exists, `homeRegion` is stated by
         the calling channel and recorded (Q-046).
       x-itms-permission: transaction.create
+      x-itms-scope: [region, module]
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -343,6 +357,7 @@ paths:
       summary: A transaction by reference (the view is audited, CC-120)
       description: A transaction outside the caller's region and module scopes answers 404, as if it did not exist.
       x-itms-permission: transaction.read
+      x-itms-scope: [region, module]
       parameters:
         - $ref: '#/components/parameters/Reference'
       responses:
@@ -362,6 +377,7 @@ paths:
       operationId: getTransactionStatusHistory
       summary: Every status change of a transaction, oldest first (CC-023; the view is audited, CC-120)
       x-itms-permission: transaction.read
+      x-itms-scope: [region, module]
       parameters:
         - $ref: '#/components/parameters/Reference'
       responses:
@@ -391,6 +407,7 @@ paths:
         503 `ELIGIBILITY_UNAVAILABLE` (fail closed). Rule-based eligibility (rules-service) follows with that service.
         A transaction that is not a Draft answers 409 `ILLEGAL_TRANSITION`.
       x-itms-permission: transaction.create
+      x-itms-scope: [region, module]
       parameters:
         - $ref: '#/components/parameters/Reference'
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -416,6 +433,7 @@ paths:
       operationId: cancelTransaction
       summary: Cancel a transaction in Draft or Pending payment (CC-022, LLD §2.1)
       x-itms-permission: transaction.cancel
+      x-itms-scope: [region, module]
       parameters:
         - $ref: '#/components/parameters/Reference'
         - $ref: '#/components/parameters/IdempotencyKey'

@@ -67,6 +67,9 @@ public class AccessReviewService {
     }
 
     public record OverdueAssignments(Period reviewPeriod, Instant evaluatedAt, List<OverdueAssignment> assignments) {
+        public OverdueAssignments {
+            assignments = List.copyOf(assignments);
+        }
     }
 
     public AccessReviewService(AccessReviewRepository reviews, AssignmentRepository assignments, AuditRecorder audit,

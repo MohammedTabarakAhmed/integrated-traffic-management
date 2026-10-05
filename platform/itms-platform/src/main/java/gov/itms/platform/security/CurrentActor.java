@@ -19,6 +19,10 @@ public record CurrentActor(String userId, String username, List<String> roles, S
     public static final List<String> CHANNELS = List.of(
             "PORTAL", "APP", "BACKOFFICE", "PARTNER", "KIOSK", "CALLCENTRE", "FIELD", "ASSISTANT", "AGENT", "SYSTEM");
 
+    public CurrentActor {
+        roles = roles == null ? List.of() : List.copyOf(roles);
+    }
+
     public static CurrentActor system(String name) {
         return new CurrentActor(name, name, List.of(), "SYSTEM", null, null);
     }

@@ -1,0 +1,3 @@
+# Python packages of the CI scripts, installed on the runner image from the Authority's package mirror (NFR-022).
+# lint_openapi.py: YAML parsing of the OpenAPI files and application.yml.
+PyYAML==6.0.3

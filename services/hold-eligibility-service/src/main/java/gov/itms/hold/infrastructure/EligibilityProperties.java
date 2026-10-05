@@ -1,6 +1,8 @@
 package gov.itms.hold.infrastructure;
 
 import gov.itms.hold.domain.EligibilityPolicy;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -22,6 +24,12 @@ import org.springframework.context.NoSuchMessageException;
 public record EligibilityProperties(List<Disclosed> disclosedHoldTypes) {
 
     public record Disclosed(String holdType, String nextStep) {
+    }
+
+    /** A copy of the bound list; null entries are kept so that {@link #toPolicy} refuses them. */
+    public EligibilityProperties {
+        disclosedHoldTypes = disclosedHoldTypes == null ? null
+                : Collections.unmodifiableList(new ArrayList<>(disclosedHoldTypes));
     }
 
     /**

@@ -62,6 +62,7 @@ paths:
         Until the reference-data and catalogue clients exist, `holdType`, `module`, `source`, service and role codes are
         checked for their format only (Q-053).
       x-itms-permission: hold.place
+      x-itms-scope: [module]
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -88,6 +89,7 @@ paths:
       operationId: listSubjectHolds
       summary: Every hold on a subject that the caller may see, newest first (the view is audited, CC-120)
       x-itms-permission: hold.read
+      x-itms-scope: [module]
       parameters:
         - name: subjectType
           in: query
@@ -114,6 +116,7 @@ paths:
       operationId: getHold
       summary: A hold (the view is audited, CC-120)
       x-itms-permission: hold.read
+      x-itms-scope: [module]
       parameters:
         - $ref: '#/components/parameters/HoldId'
       responses:
@@ -133,6 +136,7 @@ paths:
       operationId: getHoldHistory
       summary: Every stored version of a hold, oldest first (DAT-002; the view is audited, CC-120)
       x-itms-permission: hold.read
+      x-itms-scope: [module]
       parameters:
         - $ref: '#/components/parameters/HoldId'
       responses:
@@ -156,6 +160,7 @@ paths:
         may lift it (403 `LIFT_NOT_ALLOWED`). A hold that is already Lifted or Expired answers 409 `HOLD_NOT_ACTIVE`.
         A hold the caller can neither read nor lift in its module answers 404.
       x-itms-permission: hold.lift
+      x-itms-scope: [module]
       parameters:
         - $ref: '#/components/parameters/HoldId'
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -193,6 +198,7 @@ paths:
         the document service exists (Q-055). The hold itself does not change. Audited as `HOLD_OVERRIDDEN` (CC-120).
         A hold the caller can neither read nor override in its module answers 404.
       x-itms-permission: hold.override
+      x-itms-scope: [module]
       parameters:
         - $ref: '#/components/parameters/HoldId'
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -221,6 +227,7 @@ paths:
       operationId: listHoldOverrides
       summary: The hold's overrides, oldest first (the view is audited, CC-120)
       x-itms-permission: hold.read
+      x-itms-scope: [module]
       parameters:
         - $ref: '#/components/parameters/HoldId'
       responses:
@@ -250,6 +257,7 @@ paths:
         the reference must belong to `serviceCode` (422 `TRANSACTION_SERVICE_MISMATCH`). Rule-based eligibility
         (rules-service) is not part of this version.
       x-itms-permission: eligibility.check
+      x-itms-scope: national
       requestBody:
         required: true
         content:

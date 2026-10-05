@@ -11,6 +11,8 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
  */
 public class ItmsAuthentication extends JwtAuthenticationToken {
 
+    private static final long serialVersionUID = 1L;
+
     private final transient Authorisation authorisation;
 
     public ItmsAuthentication(Jwt jwt, String name, Authorisation authorisation) {

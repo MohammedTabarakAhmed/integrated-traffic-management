@@ -188,6 +188,9 @@ public class TransactionService {
 
     /** One page of an applicant's transactions; {@code nextCursor} is {@code null} on the last page. */
     public record TransactionPage(List<Transaction> items, String nextCursor) {
+        public TransactionPage {
+            items = List.copyOf(items);
+        }
     }
 
     /**

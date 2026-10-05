@@ -2,6 +2,8 @@ package gov.itms.platform.idempotency;
 
 import gov.itms.platform.idempotency.IdempotencyStore.StoredKey;
 import gov.itms.platform.idempotency.IdempotencyStore.StoredResponse;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -51,7 +53,9 @@ public class IdempotencyKeys {
             StoredKey existing = found.get();
             boolean expired = !existing.expiresAt().isAfter(now);
             boolean stale = !existing.completed() && !existing.lockedAt().plus(lockTimeout).isAfter(now);
-            if (!expired && !existing.requestHash().equals(requestHash)) {
+            // constant-time comparison (SpotBugs UNSAFE_HASH_EQUALS)
+            if (!expired && !MessageDigest.isEqual(existing.requestHash().getBytes(StandardCharsets.UTF_8),
+                    requestHash.getBytes(StandardCharsets.UTF_8))) {
                 return new Outcome.Mismatch();
             }
             if (!expired && existing.completed()) {

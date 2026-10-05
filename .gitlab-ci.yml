@@ -1,5 +1,6 @@
 # Thin wrapper (ADR-013): all logic lives in tools/ci/*.sh so it is portable.
-# Runner image must be an Authority-mirrored image with JDK 21, Maven 3.9, Python 3, Docker (Testcontainers).
+# Runner image must be an Authority-mirrored image with JDK 21, Maven 3.9, Python 3 with tools/ci/requirements.txt
+# (from the on-prem package mirror), Docker (Testcontainers).
 stages: [verify, security]
 
 verify:

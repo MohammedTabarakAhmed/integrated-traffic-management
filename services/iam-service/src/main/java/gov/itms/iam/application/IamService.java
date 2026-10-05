@@ -64,15 +64,24 @@ public class IamService {
 
     /** A role's approval limits together with the role version they belong to (CC-003). */
     public record RoleApprovalLimits(String roleCode, long version, List<ApprovalLimit> limits) {
+        public RoleApprovalLimits {
+            limits = List.copyOf(limits);
+        }
     }
 
     /** A subject who holds both roles of an ACTIVE conflicting pair, with the assignments involved (CC-002). */
     public record RoleConflictViolation(RoleConflict conflict, String subjectId, String subjectUsername,
                                         List<UUID> assignmentIds) {
+        public RoleConflictViolation {
+            assignmentIds = List.copyOf(assignmentIds);
+        }
     }
 
     /** What one leaver deactivation revoked (SEC-007); empty when there was nothing left to revoke. */
     public record SubjectDeactivation(String subjectId, Instant deactivatedAt, List<RoleAssignment> revoked) {
+        public SubjectDeactivation {
+            revoked = List.copyOf(revoked);
+        }
     }
 
     public IamService(PermissionRepository permissions, RoleRepository roles, AssignmentRepository assignments,

@@ -1,0 +1,59 @@
+# hold-eligibility-service configuration. All environment-specific values come from environment variables
+# (NFR-042, SEC-004); nothing secret is stored here.
+spring:
+  application:
+    name: hold-eligibility-service
+  datasource:
+    url: ${HOLD_DB_URL}
+    username: ${HOLD_DB_USER}
+    password: ${HOLD_DB_PASSWORD}
+  flyway:
+    locations: classpath:db/platform,classpath:db/migration
+  messages:
+    basename: messages
+    fallback-to-system-locale: false
+  threads:
+    virtual:
+      enabled: true
+
+itms:
+  security:
+    issuer: ${ITMS_OIDC_ISSUER}
+    jwk-set-uri: ${ITMS_OIDC_JWKS_URI}
+    audience: itms-api
+    # Grants come from iam-service (ADR-022). token-claims is the interim ADR-018 mode, for tests only.
+    authorisation-source: ${ITMS_AUTHORISATION_SOURCE:iam}
+    iam:
+      base-url: ${ITMS_IAM_URL:}
+      cache-ttl: ${ITMS_IAM_CACHE_TTL:60s}
+  # API_SPECIFICATION §2, ADR-032: placing and lifting holds need an Idempotency-Key; a retry with the same key and
+  # request replays the stored response. Retention and lock timeout are set per environment (Q-052).
+  idempotency:
+    enabled: true
+    paths:
+      - /v1/holds
+      - /v1/holds/*/lifts
+    retention: ${ITMS_IDEMPOTENCY_RETENTION:24h}
+    lock-timeout: ${ITMS_IDEMPOTENCY_LOCK_TIMEOUT:30s}
+    cleanup-interval: ${ITMS_IDEMPOTENCY_CLEANUP_INTERVAL:15m}
+    cleanup-batch-size: ${ITMS_IDEMPOTENCY_CLEANUP_BATCH_SIZE:500}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+
+server:
+  error:
+    include-stacktrace: never
+    include-message: never
+
+logging:
+  pattern:
+    level: "%5p [${spring.application.name},%X{correlationId:-}]"

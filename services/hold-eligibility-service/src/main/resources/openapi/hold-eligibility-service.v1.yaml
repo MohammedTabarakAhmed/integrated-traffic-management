@@ -1,0 +1,346 @@
+openapi: 3.1.0
+info:
+  title: ITMS Hold and Eligibility Service
+  version: 1.0.0
+  description: |
+    Holds (CC-030, CC-031; ADR-033): a hold on a traffic file, driving licence, vehicle or plate. Each hold records
+    its type (a code of the `HOLD_TYPE` reference list, CC-031), the module that owns it, its source (a module or an
+    external agency) with the source's own reference, a reason, a start date, an optional end date, the services it
+    blocks (service codes of the catalogue, or `*` for every service) and the roles whose holders may lift it.
+
+    Lifecycle (LLD §2.2): a hold is placed Active; it is lifted once, with a reason, by a holder of `hold.lift` in a
+    grant of one of the hold's roles that reaches the hold's module; it is Expired after its end date (the end date is
+    the last day it applies; Expired is derived, not stored). A hold is in force on a day when it is Active and its
+    start date has come. A hold never changes otherwise and is never deleted; every version is kept (DAT-002) and
+    every change and view is audited (CC-120).
+
+    Data scope (CC-001): holds are national, so only the module scopes them (Q-053): placing needs `hold.place`,
+    reading `hold.read`, each in a grant that reaches the hold's module. A hold outside the caller's modules answers
+    404, as if it did not exist, and is left out of lists.
+
+    Not yet in this version: eligibility checks before submission (CC-032), holds placed and lifted by external
+    agencies' messages (CC-033) and single-transaction overrides (CC-034).
+
+    The channel is the `X-Channel` header (set by the gateway or BFF); a hold cannot be placed or lifted without a
+    known channel. Placing and lifting need an `Idempotency-Key` (ADR-032).
+
+    Only GET/POST are used (INT-003); business actions are POSTs to sub-resources.
+    Request input (SEC-022), all endpoints, enforced once in itms-platform: enum values are exactly their names as
+    JSON strings (a number, padding or a control character is refused), also in query parameters; text is a JSON
+    string without the NUL character (U+0000); every `date-time` / `date` is an RFC 3339 string with a four-digit
+    year. A request that breaks one of these rules is refused with 400 `VALIDATION_FAILED`.
+servers:
+  - url: /
+security:
+  - bearerAuth: []
+tags:
+  - name: Holds
+
+paths:
+  /v1/holds:
+    post:
+      tags: [Holds]
+      operationId: placeHold
+      summary: Place a hold (CC-030)
+      description: |
+        Refused when: the request has no known `X-Channel` (422 `CHANNEL_REQUIRED`); the end date is before the start
+        date (422 `HOLD_DATES_INVALID`) or has passed (422 `HOLD_END_IN_PAST`); `blockedServices` mixes `*` with
+        service codes (422 `SERVICES_ALL_MIXED`) or repeats one (422 `LIST_DUPLICATES`); the caller's grant of
+        `hold.place` does not reach `module` (403 `SCOPE_EXCEEDED`, CC-001); the source already used `sourceRef`
+        (409 `DUPLICATE_SOURCE_REF`, CC-033). `startDate` defaults to today and may lie in the past or the future.
+        Until the reference-data and catalogue clients exist, `holdType`, `module`, `source`, service and role codes are
+        checked for their format only (Q-053).
+      x-itms-permission: hold.place
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlaceHoldRequest' }
+      responses:
+        '201':
+          description: Hold placed (or, on a retry with the same Idempotency-Key, the stored response)
+          headers:
+            Location: { schema: { type: string } }
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Hold' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [Holds]
+      operationId: listSubjectHolds
+      summary: Every hold on a subject that the caller may see, newest first (the view is audited, CC-120)
+      x-itms-permission: hold.read
+      parameters:
+        - name: subjectType
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/SubjectType' }
+        - name: subjectId
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/BusinessNumber' }
+      responses:
+        '200':
+          description: Holds of the subject (Active, Lifted and Expired)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HoldCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/holds/{id}:
+    get:
+      tags: [Holds]
+      operationId: getHold
+      summary: A hold (the view is audited, CC-120)
+      x-itms-permission: hold.read
+      parameters:
+        - $ref: '#/components/parameters/HoldId'
+      responses:
+        '200':
+          description: Hold
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Hold' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/holds/{id}/history:
+    get:
+      tags: [Holds]
+      operationId: getHoldHistory
+      summary: Every stored version of a hold, oldest first (DAT-002; the view is audited, CC-120)
+      x-itms-permission: hold.read
+      parameters:
+        - $ref: '#/components/parameters/HoldId'
+      responses:
+        '200':
+          description: Versions
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HoldVersionCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/holds/{id}/lifts:
+    post:
+      tags: [Holds]
+      operationId: liftHold
+      summary: Lift an Active hold, with a reason (CC-030)
+      description: |
+        Only a holder of `hold.lift` in a grant of one of the hold's `liftableByRoles` that reaches the hold's module
+        may lift it (403 `LIFT_NOT_ALLOWED`). A hold that is already Lifted or Expired answers 409 `HOLD_NOT_ACTIVE`.
+        A hold the caller can neither read nor lift in its module answers 404.
+      x-itms-permission: hold.lift
+      parameters:
+        - $ref: '#/components/parameters/HoldId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LiftHoldRequest' }
+      responses:
+        '200':
+          description: Hold lifted
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Hold' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    HoldId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Chosen by the client, new for every intended action, and sent again unchanged on a retry (API_SPECIFICATION
+        §2, ADR-032). A retry with the same key and the same request gets the stored successful response again,
+        marked `Idempotent-Replayed: true`. The same key with another request answers 409 `IDEMPOTENCY_KEY_REUSED`;
+        while the first request still runs, 409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`. A missing key answers 400
+        `IDEMPOTENCY_KEY_REQUIRED`, a malformed one 400 `IDEMPOTENCY_KEY_INVALID`.
+      schema: { type: string, pattern: '^[A-Za-z0-9._:-]{8,128}$' }
+
+  headers:
+    IdempotentReplayed:
+      description: '`true` when the response is the stored response of an earlier request with the same Idempotency-Key'
+      schema: { type: string, enum: ['true'] }
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid bearer token
+    Problem:
+      description: Problem details (RFC 9457, API_SPECIFICATION §3)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+
+  schemas:
+    Code:
+      type: string
+      pattern: '^[A-Z0-9_]{1,40}$'
+    BusinessNumber:
+      type: string
+      description: Interim business-number format of traffic files, licences, vehicles and plates (Q-046)
+      pattern: '^[A-Z0-9][A-Z0-9-]{0,39}$'
+    SubjectType:
+      type: string
+      enum: [TRAFFIC_FILE, DRIVING_LICENCE, VEHICLE, PLATE]
+    Subject:
+      type: object
+      additionalProperties: false
+      required: [type, id]
+      properties:
+        type: { $ref: '#/components/schemas/SubjectType' }
+        id: { $ref: '#/components/schemas/BusinessNumber' }
+    Channel:
+      type: string
+      description: Channels of API_SPECIFICATION §2 (`X-Channel`)
+      enum: [PORTAL, APP, BACKOFFICE, PARTNER, KIOSK, CALLCENTRE, FIELD, ASSISTANT, AGENT]
+    HoldStatus:
+      type: string
+      description: Active or Lifted as stored; Expired once the end date has passed (derived)
+      enum: [ACTIVE, LIFTED, EXPIRED]
+    SourceRef:
+      type: string
+      description: The source's own reference for the hold; used once per source (CC-033)
+      pattern: '^[A-Za-z0-9._:/-]{1,100}$'
+    Reason:
+      type: string
+      minLength: 3
+      maxLength: 500
+    PlaceHoldRequest:
+      type: object
+      additionalProperties: false
+      required: [subject, holdType, module, source, reason, blockedServices, liftableByRoles]
+      properties:
+        subject: { $ref: '#/components/schemas/Subject' }
+        holdType: { $ref: '#/components/schemas/Code' }
+        module: { $ref: '#/components/schemas/Code' }
+        source: { $ref: '#/components/schemas/Code' }
+        sourceRef: { oneOf: [ { $ref: '#/components/schemas/SourceRef' }, { type: 'null' } ] }
+        reason: { $ref: '#/components/schemas/Reason' }
+        startDate: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
+        endDate: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
+        blockedServices:
+          type: array
+          minItems: 1
+          maxItems: 100
+          uniqueItems: true
+          items: { type: string, pattern: '^(\*|[A-Z][A-Z0-9_]{1,19})$' }
+        liftableByRoles:
+          type: array
+          minItems: 1
+          maxItems: 20
+          uniqueItems: true
+          items: { type: string, pattern: '^[A-Z][A-Z0-9_]{1,59}$' }
+    LiftHoldRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: { $ref: '#/components/schemas/Reason' }
+    Actor:
+      type: object
+      additionalProperties: false
+      required: [id]
+      properties:
+        id: { type: string }
+        username: { oneOf: [ { type: string }, { type: 'null' } ] }
+    NullableActor:
+      oneOf: [ { $ref: '#/components/schemas/Actor' }, { type: 'null' } ]
+    Hold:
+      type: object
+      additionalProperties: false
+      required: [id, subject, holdType, module, source, reason, startDate, blockedServices, liftableByRoles, status,
+                 placedAt, placedBy, placedChannel, version]
+      properties:
+        id: { type: string, format: uuid }
+        subject: { $ref: '#/components/schemas/Subject' }
+        holdType: { $ref: '#/components/schemas/Code' }
+        module: { $ref: '#/components/schemas/Code' }
+        source: { $ref: '#/components/schemas/Code' }
+        sourceRef: { oneOf: [ { $ref: '#/components/schemas/SourceRef' }, { type: 'null' } ] }
+        reason: { type: string }
+        startDate: { type: string, format: date }
+        endDate: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
+        blockedServices: { type: array, items: { type: string } }
+        liftableByRoles: { type: array, items: { type: string } }
+        status: { $ref: '#/components/schemas/HoldStatus' }
+        inForce:
+          description: Whether the hold applies today (Active and started); null in the history
+          oneOf: [ { type: boolean }, { type: 'null' } ]
+        placedAt: { type: string, format: date-time }
+        placedBy: { $ref: '#/components/schemas/Actor' }
+        placedChannel: { $ref: '#/components/schemas/Channel' }
+        liftedAt: { oneOf: [ { type: string, format: date-time }, { type: 'null' } ] }
+        liftedBy: { $ref: '#/components/schemas/NullableActor' }
+        liftedChannel: { oneOf: [ { $ref: '#/components/schemas/Channel' }, { type: 'null' } ] }
+        liftReason: { oneOf: [ { type: string }, { type: 'null' } ] }
+        version: { type: integer, minimum: 1 }
+    HoldCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Hold' } }
+    HoldVersion:
+      type: object
+      additionalProperties: false
+      required: [hold, validFrom, changedBy]
+      properties:
+        hold: { $ref: '#/components/schemas/Hold' }
+        validFrom: { type: string, format: date-time }
+        validTo: { oneOf: [ { type: string, format: date-time }, { type: 'null' } ] }
+        changedBy: { type: string }
+    HoldVersionCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/HoldVersion' } }
+    Problem:
+      type: object
+      required: [status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        code: { type: string }
+        detail: { type: string }
+        instance: { type: string }
+        correlationId: { type: string }
+        requirementRefs: { type: array, items: { type: string } }
+        errors: { type: array, items: { type: object } }

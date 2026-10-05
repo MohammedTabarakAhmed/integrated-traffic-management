@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # One-command local startup (BRD reader's guide: "README that starts the whole system with one command").
 #   tools/dev/up.sh          build + start PostgreSQL (one per service), Keycloak (realm "itms"), iam-service,
-#                            reference-data-service and transaction-service, then grant the development roles
+#                            reference-data-service, transaction-service and hold-eligibility-service, then grant
+#                            the development roles
 #                            through iam-service
 #   tools/dev/up.sh down     stop the stack (data volumes kept)
 # First run generates infra/local/.env with random development secrets (git-ignored; SEC-004). Missing keys are
@@ -24,6 +25,8 @@ wanted = {
     "IAM_DB_PASSWORD": lambda: secrets.token_urlsafe(24),
     "TXN_DB_USER": lambda: "transaction",
     "TXN_DB_PASSWORD": lambda: secrets.token_urlsafe(24),
+    "HOLD_DB_USER": lambda: "hold",
+    "HOLD_DB_PASSWORD": lambda: secrets.token_urlsafe(24),
     "KC_ADMIN_USER": lambda: "kc-admin",
     "KC_ADMIN_PASSWORD": lambda: secrets.token_urlsafe(24),
     "DEV_IAM_ADMIN_PASSWORD": lambda: secrets.token_urlsafe(16),
@@ -51,7 +54,7 @@ if [[ "${1:-}" == "down" ]]; then
 fi
 
 echo "== Building service jars"
-mvn -B -ntp -q package -DskipTests -pl services/iam-service,services/reference-data-service,services/transaction-service -am
+mvn -B -ntp -q package -DskipTests -pl services/iam-service,services/reference-data-service,services/transaction-service,services/hold-eligibility-service -am
 
 echo "== Starting stack (this waits until every container is healthy)"
 "${COMPOSE[@]}" up -d --build --wait
@@ -91,6 +94,8 @@ grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker CATALOGUE_MAKER
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker CATALOGUE_CHECKER
 # Counter staff for transactions (CC-021..CC-027; ADR-029).
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker TRANSACTION_OFFICER
+# Holds (CC-030; ADR-033): dev.checker places, reads and lifts holds.
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker HOLD_OFFICER
 # dev.checker is also the development access reviewer ("manager", SEC-007, ADR-026); dev.iam-admin, the IT
 # administrator, opens and closes reviews.
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker ACCESS_REVIEWER
@@ -103,6 +108,7 @@ ITMS local stack is up:
   iam-service             http://localhost:8082/v1/roles             (bearer token required)
   reference-data-service  http://localhost:8081/v1/reference-lists   (bearer token required)
   transaction-service     http://localhost:8083/v1/services          (bearer token required)
+  hold-eligibility-service http://localhost:8084/v1/holds            (bearer token required)
   Keycloak                http://localhost:8180   (realm: itms; users dev.iam-admin / dev.maker / dev.checker;
                                                    passwords in $ENV_FILE; client itms-directory-feed uses
                                                    DEV_DIRECTORY_FEED_SECRET)

@@ -26,6 +26,7 @@
     <module>services/reference-data-service</module>
     <module>services/iam-service</module>
     <module>services/transaction-service</module>
+    <module>services/hold-eligibility-service</module>
   </modules>
 
   <properties>

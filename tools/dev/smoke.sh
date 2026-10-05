@@ -6,7 +6,7 @@
 # -> a service is defined and disabled per region and channel through catalogue maker-checker (CC-020, CC-026)
 # -> a transaction of that service is opened, refused as a duplicate and submitted (CC-021..CC-023, CC-027)
 # -> it is found as the newest of its applicant's transactions (CC-025) -> a retry with the same Idempotency-Key is
-# replayed, not repeated (ADR-032).
+# replayed, not repeated (ADR-032) -> a hold is placed on a vehicle and lifted by its role (CC-030).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 set -a; source infra/local/.env; set +a
@@ -228,5 +228,25 @@ res=$(curl -s -w '\n%{http_code}' -H "Authorization: Bearer $CHECKER" -H 'Conten
 [[ "$(status_of "$res")" == 400 && "$(body_of "$res" | json_field "['code']")" == IDEMPOTENCY_KEY_REQUIRED ]] \
   || { echo "FAIL: no key should be refused with 400 IDEMPOTENCY_KEY_REQUIRED, got $(status_of "$res"): $(body_of "$res")"; exit 1; }
 echo "   $first replayed; no key: 400 IDEMPOTENCY_KEY_REQUIRED"
+
+echo "16. Holds (CC-030): the officer places a hold on a vehicle; the maker cannot read it; the officer lifts it"
+# A throw-away vehicle per run; the hold ends lifted, so nothing is left in force.
+HOLDS=http://localhost:8084
+post_hold() { # token path body -> prints "<status> <body>"
+  curl -s -w '\n%{http_code}' -H "Authorization: Bearer $1" -H 'Content-Type: application/json' -H 'X-Channel: BACKOFFICE' \
+    -H "Idempotency-Key: $(new_key)" "$HOLDS$2" -d "$3"
+}
+hold_vin="SMKHLD-$(date +%s)"
+res=$(post_hold "$CHECKER" /v1/holds "{\"subject\":{\"type\":\"VEHICLE\",\"id\":\"$hold_vin\"},\"holdType\":\"UNPAID_FINES\",\"module\":\"VIOLATIONS\",\"source\":\"VIOLATIONS\",\"reason\":\"smoke test hold\",\"blockedServices\":[\"*\"],\"liftableByRoles\":[\"HOLD_OFFICER\"]}")
+[[ "$(status_of "$res")" == 201 ]] || { echo "FAIL: placing a hold returned $(status_of "$res"): $(body_of "$res")"; exit 1; }
+hold_id=$(body_of "$res" | json_field "['id']")
+status=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $MAKER" "$HOLDS/v1/holds/$hold_id")
+[[ "$status" == 403 ]] || { echo "FAIL: the maker has no hold permission, expected 403, got $status"; exit 1; }
+res=$(post_hold "$CHECKER" "/v1/holds/$hold_id/lifts" '{"reason":"smoke test lift"}')
+[[ "$(status_of "$res")" == 200 && "$(body_of "$res" | json_field "['status']")" == LIFTED ]] \
+  || { echo "FAIL: lifting returned $(status_of "$res"): $(body_of "$res")"; exit 1; }
+versions=$(curl -sf -H "Authorization: Bearer $CHECKER" "$HOLDS/v1/holds/$hold_id/history" | json_field "['items'].__len__()")
+[[ "$versions" == 2 ]] || { echo "FAIL: expected 2 versions, got $versions"; exit 1; }
+echo "   $hold_vin: hold $hold_id placed and lifted (2 versions)"
 
 echo "SMOKE OK"

@@ -47,6 +47,20 @@ services:
       timeout: 3s
       retries: 20
 
+  hold-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: hold
+      POSTGRES_USER: ${HOLD_DB_USER:?run tools/dev/up.sh}
+      POSTGRES_PASSWORD: ${HOLD_DB_PASSWORD:?run tools/dev/up.sh}
+    volumes:
+      - hold-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d hold"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   keycloak:
     image: quay.io/keycloak/keycloak:26.8.0
     command: ["start-dev", "--import-realm"]
@@ -140,7 +154,33 @@ services:
       timeout: 3s
       retries: 30
 
+  hold-eligibility-service:
+    build: ../../services/hold-eligibility-service
+    environment:
+      HOLD_DB_URL: jdbc:postgresql://hold-postgres:5432/hold
+      HOLD_DB_USER: ${HOLD_DB_USER}
+      HOLD_DB_PASSWORD: ${HOLD_DB_PASSWORD}
+      ITMS_OIDC_ISSUER: http://localhost:8180/realms/itms
+      ITMS_OIDC_JWKS_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/certs
+      ITMS_AUTHORISATION_SOURCE: iam
+      ITMS_IAM_URL: http://iam-service:8080
+    ports:
+      - "127.0.0.1:8084:8080"
+    depends_on:
+      hold-postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      iam-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/actuator/health/readiness | grep -q UP"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
 volumes:
   refdata-db:
   iam-db:
   transaction-db:
+  hold-db:

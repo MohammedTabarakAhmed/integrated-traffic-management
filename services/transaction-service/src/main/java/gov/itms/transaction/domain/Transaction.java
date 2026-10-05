@@ -1,5 +1,6 @@
 package gov.itms.transaction.domain;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
@@ -10,8 +11,10 @@ import java.util.UUID;
  * definition in force, and each command moves it one step along the lifecycle of {@link TransactionStatus}, recording
  * the change ({@link #lastChange()}) for the status history. Every rule here is enforced again by the database.
  *
- * <p>Payment, review, return-for-information, decision, fulfilment and expiry are commands of the services that are
- * built later (payments, workflow, scheduler); they are defined here so that the lifecycle has one owner.
+ * <p>Payment, review, return-for-information, decision and fulfilment are commands of the services that are built
+ * later (payments, workflow); they are defined here so that the lifecycle has one owner. Draft expiry (CC-024) is run
+ * by this service's own job. Expiry of an unpaid or unanswered transaction waits for the payment and workflow periods
+ * (Q-051).
  */
 public final class Transaction {
 
@@ -150,12 +153,39 @@ public final class Transaction {
         return move(TransactionStatus.CANCELLED, StatusReason.CANCELLED, Codes.reason(note), actor, via, now);
     }
 
-    /** Draft, Pending payment or Returned for information → Expired, by the system (CC-024, next slice). */
-    public StatusChange expire(Channel via, Instant now) {
-        return move(TransactionStatus.EXPIRED, StatusReason.EXPIRED, null, SYSTEM, via, now);
+    /**
+     * Draft → Expired, by the system through the {@code SYSTEM} channel, when the Draft was not submitted within
+     * {@code period} of being opened (CC-024; the period is configuration, ADR-031). The note records the period
+     * applied.
+     */
+    public StatusChange expireDraft(Duration period, Instant now) {
+        Objects.requireNonNull(period);
+        if (period.isNegative() || period.isZero()) {
+            throw new IllegalArgumentException("the Draft period must be positive");
+        }
+        if (status() != TransactionStatus.DRAFT) {
+            throw new DomainException(DomainException.Kind.CONFLICT, "ILLEGAL_TRANSITION",
+                    "only a Draft expires for not being submitted", List.of("CC-024"), status(),
+                    TransactionStatus.EXPIRED);
+        }
+        if (!isDraftDue(period, now)) {
+            throw new IllegalStateException("the Draft period has not passed yet");
+        }
+        return move(TransactionStatus.EXPIRED, StatusReason.EXPIRED, "not submitted within " + period, SYSTEM,
+                ChangeChannel.SYSTEM, now);
+    }
+
+    /** The transaction is a Draft opened at least {@code period} before {@code now} (CC-024). */
+    public boolean isDraftDue(Duration period, Instant now) {
+        return status() == TransactionStatus.DRAFT && !createdAt.plus(period).isAfter(now);
     }
 
     private StatusChange move(TransactionStatus to, StatusReason reason, String note, Actor actor, Channel via,
+                              Instant now) {
+        return move(to, reason, note, actor, ChangeChannel.of(Objects.requireNonNull(via)), now);
+    }
+
+    private StatusChange move(TransactionStatus to, StatusReason reason, String note, Actor actor, ChangeChannel via,
                               Instant now) {
         Objects.requireNonNull(actor);
         Objects.requireNonNull(via);

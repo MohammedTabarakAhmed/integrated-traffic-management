@@ -210,6 +210,14 @@ final class InMemoryRepositories {
         }
 
         @Override
+        public List<Transaction> lockDraftsOpenedBy(Instant openedBy, int limit) {
+            return rows.values().stream()
+                    .filter(t -> t.status() == TransactionStatus.DRAFT && !t.createdAt().isAfter(openedBy))
+                    .sorted(Comparator.comparing(Transaction::createdAt)).limit(limit).map(Transactions::copy)
+                    .toList();
+        }
+
+        @Override
         public List<StatusChange> history(UUID transactionId) {
             return List.copyOf(history.getOrDefault(transactionId, List.of()));
         }
@@ -240,6 +248,8 @@ final class InMemoryRepositories {
 
     static final class Audit implements AuditRecorder {
         final List<AuditEntry> entries = new ArrayList<>();
+        /** Explicit actors of {@link #recordAs}, in order. */
+        final List<gov.itms.platform.security.CurrentActor> systemActors = new ArrayList<>();
 
         @Override
         public void record(String action, String entityType, String entityId, Object oldValue, Object newValue,
@@ -250,6 +260,7 @@ final class InMemoryRepositories {
         @Override
         public void recordAs(gov.itms.platform.security.CurrentActor actor, String action, String entityType,
                              String entityId, Object oldValue, Object newValue, String reason) {
+            systemActors.add(actor);
             record(action, entityType, entityId, oldValue, newValue, reason);
         }
 

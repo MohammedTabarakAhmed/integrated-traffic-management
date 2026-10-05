@@ -26,6 +26,15 @@ itms:
     iam:
       base-url: ${ITMS_IAM_URL:}
       cache-ttl: ${ITMS_IAM_CACHE_TTL:60s}
+  transaction:
+    # CC-024: Drafts not submitted within the period expire (BRD default 30 days; ADR-031). Business configuration,
+    # set per environment; never hard-coded in the code.
+    draft-expiry:
+      enabled: ${ITMS_DRAFT_EXPIRY_ENABLED:true}
+      period: ${ITMS_DRAFT_EXPIRY_PERIOD:30d}
+      interval: ${ITMS_DRAFT_EXPIRY_INTERVAL:15m}
+      batch-size: ${ITMS_DRAFT_EXPIRY_BATCH_SIZE:100}
+      max-batches: ${ITMS_DRAFT_EXPIRY_MAX_BATCHES:50}
 
 management:
   endpoints:

@@ -11,7 +11,9 @@ import com.atlassian.oai.validator.model.Request;
 import com.atlassian.oai.validator.model.SimpleRequest;
 import com.atlassian.oai.validator.model.SimpleResponse;
 import com.atlassian.oai.validator.report.ValidationReport;
+import gov.itms.transaction.infrastructure.DraftExpiryJob;
 import java.nio.charset.StandardCharsets;
+import java.sql.Connection;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.Arrays;
@@ -19,6 +21,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import javax.sql.DataSource;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
@@ -67,6 +70,10 @@ class TransactionApiIT {
     ObjectMapper json;
     @Autowired
     JdbcClient db;
+    @Autowired
+    DataSource dataSource;
+    @Autowired
+    DraftExpiryJob draftExpiryJob;
 
     @BeforeAll
     static void loadContract() {
@@ -515,5 +522,99 @@ class TransactionApiIT {
                 .hasMessageContaining("ck_transaction_reference");
         assertThat(db.sql(insert).param("ref", "ITX_DB-R1-" + YEAR + "-0000501").param("year", YEAR)
                 .param("seq", 501).param("subject", "VIN-NEW").update()).isEqualTo(1);
+    }
+
+    @Test
+    @Tag("CC-024")
+    @Tag("CC-023")
+    @Tag("CC-120")
+    @DisplayName("CC-024: the job expires Drafts older than the configured 30 days, as SYSTEM, skipping Drafts another instance holds")
+    void draftExpiry() throws Exception {
+        define("ITX_EXP", null, true, false);
+        String old = backdatedDraft("ITX_EXP", 900_001, "VIN-EXP1", 31);
+        String held = backdatedDraft("ITX_EXP", 900_002, "VIN-EXP2", 31);
+        String recent = backdatedDraft("ITX_EXP", 900_003, "VIN-EXP3", 29);
+        String fresh = openOk("ITX_EXP", "VIN-EXP4");
+
+        // Another instance (or a submission) holds one Draft: this run skips it instead of waiting.
+        try (Connection other = dataSource.getConnection()) {
+            other.setAutoCommit(false);
+            try (var lock = other.prepareStatement("select id from service_transaction where reference = ? for update")) {
+                lock.setString(1, held);
+                lock.executeQuery();
+            }
+            assertThat(draftExpiryJob.run()).isEqualTo(1);
+            other.rollback();
+        }
+        assertThat(status(old)).isEqualTo("EXPIRED");
+        assertThat(status(held)).isEqualTo("DRAFT");
+        assertThat(draftExpiryJob.run()).isEqualTo(1);
+        assertThat(status(held)).isEqualTo("EXPIRED");
+        assertThat(status(recent)).isEqualTo("DRAFT");
+        assertThat(status(fresh)).isEqualTo("DRAFT");
+        assertThat(draftExpiryJob.run()).isZero();
+
+        // History through the API (contract-validated): actor and channel SYSTEM, reason EXPIRED, period noted.
+        JsonNode last = body(getAs("/v1/transactions/" + old + "/status-history", officer())).get("items").get(1);
+        assertThat(last.get("status").asString()).isEqualTo("EXPIRED");
+        assertThat(last.get("previousStatus").asString()).isEqualTo("DRAFT");
+        assertThat(last.get("reason").asString()).isEqualTo("EXPIRED");
+        assertThat(last.get("actor").get("id").asString()).isEqualTo("SYSTEM");
+        assertThat(last.get("channel").asString()).isEqualTo("SYSTEM");
+        assertThat(last.get("note").asString()).isEqualTo("not submitted within PT720H");
+        assertThat(db.sql("select actor_id || '/' || channel || '/' || reason from audit_outbox"
+                + " where action = 'TRANSACTION_EXPIRED' and entity_id = :ref").param("ref", old)
+                .query(String.class).single()).isEqualTo("SYSTEM/SYSTEM/not submitted within PT720H");
+
+        // Too late to submit; the subject is free again (CC-027).
+        MvcResult late = postAs("/v1/transactions/" + old + "/submissions", null, officer());
+        assertThat(late.getResponse().getStatus()).isEqualTo(409);
+        assertThat(body(late).get("code").asString()).isEqualTo("ILLEGAL_TRANSITION");
+        openOk("ITX_EXP", "VIN-EXP1");
+
+        // SYSTEM is not a channel a request may use.
+        MvcResult viaSystem = postVia("/v1/transactions", newTransaction("ITX_EXP", "VEHICLE", "VIN-EXP5", "R1", null),
+                officer(), "SYSTEM");
+        assertThat(viaSystem.getResponse().getStatus()).isEqualTo(422);
+        assertThat(body(viaSystem).get("code").asString()).isEqualTo("CHANNEL_REQUIRED");
+
+        // The database: only the system expires a Draft, only the system uses SYSTEM, nothing is opened through it.
+        String where = " where reference = '" + recent + "'";
+        assertThatThrownBy(() -> db.sql("update service_transaction set status = 'EXPIRED', status_reason = 'EXPIRED',"
+                + " status_channel = 'BACKOFFICE', version = version + 1" + where).update())
+                .isInstanceOf(DataAccessException.class).hasMessageContaining("ck_transaction_draft_expiry");
+        assertThatThrownBy(() -> db.sql("update service_transaction set status = 'CANCELLED',"
+                + " status_reason = 'CANCELLED', status_note = 'by hand', status_channel = 'SYSTEM',"
+                + " version = version + 1" + where).update())
+                .isInstanceOf(DataAccessException.class).hasMessageContaining("ck_transaction_channels");
+        assertThatThrownBy(() -> backdatedDraft("ITX_EXP", 900_004, "VIN-EXP6", 1, "SYSTEM"))
+                .isInstanceOf(DataAccessException.class).hasMessageContaining("ck_transaction_channels");
+    }
+
+    private String backdatedDraft(String serviceCode, int sequence, String subjectId, int daysAgo) {
+        return backdatedDraft(serviceCode, sequence, subjectId, daysAgo, "BACKOFFICE");
+    }
+
+    /** A Draft opened {@code daysAgo} days ago, written below the application (created_at is fixed once stored). */
+    private String backdatedDraft(String serviceCode, int sequence, String subjectId, int daysAgo, String channel) {
+        String ref = serviceCode + "-R1-" + YEAR + "-" + String.format("%07d", sequence);
+        db.sql("""
+                        insert into service_transaction (id, reference, service_code, reference_year,
+                            reference_sequence, service_version, module, fee_code, payment_required,
+                            allows_concurrent_open, subject_type, subject_id, applicant_file_number, home_region,
+                            region, channel, created_at, created_by, status, status_reason, status_actor_id,
+                            status_channel, status_changed_at, version)
+                        values (gen_random_uuid(), :ref, :code, :year, :seq, 1, 'VEHICLE', null, false, false,
+                            'VEHICLE', :subject, 'TF-1001', 'R1', 'R1', :channel,
+                            now() - make_interval(days => :days), 'u-officer', 'DRAFT', 'CREATED', 'u-officer',
+                            :channel, now() - make_interval(days => :days), 1)""")
+                .param("ref", ref).param("code", serviceCode).param("year", YEAR).param("seq", sequence)
+                .param("subject", subjectId).param("channel", channel).param("days", daysAgo).update();
+        return ref;
+    }
+
+    private String status(String reference) {
+        return db.sql("select status from service_transaction where reference = :ref").param("ref", reference)
+                .query(String.class).single();
     }
 }

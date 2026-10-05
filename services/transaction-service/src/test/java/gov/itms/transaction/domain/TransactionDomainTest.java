@@ -3,6 +3,7 @@ package gov.itms.transaction.domain;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.EnumSet;
@@ -162,10 +163,8 @@ class TransactionDomainTest {
         StatusChange cancelled = t.cancel(CLERK, Channel.BACKOFFICE, "changed my mind", NOW);
         assertThat(cancelled.note()).isEqualTo("changed my mind");
         assertThat(t.status().isOpen()).isFalse();
-        assertThatThrownBy(() -> t.expire(Channel.BACKOFFICE, NOW)).satisfies(code("ILLEGAL_TRANSITION"));
-
-        Transaction draft = open(spec(null, true), "R1", "R1");
-        assertThat(draft.expire(Channel.BACKOFFICE, NOW).actor()).isEqualTo(Transaction.SYSTEM);
+        assertThatThrownBy(() -> t.expireDraft(Duration.ofDays(30), NOW.plus(Duration.ofDays(31))))
+                .satisfies(code("ILLEGAL_TRANSITION"));
         Transaction review = open(spec(null, true), "R1", "R1");
         review.submit(CLERK, Channel.BACKOFFICE, NOW);
         review.routePayment(Channel.BACKOFFICE, NOW);
@@ -210,6 +209,43 @@ class TransactionDomainTest {
             assertThatThrownBy(() -> TransactionCursor.decode(bad)).as(bad).satisfies(code("CURSOR_INVALID"));
         }
         assertThatThrownBy(() -> TransactionCursor.decode(null)).satisfies(code("CURSOR_INVALID"));
+    }
+
+    @Test
+    @Tag("CC-024")
+    @Tag("CC-023")
+    @DisplayName("CC-024: a Draft expires only once the period since opening has passed, by the system through the SYSTEM channel")
+    void draftExpiry() {
+        Duration period = Duration.ofDays(30);
+        Transaction draft = open(spec(null, true), "R1", "R1");
+        Instant due = NOW.plus(period);
+        assertThat(draft.isDraftDue(period, due.minusNanos(1000))).isFalse();
+        assertThatThrownBy(() -> draft.expireDraft(period, due.minusNanos(1000)))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(draft.isDraftDue(period, due)).isTrue();
+        assertThatThrownBy(() -> draft.expireDraft(Duration.ZERO, due)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> draft.expireDraft(period.negated(), due))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        StatusChange expired = draft.expireDraft(period, due);
+        assertThat(expired).isEqualTo(new StatusChange(2, TransactionStatus.DRAFT, TransactionStatus.EXPIRED,
+                StatusReason.EXPIRED, "not submitted within PT720H", Transaction.SYSTEM, ChangeChannel.SYSTEM, due));
+        assertThat(draft.status().isOpen()).isFalse();
+        assertThat(draft.isDraftDue(period, due)).isFalse();
+        assertThatThrownBy(() -> draft.expireDraft(period, due)).satisfies(code("ILLEGAL_TRANSITION"));
+
+        // A submitted transaction does not expire under CC-024.
+        Transaction submitted = open(spec(null, true), "R1", "R1");
+        submitted.submit(CLERK, Channel.BACKOFFICE, NOW);
+        assertThat(submitted.isDraftDue(period, due)).isFalse();
+        assertThatThrownBy(() -> submitted.expireDraft(period, due)).satisfies(code("ILLEGAL_TRANSITION"));
+
+        // SYSTEM is the system's channel only; it is never a channel a request comes through.
+        assertThatThrownBy(() -> new StatusChange(2, TransactionStatus.DRAFT, TransactionStatus.EXPIRED,
+                StatusReason.EXPIRED, null, CLERK, ChangeChannel.SYSTEM, due))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(ChangeChannel.of(Channel.KIOSK)).isEqualTo(ChangeChannel.KIOSK);
+        assertThat(Channel.values()).extracting(Channel::name).doesNotContain("SYSTEM");
     }
 
     @Test

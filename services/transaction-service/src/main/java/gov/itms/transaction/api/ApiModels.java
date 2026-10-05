@@ -9,6 +9,7 @@ import gov.itms.transaction.domain.AvailabilityRule;
 import gov.itms.transaction.domain.AvailabilityRuleSpec;
 import gov.itms.transaction.domain.BilingualName;
 import gov.itms.transaction.domain.CatalogueChange;
+import gov.itms.transaction.domain.ChangeChannel;
 import gov.itms.transaction.domain.Channel;
 import gov.itms.transaction.domain.Codes;
 import gov.itms.transaction.domain.DomainException;
@@ -210,7 +211,8 @@ final class ApiModels {
     }
 
     record StatusChangeDto(long sequence, TransactionStatus previousStatus, TransactionStatus status,
-                           StatusReason reason, String note, ActorDto actor, Channel channel, Instant changedAt) {
+                           StatusReason reason, String note, ActorDto actor, ChangeChannel channel,
+                           Instant changedAt) {
         static StatusChangeDto of(StatusChange c) {
             return new StatusChangeDto(c.sequence(), c.previousStatus(), c.status(), c.reason(), c.note(),
                     ActorDto.of(c.actor()), c.channel(), c.changedAt());

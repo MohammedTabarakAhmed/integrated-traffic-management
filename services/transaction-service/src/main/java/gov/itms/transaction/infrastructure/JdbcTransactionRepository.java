@@ -2,6 +2,7 @@ package gov.itms.transaction.infrastructure;
 
 import gov.itms.transaction.application.TransactionRepository;
 import gov.itms.transaction.domain.Actor;
+import gov.itms.transaction.domain.ChangeChannel;
 import gov.itms.transaction.domain.Channel;
 import gov.itms.transaction.domain.DomainException;
 import gov.itms.transaction.domain.StatusChange;
@@ -136,6 +137,16 @@ class JdbcTransactionRepository implements TransactionRepository {
     }
 
     @Override
+    public List<Transaction> lockDraftsOpenedBy(Instant openedBy, int limit) {
+        // ix_transaction_draft_created (V4) holds only Drafts, oldest first.
+        return jdbc.sql(SELECT + " where t.status = 'DRAFT' and t.created_at <= :openedBy"
+                        + " order by t.created_at limit :limit for update of t skip locked")
+                .param("openedBy", Timestamp.from(openedBy))
+                .param("limit", limit)
+                .query((rs, n) -> map(rs)).list();
+    }
+
+    @Override
     public void saveStatus(Transaction t) {
         StatusChange c = t.lastChange();
         int updated = jdbc.sql("""
@@ -194,7 +205,7 @@ class JdbcTransactionRepository implements TransactionRepository {
                 .query((rs, n) -> new StatusChange(rs.getLong("sequence"), status(rs.getString("previous_status")),
                         TransactionStatus.valueOf(rs.getString("status")), StatusReason.valueOf(rs.getString("reason")),
                         rs.getString("note"), new Actor(rs.getString("actor_id"), rs.getString("actor_username")),
-                        Channel.valueOf(rs.getString("channel")), rs.getTimestamp("changed_at").toInstant()))
+                        ChangeChannel.valueOf(rs.getString("channel")), rs.getTimestamp("changed_at").toInstant()))
                 .list();
     }
 
@@ -205,7 +216,8 @@ class JdbcTransactionRepository implements TransactionRepository {
                 TransactionStatus.valueOf(rs.getString("status")), StatusReason.valueOf(rs.getString("status_reason")),
                 rs.getString("status_note"),
                 new Actor(rs.getString("status_actor_id"), rs.getString("status_actor_username")),
-                Channel.valueOf(rs.getString("status_channel")), rs.getTimestamp("status_changed_at").toInstant());
+                ChangeChannel.valueOf(rs.getString("status_channel")),
+                rs.getTimestamp("status_changed_at").toInstant());
         return new Transaction(rs.getObject("id", UUID.class), reference, rs.getLong("service_version"),
                 rs.getString("module"), rs.getString("fee_code"), rs.getBoolean("allows_concurrent_open"),
                 new Subject(Subject.Type.valueOf(rs.getString("subject_type")), rs.getString("subject_id")),

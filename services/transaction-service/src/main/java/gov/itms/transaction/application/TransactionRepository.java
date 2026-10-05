@@ -6,6 +6,7 @@ import gov.itms.transaction.domain.Transaction;
 import gov.itms.transaction.domain.TransactionCursor;
 import gov.itms.transaction.domain.TransactionReference;
 import gov.itms.transaction.domain.TransactionStatus;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -32,6 +33,13 @@ public interface TransactionRepository {
 
     /** Reads the transaction and locks it until the end of the database transaction. */
     Optional<Transaction> findForUpdate(TransactionReference reference);
+
+    /**
+     * Up to {@code limit} Drafts opened at or before {@code openedBy}, oldest first, locked until the end of the
+     * database transaction. Drafts another database transaction holds are skipped, so several instances can run the
+     * expiry job at once without waiting on each other or on a submission (CC-024).
+     */
+    List<Transaction> lockDraftsOpenedBy(Instant openedBy, int limit);
 
     /** Saves the transaction's {@link Transaction#lastChange()}; the stored version must be one less. */
     void saveStatus(Transaction transaction);

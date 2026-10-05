@@ -14,8 +14,10 @@ info:
     (CC-021; a 7-digit sequence per service, region and year, Q-003) and follows the lifecycle of CC-022 / LLD §2.1.
     Every status change is kept in an append-only status history with user, channel, time, reason and previous status
     (CC-023). This version lets staff create, submit and cancel a transaction; payment, review, return-for-information,
-    decision, fulfilment and expiry transitions are commands of the services built later (payments, workflow,
-    scheduler). A transaction is tracked by its reference or through the applicant's list, whatever channel it was
+    decision and fulfilment transitions are commands of the services built later (payments, workflow). A Draft not
+    submitted within a configured period (default 30 days, counted from opening) expires automatically: the service
+    does it on its own schedule, recorded with actor and channel `SYSTEM` and reason `EXPIRED` (CC-024, ADR-031); a
+    submission that arrives after that answers 409 `ILLEGAL_TRANSITION`. A transaction is tracked by its reference or through the applicant's list, whatever channel it was
     opened through (CC-025; staff-assisted until customers can sign in, Q-050). The channel is the `X-Channel` header (set by the gateway or BFF); a transaction cannot be created or
     changed without a known channel.
 
@@ -471,6 +473,13 @@ components:
       type: string
       description: Channels of API_SPECIFICATION §2 (`X-Channel`)
       enum: [PORTAL, APP, BACKOFFICE, PARTNER, KIOSK, CALLCENTRE, FIELD, ASSISTANT, AGENT]
+    ChangeChannel:
+      type: string
+      description: >-
+        Channel recorded with a status change (CC-023): the request's channel, or `SYSTEM` for a change the system makes
+        on its own schedule (actor `SYSTEM`), such as a Draft not submitted within the configured period expiring
+        (CC-024). `SYSTEM` is never accepted as `X-Channel`.
+      enum: [PORTAL, APP, BACKOFFICE, PARTNER, KIOSK, CALLCENTRE, FIELD, ASSISTANT, AGENT, SYSTEM]
     ChannelOrAll:
       type: string
       enum: [PORTAL, APP, BACKOFFICE, PARTNER, KIOSK, CALLCENTRE, FIELD, ASSISTANT, AGENT, '*']
@@ -772,7 +781,7 @@ components:
     StatusChange:
       type: object
       additionalProperties: false
-      description: One status change (CC-023). The system acts as actor `SYSTEM` for automatic steps.
+      description: One status change (CC-023). The system acts as actor `SYSTEM` for automatic steps; a step it takes on its own schedule (Draft expiry, CC-024) also has channel `SYSTEM`.
       required: [sequence, status, reason, actor, channel, changedAt]
       properties:
         sequence: { type: integer, format: int64 }
@@ -781,7 +790,7 @@ components:
         reason: { $ref: '#/components/schemas/StatusReason' }
         note: { oneOf: [ { type: string }, { type: 'null' } ] }
         actor: { $ref: '#/components/schemas/Actor' }
-        channel: { $ref: '#/components/schemas/Channel' }
+        channel: { $ref: '#/components/schemas/ChangeChannel' }
         changedAt: { type: string, format: date-time }
     StatusChangeCollection:
       type: object

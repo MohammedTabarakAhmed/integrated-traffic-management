@@ -1,7 +1,9 @@
 package gov.itms.transaction.application;
 
 import gov.itms.platform.audit.AuditRecorder;
+import gov.itms.platform.security.CurrentActor;
 import gov.itms.transaction.domain.Availability;
+import gov.itms.transaction.domain.ChangeChannel;
 import gov.itms.transaction.domain.Channel;
 import gov.itms.transaction.domain.DomainException;
 import gov.itms.transaction.domain.ServiceDefinition;
@@ -12,6 +14,7 @@ import gov.itms.transaction.domain.TransactionCursor;
 import gov.itms.transaction.domain.TransactionReference;
 import gov.itms.transaction.domain.TransactionStatus;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
@@ -31,7 +34,8 @@ import org.springframework.transaction.annotation.Transactional;
  *   <li>submitting needs {@value #CREATE}, cancelling {@value #CANCEL}, reading {@value #READ}, each reaching the
  *       transaction's region and module; a transaction outside the caller's scope answers as if it did not exist;</li>
  *   <li>every change and every view is audited in the same database transaction (CC-120); status changes also go to
- *       the status history, written by the database (CC-023).</li>
+ *       the status history, written by the database (CC-023);</li>
+ *   <li>Drafts not submitted within the configured period expire, by the system (CC-024, ADR-031).</li>
  * </ul>
  */
 public class TransactionService {
@@ -44,6 +48,9 @@ public class TransactionService {
     static final String ENTITY_LIST = "ApplicantTransactions";
     static final int DEFAULT_PAGE = 50;
     static final int MAX_PAGE = 200;
+    /** Audit actor of the Draft expiry job (CC-024): no signed-in user, channel {@code SYSTEM}. */
+    static final CurrentActor SYSTEM_AUDIT_ACTOR = new CurrentActor(Transaction.SYSTEM.id(),
+            Transaction.SYSTEM.username(), List.of(), ChangeChannel.SYSTEM.name(), null, null);
 
     private final ServiceDefinitionRepository services;
     private final AvailabilityRuleRepository rules;
@@ -131,6 +138,31 @@ public class TransactionService {
         audit.record("TRANSACTION_CANCELLED", ENTITY, reference, before, snapshot(transaction),
                 transaction.lastChange().note());
         return transaction;
+    }
+
+    /**
+     * Expires up to {@code limit} Drafts that were not submitted within {@code period} of being opened (CC-024), in one
+     * database transaction; Drafts locked by a submission or by another instance are left for the next run. Each
+     * expiry is recorded in the status history (actor and channel {@code SYSTEM}, CC-023) and audited as the system
+     * (CC-120).
+     *
+     * @return the number of Drafts expired; fewer than {@code limit} means none were left
+     */
+    @Transactional
+    public int expireDrafts(Duration period, int limit) {
+        if (period == null || period.isNegative() || period.isZero() || limit < 1) {
+            throw new IllegalArgumentException("period and limit must be positive");
+        }
+        Instant now = clock.instant();
+        List<Transaction> due = transactions.lockDraftsOpenedBy(now.minus(period), limit);
+        for (Transaction transaction : due) {
+            Map<String, Object> before = snapshot(transaction);
+            transaction.expireDraft(period, now);
+            transactions.saveStatus(transaction);
+            audit.recordAs(SYSTEM_AUDIT_ACTOR, "TRANSACTION_EXPIRED", ENTITY, transaction.reference().toString(),
+                    before, snapshot(transaction), transaction.lastChange().note());
+        }
+        return due.size();
     }
 
     // ---------------------------------------------------------------- queries (views are audited, CC-120)

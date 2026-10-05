@@ -200,4 +200,13 @@ newest=$(curl -sf -H "Authorization: Bearer $CHECKER" "$TXN/v1/transactions?appl
 [[ "$newest" == "$ref IN_REVIEW" ]] || { echo "FAIL: newest transaction of TF-SMOKE is $newest"; exit 1; }
 echo "   TF-SMOKE: $newest"
 
+echo "14. Draft expiry (CC-024): the job is the only SYSTEM actor; a request through X-Channel SYSTEM is refused"
+# Expiry itself needs a 30-day-old Draft, so it is proven by TransactionApiIT.draftExpiry; here only the channel rule.
+sys_txn="{\"serviceCode\":\"$SVC\",\"subject\":{\"type\":\"VEHICLE\",\"id\":\"SMKSYS-$(date +%s)\"},\"applicantFileNumber\":\"TF-SMOKE\",\"homeRegion\":\"R1\"}"
+res=$(curl -s -w '\n%{http_code}' -H "Authorization: Bearer $CHECKER" -H 'Content-Type: application/json' \
+  -H 'X-Channel: SYSTEM' "$TXN/v1/transactions" -d "$sys_txn")
+[[ "$(status_of "$res")" == 422 && "$(body_of "$res" | json_field "['code']")" == CHANNEL_REQUIRED ]] \
+  || { echo "FAIL: X-Channel SYSTEM should be refused with 422 CHANNEL_REQUIRED, got $(status_of "$res"): $(body_of "$res")"; exit 1; }
+echo "   X-Channel SYSTEM: 422 CHANNEL_REQUIRED"
+
 echo "SMOKE OK"

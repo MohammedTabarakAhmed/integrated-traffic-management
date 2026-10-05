@@ -8,6 +8,7 @@ import gov.itms.transaction.domain.Actor;
 import gov.itms.transaction.domain.AvailabilityRule;
 import gov.itms.transaction.domain.AvailabilityRuleSpec;
 import gov.itms.transaction.domain.BilingualName;
+import gov.itms.transaction.domain.ChangeChannel;
 import gov.itms.transaction.domain.Channel;
 import gov.itms.transaction.domain.DomainException;
 import gov.itms.transaction.domain.ServiceDefinition;
@@ -18,6 +19,7 @@ import gov.itms.transaction.domain.Subject;
 import gov.itms.transaction.domain.Transaction;
 import gov.itms.transaction.domain.TransactionStatus;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -103,6 +105,63 @@ class TransactionServiceTest {
     }
 
     @Test
+    @Tag("CC-024")
+    @Tag("CC-023")
+    @Tag("CC-120")
+    @DisplayName("CC-024: Drafts not submitted within the configured period expire, by the system, oldest first, in batches")
+    void draftExpiry() {
+        Duration period = Duration.ofDays(30);
+        String old1 = create("CERT", CAR, "R1", null).reference().toString();
+        clock.now = NOW.plusSeconds(10);
+        String old2 = create("CERT", CAR, "R1", null).reference().toString();
+        String submitted = create("CERT", CAR, "R1", null).reference().toString();
+        service.submit(submitted, counter());
+        clock.now = NOW.plus(Duration.ofDays(29));
+        String young = create("CERT", CAR, "R1", null).reference().toString();
+        audit.entries.clear();
+
+        // Exactly 30 days after the first Draft was opened: only that one is due.
+        clock.now = NOW.plus(period);
+        assertThat(service.expireDrafts(period, 10)).isEqualTo(1);
+        Transaction expired = service.get(old1, counter());
+        assertThat(expired.status()).isEqualTo(TransactionStatus.EXPIRED);
+        StatusChange change = expired.lastChange();
+        assertThat(change.reason()).isEqualTo(StatusReason.EXPIRED);
+        assertThat(change.actor()).isEqualTo(Transaction.SYSTEM);
+        assertThat(change.channel()).isEqualTo(ChangeChannel.SYSTEM);
+        assertThat(change.previousStatus()).isEqualTo(TransactionStatus.DRAFT);
+        assertThat(change.note()).isEqualTo("not submitted within PT720H");
+        assertThat(audit.actions()).containsExactly("TRANSACTION_EXPIRED", "TRANSACTION_VIEWED");
+        assertThat(audit.entries.getFirst().reason()).isEqualTo("not submitted within PT720H");
+        assertThat(audit.systemActors).singleElement().satisfies(a -> {
+            assertThat(a.userId()).isEqualTo("SYSTEM");
+            assertThat(a.channel()).isEqualTo("SYSTEM");
+        });
+
+        // A batch of one, then nothing left; the submitted and the young Draft stay as they are.
+        clock.now = NOW.plus(period).plusSeconds(10);
+        assertThat(service.expireDrafts(period, 1)).isEqualTo(1);
+        assertThat(service.expireDrafts(period, 1)).isZero();
+        assertThat(service.get(old2, counter()).status()).isEqualTo(TransactionStatus.EXPIRED);
+        assertThat(service.get(submitted, counter()).status()).isEqualTo(TransactionStatus.IN_REVIEW);
+        assertThat(service.get(young, counter()).status()).isEqualTo(TransactionStatus.DRAFT);
+
+        // A shorter configured period applies to every Draft from the next run on (Q-051).
+        assertThat(service.expireDrafts(Duration.ofDays(1), 10)).isEqualTo(1);
+        assertThat(service.get(young, counter()).status()).isEqualTo(TransactionStatus.EXPIRED);
+
+        // An expired Draft cannot be submitted or cancelled any more.
+        assertThatThrownBy(() -> service.submit(old1, counter())).satisfies(code("ILLEGAL_TRANSITION"));
+        assertThatThrownBy(() -> service.cancel(old1, "too late", counter())).satisfies(code("ILLEGAL_TRANSITION"));
+        assertThat(service.history(old1, counter())).extracting(StatusChange::status)
+                .containsExactly(TransactionStatus.DRAFT, TransactionStatus.EXPIRED);
+
+        assertThatThrownBy(() -> service.expireDrafts(Duration.ZERO, 10)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.expireDrafts(period, 0)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.expireDrafts(null, 10)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     @Tag("CC-021")
     @DisplayName("CC-021/Q-003: references count per service, region and year and start again each year")
     void references() {
@@ -140,7 +199,7 @@ class TransactionServiceTest {
                 TransactionStatus.SUBMITTED, TransactionStatus.PENDING_PAYMENT, TransactionStatus.CANCELLED);
         assertThat(history).extracting(StatusChange::previousStatus).containsExactly(null, TransactionStatus.DRAFT,
                 TransactionStatus.SUBMITTED, TransactionStatus.PENDING_PAYMENT);
-        assertThat(history.get(1).channel()).isEqualTo(Channel.PORTAL);
+        assertThat(history.get(1).channel()).isEqualTo(ChangeChannel.PORTAL);
         assertThat(history.get(2).actor()).isEqualTo(Transaction.SYSTEM);
         assertThat(history.get(3).note()).isEqualTo("customer withdrew");
         assertThat(service.get(ref, counter()).version()).isEqualTo(4);

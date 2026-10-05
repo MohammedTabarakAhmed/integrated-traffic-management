@@ -45,13 +45,14 @@ itms:
         next-step: RELEASE_VEHICLE
       - hold-type: DRIVING_BAN
         next-step: CONTACT_AUTHORITY
-  # API_SPECIFICATION §2, ADR-032: placing and lifting holds need an Idempotency-Key; a retry with the same key and
-  # request replays the stored response. Retention and lock timeout are set per environment (Q-052).
+  # API_SPECIFICATION §2, ADR-032: placing, lifting and overriding holds need an Idempotency-Key; a retry with the same
+  # key and request replays the stored response. Retention and lock timeout are set per environment (Q-052).
   idempotency:
     enabled: true
     paths:
       - /v1/holds
       - /v1/holds/*/lifts
+      - /v1/holds/*/overrides
     retention: ${ITMS_IDEMPOTENCY_RETENTION:24h}
     lock-timeout: ${ITMS_IDEMPOTENCY_LOCK_TIMEOUT:30s}
     cleanup-interval: ${ITMS_IDEMPOTENCY_CLEANUP_INTERVAL:15m}

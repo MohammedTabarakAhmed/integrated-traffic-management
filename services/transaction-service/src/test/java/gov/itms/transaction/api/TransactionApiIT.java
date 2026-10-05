@@ -781,6 +781,7 @@ class TransactionApiIT {
         assertThat(asked.language()).isEqualTo("en");
         assertThat(asked.correlationId()).isEqualTo("txn-it-transactions");
         assertThat(asked.body().get("serviceCode").asString()).isEqualTo("ITX_ELIG");
+        assertThat(asked.body().get("transactionReference").asString()).isEqualTo(ref);
         assertThat(asked.body().get("subjects")).hasSize(2);
         assertThat(asked.body().get("subjects").get(0).get("type").asString()).isEqualTo("VEHICLE");
         assertThat(asked.body().get("subjects").get(0).get("id").asString()).isEqualTo("BLOCKED-1");

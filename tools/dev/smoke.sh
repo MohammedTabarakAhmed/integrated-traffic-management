@@ -7,7 +7,8 @@
 # -> a transaction of that service is opened, refused as a duplicate and submitted (CC-021..CC-023, CC-027)
 # -> it is found as the newest of its applicant's transactions (CC-025) -> a retry with the same Idempotency-Key is
 # replayed, not repeated (ADR-032) -> a hold is placed on a vehicle and lifted by its role (CC-030) -> holds block a
-# submission with the customer's reasons and next steps, sensitive ones masked, until lifted (CC-032).
+# submission with the customer's reasons and next steps, sensitive ones masked, until lifted (CC-032) -> a supervisor
+# overrides a hold for one transaction, which then goes through (CC-034).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 set -a; source infra/local/.env; set +a
@@ -230,7 +231,7 @@ res=$(curl -s -w '\n%{http_code}' -H "Authorization: Bearer $CHECKER" -H 'Conten
   || { echo "FAIL: no key should be refused with 400 IDEMPOTENCY_KEY_REQUIRED, got $(status_of "$res"): $(body_of "$res")"; exit 1; }
 echo "   $first replayed; no key: 400 IDEMPOTENCY_KEY_REQUIRED"
 
-echo "16. Holds (CC-030): the officer places a hold on a vehicle; the maker cannot read it; the officer lifts it"
+echo "16. Holds (CC-030): the officer places a hold on a vehicle; the maker cannot place one; the officer lifts it"
 # A throw-away vehicle per run; the hold ends lifted, so nothing is left in force.
 HOLDS=http://localhost:8084
 post_hold() { # token path body -> prints "<status> <body>"
@@ -241,8 +242,9 @@ hold_vin="SMKHLD-$(date +%s)"
 res=$(post_hold "$CHECKER" /v1/holds "{\"subject\":{\"type\":\"VEHICLE\",\"id\":\"$hold_vin\"},\"holdType\":\"UNPAID_FINES\",\"module\":\"VIOLATIONS\",\"source\":\"VIOLATIONS\",\"reason\":\"smoke test hold\",\"blockedServices\":[\"*\"],\"liftableByRoles\":[\"HOLD_OFFICER\"]}")
 [[ "$(status_of "$res")" == 201 ]] || { echo "FAIL: placing a hold returned $(status_of "$res"): $(body_of "$res")"; exit 1; }
 hold_id=$(body_of "$res" | json_field "['id']")
-status=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $MAKER" "$HOLDS/v1/holds/$hold_id")
-[[ "$status" == 403 ]] || { echo "FAIL: the maker has no hold permission, expected 403, got $status"; exit 1; }
+# dev.maker is the hold supervisor (CC-034, step 18): it reads and overrides holds but holds no hold.place.
+res=$(post_hold "$MAKER" /v1/holds "{\"subject\":{\"type\":\"VEHICLE\",\"id\":\"$hold_vin\"},\"holdType\":\"UNPAID_FINES\",\"module\":\"VIOLATIONS\",\"source\":\"VIOLATIONS\",\"reason\":\"smoke test hold\",\"blockedServices\":[\"*\"],\"liftableByRoles\":[\"HOLD_OFFICER\"]}")
+[[ "$(status_of "$res")" == 403 ]] || { echo "FAIL: the maker has no hold.place, expected 403, got $(status_of "$res")"; exit 1; }
 res=$(post_hold "$CHECKER" "/v1/holds/$hold_id/lifts" '{"reason":"smoke test lift"}')
 [[ "$(status_of "$res")" == 200 && "$(body_of "$res" | json_field "['status']")" == LIFTED ]] \
   || { echo "FAIL: lifting returned $(status_of "$res"): $(body_of "$res")"; exit 1; }
@@ -278,5 +280,30 @@ res=$(post_txn "$CHECKER" "/v1/transactions/$elig_ref/submissions" "")
 [[ "$(status_of "$res")" == 200 && "$(body_of "$res" | json_field "['status']")" == IN_REVIEW ]] \
   || { echo "FAIL: submission after lifting returned $(status_of "$res"): $(body_of "$res")"; exit 1; }
 echo "   $elig_ref: blocked ($blocked), then submitted once the holds were lifted"
+
+echo "18. Override (CC-034): a supervisor overrides a hold for one transaction, with a reason and document; it goes through"
+# dev.checker (HOLD_OFFICER) places the hold; dev.maker (HOLD_SUPERVISOR) overrides it, so the placer never does. A
+# throw-away vehicle per run; the hold ends lifted and the transaction In review.
+elig_vin="SMKOVR-$(date +%s)"
+ovr_hold=$(place_on COURT_ORDER)
+res=$(post_txn "$CHECKER" /v1/transactions "{\"serviceCode\":\"$SVC\",\"subject\":{\"type\":\"VEHICLE\",\"id\":\"$elig_vin\"},\"applicantFileNumber\":\"TF-SMOKE-OVR\",\"homeRegion\":\"R1\"}")
+[[ "$(status_of "$res")" == 201 ]] || { echo "FAIL: opening returned $(status_of "$res"): $(body_of "$res")"; exit 1; }
+ovr_ref=$(body_of "$res" | json_field "['reference']")
+res=$(post_txn "$CHECKER" "/v1/transactions/$ovr_ref/submissions" "")
+[[ "$(status_of "$res")" == 422 ]] || { echo "FAIL: submission should be blocked, got $(status_of "$res"): $(body_of "$res")"; exit 1; }
+override_body="{\"transactionReference\":\"$ovr_ref\",\"reason\":\"smoke court ruling\",\"supportingDocument\":{\"type\":\"COURT_RULING\",\"number\":\"SMOKE-CR-1\"}}"
+res=$(post_hold "$CHECKER" "/v1/holds/$ovr_hold/overrides" "$override_body")
+[[ "$(status_of "$res")" == 403 ]] || { echo "FAIL: the officer has no hold.override, expected 403, got $(status_of "$res")"; exit 1; }
+res=$(post_hold "$MAKER" "/v1/holds/$ovr_hold/overrides" "$override_body")
+[[ "$(status_of "$res")" == 201 && "$(body_of "$res" | json_field "['transactionReference']")" == "$ovr_ref" ]] \
+  || { echo "FAIL: override returned $(status_of "$res"): $(body_of "$res")"; exit 1; }
+res=$(post_txn "$CHECKER" "/v1/transactions/$ovr_ref/submissions" "")
+[[ "$(status_of "$res")" == 200 && "$(body_of "$res" | json_field "['status']")" == IN_REVIEW ]] \
+  || { echo "FAIL: submission after the override returned $(status_of "$res"): $(body_of "$res")"; exit 1; }
+still=$(curl -sf -H "Authorization: Bearer $CHECKER" "$HOLDS/v1/holds/$ovr_hold" | json_field "['status']")
+[[ "$still" == ACTIVE ]] || { echo "FAIL: the overridden hold should stay ACTIVE, got $still"; exit 1; }
+res=$(post_hold "$CHECKER" "/v1/holds/$ovr_hold/lifts" '{"reason":"smoke test lift"}')
+[[ "$(status_of "$res")" == 200 ]] || { echo "FAIL: lifting $ovr_hold returned $(status_of "$res")"; exit 1; }
+echo "   $ovr_ref: blocked, overridden by the supervisor for this transaction only, then submitted"
 
 echo "SMOKE OK"

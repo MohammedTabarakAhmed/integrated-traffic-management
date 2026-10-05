@@ -10,6 +10,7 @@ import gov.itms.hold.domain.Eligibility;
 import gov.itms.hold.domain.EligibilityPolicy;
 import gov.itms.hold.domain.EligibilityPolicy.Block;
 import gov.itms.hold.domain.Hold;
+import gov.itms.hold.domain.HoldOverride;
 import gov.itms.hold.domain.Subject;
 import gov.itms.platform.audit.AuditRecorder;
 import gov.itms.platform.security.CurrentActor;
@@ -103,6 +104,37 @@ class EligibilityServiceTest {
                 "eligible", true, "blockingHolds", List.of()));
         assertThat(auditValues.get(1)).isEqualTo(Map.of("serviceCode", "VL_RENEW", "checkedOn", "2026-10-05",
                 "eligible", false, "blockingHolds", List.of(fines.id().toString())));
+    }
+
+    @Test
+    @Tag("CC-034")
+    @DisplayName("CC-034: a check for a transaction ignores holds overridden for it, and audits them as overridden")
+    void overriddenHoldsDoNotBlockTheirTransaction() {
+        Hold fines = place(FILE, "UNPAID_FINES", "VIOLATIONS");
+        Hold circular = place(VEHICLE, "POLICE_CIRCULAR", "POLICE");
+        String ref = "VL_RENEW-R1-2026-0000001";
+        holds.insertOverride(HoldOverride.grant(UUID.randomUUID(), circular, ref, "court ruling",
+                new HoldOverride.Document("COURT_RULING", "CR-1"), new Actor("u-super", "super"), Channel.BACKOFFICE,
+                NOW, TODAY));
+
+        Eligibility forRef = service.check("VL_RENEW", List.of(VEHICLE, FILE), ref, caller(true));
+        assertThat(forRef.blocks()).containsExactly(new Block("UNPAID_FINES", "PAY_FINES"));
+        assertThat(forRef.blockingHolds()).containsExactly(fines.id());
+        assertThat(forRef.overriddenHolds()).containsExactly(circular.id());
+        assertThat(auditValues.get(0)).isEqualTo(Map.of("serviceCode", "VL_RENEW", "checkedOn", "2026-10-05",
+                "eligible", true, "blockingHolds", List.of(), "transactionReference", ref,
+                "overriddenHolds", List.of(circular.id().toString())));
+
+        assertThat(service.check("VL_RENEW", List.of(VEHICLE), "VL_RENEW-R1-2026-0000002", caller(true))
+                .blockingHolds()).as("another transaction").containsExactly(circular.id());
+        assertThat(service.check("VL_RENEW", List.of(VEHICLE), caller(true)).blockingHolds())
+                .as("no transaction named").containsExactly(circular.id());
+        assertThatThrownBy(() -> service.check("VL_RENEW", List.of(VEHICLE), "VL_TRANSFER-R1-2026-0000001",
+                caller(true))).isInstanceOfSatisfying(DomainException.class,
+                        e -> assertThat(e.code()).isEqualTo("TRANSACTION_SERVICE_MISMATCH"));
+        assertThatThrownBy(() -> service.check("VL_RENEW", List.of(VEHICLE), "not-a-reference", caller(true)))
+                .isInstanceOfSatisfying(DomainException.class,
+                        e -> assertThat(e.code()).isEqualTo("INVALID_TRANSACTION_REFERENCE"));
     }
 
     @Test

@@ -1,10 +1,12 @@
 package gov.itms.hold.application;
 
 import gov.itms.hold.domain.Hold;
+import gov.itms.hold.domain.HoldOverride;
 import gov.itms.hold.domain.Subject;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /** Port to the hold store (owned by this service only, ADR-016). */
@@ -26,6 +28,18 @@ public interface HoldRepository {
 
     /** Stores the lift; the stored version must be the one before it (optimistic check, NFR-015). */
     void saveLift(Hold hold);
+
+    /**
+     * Stores an override (CC-034). Throws an {@code OVERRIDE_EXISTS} conflict when the hold is already overridden for
+     * that transaction, also when two requests race.
+     */
+    void insertOverride(HoldOverride override);
+
+    /** The hold's overrides, oldest first. */
+    List<HoldOverride> findOverrides(UUID holdId);
+
+    /** The ids of the holds overridden for {@code transactionReference} (CC-034). */
+    Set<UUID> overriddenFor(String transactionReference);
 
     /** Every stored version of the hold, oldest first (DAT-002). */
     List<HoldVersion> history(UUID id);

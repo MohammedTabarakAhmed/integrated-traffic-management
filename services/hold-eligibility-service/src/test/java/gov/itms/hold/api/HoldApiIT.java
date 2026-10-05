@@ -364,9 +364,17 @@ class HoldApiIT {
 
     private MvcResult check(String serviceCode, List<Map<String, String>> subjects, RequestPostProcessor who,
                             String language) throws Exception {
+        return check(serviceCode, subjects, null, who, language);
+    }
+
+    private MvcResult check(String serviceCode, List<Map<String, String>> subjects, String transactionReference,
+                            RequestPostProcessor who, String language) throws Exception {
         Map<String, Object> request = new HashMap<>();
         request.put("serviceCode", serviceCode);
         request.put("subjects", subjects);
+        if (transactionReference != null) {
+            request.put("transactionReference", transactionReference);
+        }
         return call(post("/v1/eligibility-checks").header("Accept-Language", language), Request.Method.POST,
                 "/v1/eligibility-checks", request, who, "PORTAL", null);
     }
@@ -460,5 +468,129 @@ class HoldApiIT {
                 submissionService(), "en");
         assertThat(twice.getResponse().getStatus()).isEqualTo(422);
         assertThat(code(twice)).isEqualTo("LIST_DUPLICATES");
+    }
+
+    // ------------------------------------------------------------------ overrides (CC-034)
+
+    /** A supervisor of the hold's module: HOLD_SUPERVISOR (iam V10). */
+    private static RequestPostProcessor supervisor() {
+        return user("u-super", "supervisor", "HOLD_SUPERVISOR", "hold.override", "hold.read");
+    }
+
+    private static Map<String, Object> override(String transactionReference) {
+        return Map.of("transactionReference", transactionReference, "reason", "court ruling allows the renewal",
+                "supportingDocument", Map.of("type", "COURT_RULING", "number", "CR/2026/0042"));
+    }
+
+    @Test
+    @Tag("CC-034")
+    @Tag("CC-002")
+    @Tag("CC-120")
+    @DisplayName("CC-034: a supervisor overrides a hold for one transaction with a reason and document; only that "
+            + "transaction's check ignores it; the placer cannot override (CC-002); audited (CC-120)")
+    void overrides() throws Exception {
+        String id = placeOk(hold("VIN-OVR", "VIOLATIONS"));
+        String ref = "VL_RENEW-R1-2026-0000001";
+        List<Map<String, String>> vehicle = List.of(subject("VEHICLE", "VIN-OVR"));
+
+        assertThat(body(check("VL_RENEW", vehicle, ref, submissionService(), "en")).get("eligible").asBoolean())
+                .as("blocked before the override").isFalse();
+
+        // Who may override: hold.override (403 from the gateway check), never the officer who placed the hold.
+        assertThat(postAs("/v1/holds/" + id + "/overrides", override(ref), officer()).getResponse().getStatus())
+                .isEqualTo(403);
+        MvcResult byPlacer = postAs("/v1/holds/" + id + "/overrides", override(ref),
+                user("u-officer", "officer", "HOLD_SUPERVISOR", "hold.override", "hold.read"));
+        assertThat(byPlacer.getResponse().getStatus()).isEqualTo(403);
+        assertThat(code(byPlacer)).isEqualTo("OVERRIDE_BY_PLACER");
+
+        MvcResult created = call(post("/v1/holds/" + id + "/overrides"), Request.Method.POST,
+                "/v1/holds/" + id + "/overrides", override(ref), supervisor(), "BACKOFFICE", "it-override-once");
+        assertThat(created.getResponse().getStatus()).as(created.getResponse().getContentAsString()).isEqualTo(201);
+        assertThat(created.getResponse().getHeader("Location")).isEqualTo("/v1/holds/" + id + "/overrides");
+        JsonNode o = body(created);
+        assertThat(o.get("holdId").asString()).isEqualTo(id);
+        assertThat(o.get("transactionReference").asString()).isEqualTo(ref);
+        assertThat(o.get("serviceCode").asString()).isEqualTo("VL_RENEW");
+        assertThat(o.get("supportingDocument").get("type").asString()).isEqualTo("COURT_RULING");
+        assertThat(o.get("supportingDocument").get("number").asString()).isEqualTo("CR/2026/0042");
+        assertThat(o.get("overriddenBy").get("id").asString()).isEqualTo("u-super");
+        MvcResult replay = call(post("/v1/holds/" + id + "/overrides"), Request.Method.POST,
+                "/v1/holds/" + id + "/overrides", override(ref), supervisor(), "BACKOFFICE", "it-override-once");
+        assertThat(replay.getResponse().getHeader("Idempotent-Replayed")).isEqualTo("true");
+        assertThat(body(replay).get("id").asString()).isEqualTo(o.get("id").asString());
+
+        MvcResult twice = postAs("/v1/holds/" + id + "/overrides", override(ref), supervisor());
+        assertThat(twice.getResponse().getStatus()).isEqualTo(409);
+        assertThat(code(twice)).isEqualTo("OVERRIDE_EXISTS");
+        MvcResult notBlocked = postAs("/v1/holds/" + id + "/overrides", override("DL_ISSUE-R1-2026-0000001"),
+                supervisor());
+        assertThat(notBlocked.getResponse().getStatus()).isEqualTo(409);
+        assertThat(code(notBlocked)).isEqualTo("OVERRIDE_NOT_NEEDED");
+        for (Map<String, Object> bad : List.of(
+                Map.<String, Object>of("transactionReference", "VL_RENEW-1", "reason", "ok reason",
+                        "supportingDocument", Map.of("type", "COURT_RULING", "number", "CR-1")),
+                Map.<String, Object>of("transactionReference", ref, "reason", "ok reason"),
+                Map.<String, Object>of("transactionReference", ref, "supportingDocument",
+                        Map.of("type", "COURT_RULING", "number", "CR-1")),
+                Map.<String, Object>of("transactionReference", ref, "reason", "ok reason",
+                        "supportingDocument", Map.of("type", "court ruling", "number", "CR-1")))) {
+            MvcResult r = postAs("/v1/holds/" + id + "/overrides", bad, supervisor());
+            assertThat(r.getResponse().getStatus()).as(bad.toString()).isEqualTo(400);
+        }
+
+        // Only the overridden transaction is let through; the hold stays Active for everything else.
+        MvcResult forRef = check("VL_RENEW", vehicle, ref, submissionService(), "en");
+        assertThat(body(forRef).get("eligible").asBoolean()).isTrue();
+        assertThat(body(check("VL_RENEW", vehicle, "VL_RENEW-R1-2026-0000002", submissionService(), "en"))
+                .get("eligible").asBoolean()).isFalse();
+        assertThat(body(check("VL_RENEW", vehicle, submissionService(), "en")).get("eligible").asBoolean()).isFalse();
+        assertThat(body(check("VL_TRANSFER", vehicle, "VL_TRANSFER-R1-2026-0000001", submissionService(), "en"))
+                .get("eligible").asBoolean()).isFalse();
+        MvcResult mismatch = check("VL_RENEW", vehicle, "VL_TRANSFER-R1-2026-0000001", submissionService(), "en");
+        assertThat(mismatch.getResponse().getStatus()).isEqualTo(422);
+        assertThat(code(mismatch)).isEqualTo("TRANSACTION_SERVICE_MISMATCH");
+        assertThat(body(getAs("/v1/holds/" + id, reader())).get("status").asString()).isEqualTo("ACTIVE");
+
+        JsonNode listed = body(getAs("/v1/holds/" + id + "/overrides", supervisor())).get("items");
+        assertThat(listed).hasSize(1);
+        assertThat(listed.get(0).get("reason").asString()).isEqualTo("court ruling allows the renewal");
+
+        List<String> actions = db.sql("select action from audit_outbox where entity_id = :id order by occurred_at")
+                .param("id", id).query(String.class).list();
+        assertThat(actions).containsExactly("HOLD_PLACED", "HOLD_OVERRIDDEN", "HOLD_VIEWED", "HOLD_OVERRIDES_VIEWED");
+        assertThat(db.sql("select reason from audit_outbox where entity_id = :id and action = 'HOLD_OVERRIDDEN'")
+                .param("id", id).query(String.class).single()).isEqualTo("court ruling allows the renewal");
+        assertThat(db.sql("select count(*) from audit_outbox where action = 'ELIGIBILITY_CHECKED'"
+                        + " and entity_id = 'VEHICLE:VIN-OVR' and new_value ->> 'transactionReference' = :ref"
+                        + " and new_value -> 'overriddenHolds' @> jsonb_build_array(cast(:id as text))"
+                        + " and new_value ->> 'eligible' = 'true'")
+                .param("ref", ref).param("id", id).query(Long.class).single()).isEqualTo(1);
+
+        // A lifted hold has nothing left to override.
+        postAs("/v1/holds/" + id + "/lifts", Map.of("reason", "fines paid"), officer());
+        MvcResult lifted = postAs("/v1/holds/" + id + "/overrides", override("VL_RENEW-R1-2026-0000003"),
+                supervisor());
+        assertThat(lifted.getResponse().getStatus()).isEqualTo(409);
+        assertThat(code(lifted)).isEqualTo("OVERRIDE_HOLD_NOT_ACTIVE");
+
+        // The database keeps overrides as written and repeats the segregation-of-duties rule.
+        UUID holdId = UUID.fromString(id);
+        assertThatThrownBy(() -> db.sql("update hold_override set reason = 'changed' where hold_id = :id")
+                .param("id", holdId).update()).hasMessageContaining("never changed or deleted");
+        assertThatThrownBy(() -> db.sql("delete from hold_override where hold_id = :id")
+                .param("id", holdId).update()).hasMessageContaining("never changed or deleted");
+        assertThatThrownBy(() -> db.sql("""
+                        insert into hold_override (id, hold_id, transaction_reference, service_code, reason, document_type,
+                            document_number, overridden_at, overridden_by, overridden_channel)
+                        values (gen_random_uuid(), :id, 'VL_RENEW-R1-2026-0000009', 'VL_RENEW', 'placer override',
+                            'COURT_RULING', 'CR-9', now(), 'u-officer', 'BACKOFFICE')""")
+                .param("id", holdId).update()).hasMessageContaining("cannot override");
+        assertThatThrownBy(() -> db.sql("""
+                        insert into hold_override (id, hold_id, transaction_reference, service_code, reason, document_type,
+                            document_number, overridden_at, overridden_by, overridden_channel)
+                        values (gen_random_uuid(), :id, 'VL_RENEW-R1-2026-0000009', 'DL_ISSUE', 'wrong service',
+                            'COURT_RULING', 'CR-9', now(), 'u-super', 'BACKOFFICE')""")
+                .param("id", holdId).update()).hasMessageContaining("ck_hold_override_reference");
     }
 }

@@ -59,8 +59,9 @@ class TransactionServiceTest {
         boolean unavailable;
 
         @Override
-        public List<Block> check(String serviceCode, List<Subject> subjects, Channel channel) {
-            calls.add(serviceCode + " " + subjects + " " + channel);
+        public List<Block> check(String serviceCode, List<Subject> subjects, String transactionReference,
+                                 Channel channel) {
+            calls.add(serviceCode + " " + subjects + " " + transactionReference + " " + channel);
             if (unavailable) {
                 throw new DomainException(DomainException.Kind.UNAVAILABLE, "ELIGIBILITY_UNAVAILABLE", "down",
                         List.of("CC-032"));
@@ -204,7 +205,7 @@ class TransactionServiceTest {
                     assertThat(e.requirementRefs()).containsExactly("CC-032");
                     assertThat(e.blocks()).containsExactly(masked, fines);
                 });
-        assertThat(eligibility.calls).containsExactly("VL_RENEW " + List.of(CAR, file) + " PORTAL");
+        assertThat(eligibility.calls).containsExactly("VL_RENEW " + List.of(CAR, file) + " " + ref + " PORTAL");
         assertThat(transactions.rows.get(ref).status()).isEqualTo(TransactionStatus.DRAFT);
         assertThat(audit.entries).isEmpty();
 
@@ -220,7 +221,7 @@ class TransactionServiceTest {
         eligibility.calls.clear();
         String own = create("DL_FREE", file, "R1", null).reference().toString();
         service.submit(own, counter());
-        assertThat(eligibility.calls).containsExactly("DL_FREE " + List.of(file) + " BACKOFFICE");
+        assertThat(eligibility.calls).containsExactly("DL_FREE " + List.of(file) + " " + own + " BACKOFFICE");
 
         // Not a Draft: refused before hold-eligibility-service is asked.
         eligibility.calls.clear();

@@ -15,9 +15,10 @@ public interface EligibilityChecker {
     }
 
     /**
-     * The reasons {@code serviceCode} is blocked for {@code subjects} today; empty when eligible. Throws a
-     * {@code DomainException} of kind {@code UNAVAILABLE} when the answer cannot be obtained: the submission is then
-     * refused, never let through (fail closed).
+     * The reasons {@code serviceCode} is blocked for {@code subjects} today; empty when eligible. Holds a supervisor
+     * overrode for {@code transactionReference} do not count (CC-034). Throws a {@code DomainException} of kind
+     * {@code UNAVAILABLE} when the answer cannot be obtained: the submission is then refused, never let through (fail
+     * closed).
      */
-    List<Block> check(String serviceCode, List<Subject> subjects, Channel channel);
+    List<Block> check(String serviceCode, List<Subject> subjects, String transactionReference, Channel channel);
 }

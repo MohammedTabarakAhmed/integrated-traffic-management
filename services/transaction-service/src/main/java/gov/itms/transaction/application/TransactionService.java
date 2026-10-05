@@ -112,8 +112,9 @@ public class TransactionService {
      * Draft → Submitted, then Pending payment or (no fee) In review with the skip recorded (CC-022, Q-004). The
      * service must still be available and usable from the home-region rule's point of view (Q-049), and eligible
      * (CC-032): no hold in force may block it for the subject or the applicant's traffic file, otherwise 422
-     * {@code ELIGIBILITY_BLOCKED} with the customer's reasons and next steps and the transaction stays a Draft. The
-     * check runs last, while the Draft is locked, so a second submission waits for it (ADR-034).
+     * {@code ELIGIBILITY_BLOCKED} with the customer's reasons and next steps and the transaction stays a Draft. A hold
+     * a supervisor overrode for this transaction does not count (CC-034). The check runs last, while the Draft is
+     * locked, so a second submission waits for it (ADR-034).
      */
     @Transactional
     public Transaction submit(String reference, Caller caller) {
@@ -127,7 +128,7 @@ public class TransactionService {
                 rules.findByService(definition.code()), transaction.region(), channel,
                 LocalDate.ofInstant(now, clock.getZone())), transaction.homeRegion());
         List<EligibilityChecker.Block> blocks = eligibility.check(transaction.serviceCode(), parties(transaction),
-                channel);
+                reference, channel);
         if (!blocks.isEmpty()) {
             throw new EligibilityBlockedException(transaction.serviceCode(), blocks);
         }
@@ -242,7 +243,6 @@ public class TransactionService {
         return caller.channel();
     }
 
-    /** CC-027. The open transaction's reference is shown only to a caller who may read it. */
     /** Whose holds decide eligibility (CC-032): the subject and, if it is another one, the applicant's file. */
     static List<Subject> parties(Transaction transaction) {
         Subject applicant = new Subject(Subject.Type.TRAFFIC_FILE, transaction.applicantFileNumber());

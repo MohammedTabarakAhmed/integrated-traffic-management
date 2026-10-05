@@ -40,7 +40,8 @@ class EligibilityController {
     @PostMapping
     @PreAuthorize("hasAuthority('eligibility.check')")
     EligibilityDto check(@Valid @RequestBody EligibilityCheckRequest body) {
-        Eligibility result = service.check(body.serviceCode(), body.toDomain(), callers.current());
+        Eligibility result = service.check(body.serviceCode(), body.toDomain(), body.transactionReference(),
+                callers.current());
         Locale locale = LocaleContextHolder.getLocale();
         List<EligibilityBlockDto> blocks = result.blocks().stream().map(b -> dto(b, locale)).toList();
         return new EligibilityDto(result.serviceCode(), result.checkedOn(), result.eligible(), blocks);

@@ -5,6 +5,7 @@ import gov.itms.hold.domain.Actor;
 import gov.itms.hold.domain.Channel;
 import gov.itms.hold.domain.DomainException;
 import gov.itms.hold.domain.Hold;
+import gov.itms.hold.domain.HoldOverride;
 import gov.itms.hold.domain.HoldStatus;
 import gov.itms.hold.domain.Subject;
 import java.sql.Array;
@@ -18,7 +19,9 @@ import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.LinkedHashSet;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.OptimisticLockingFailureException;
@@ -28,7 +31,8 @@ import tools.jackson.databind.ObjectMapper;
 
 /**
  * Holds in {@code hold}; the database guards the lifecycle (lifted once, nothing else changes, never deleted) and
- * writes the temporal history ({@code hold_history}) in the same transaction (V1).
+ * writes the temporal history ({@code hold_history}) in the same transaction (V1). Overrides are rows of
+ * {@code hold_override}, written once and never changed (V3).
  */
 class JdbcHoldRepository implements HoldRepository {
 
@@ -125,6 +129,60 @@ class JdbcHoldRepository implements HoldRepository {
         if (updated != 1) {
             throw new OptimisticLockingFailureException("hold " + hold.id() + " changed in between");
         }
+    }
+
+    @Override
+    public void insertOverride(HoldOverride o) {
+        try {
+            jdbc.sql("""
+                            insert into hold_override (id, hold_id, transaction_reference, service_code, reason,
+                                document_type, document_number, overridden_at, overridden_by, overridden_by_username,
+                                overridden_channel)
+                            values (:id, :holdId, :reference, :serviceCode, :reason, :documentType, :documentNumber,
+                                :at, :by, :byName, :channel)""")
+                    .param("id", o.id())
+                    .param("holdId", o.holdId())
+                    .param("reference", o.transactionReference())
+                    .param("serviceCode", o.serviceCode())
+                    .param("reason", o.reason())
+                    .param("documentType", o.document().type())
+                    .param("documentNumber", o.document().number())
+                    .param("at", Timestamp.from(o.at()))
+                    .param("by", o.actor().id())
+                    .param("byName", o.actor().username())
+                    .param("channel", o.channel().name())
+                    .update();
+        } catch (DuplicateKeyException e) {
+            // uq_hold_override_transaction, perhaps by two requests at the same moment
+            throw new DomainException(DomainException.Kind.CONFLICT, "OVERRIDE_EXISTS",
+                    "this hold is already overridden for transaction " + o.transactionReference(), List.of("CC-034"),
+                    o.transactionReference());
+        }
+    }
+
+    @Override
+    public List<HoldOverride> findOverrides(UUID holdId) {
+        return jdbc.sql("""
+                        select id, hold_id, transaction_reference, service_code, reason, document_type, document_number,
+                            overridden_at, overridden_by, overridden_by_username, overridden_channel
+                        from hold_override where hold_id = :holdId order by overridden_at, id""")
+                .param("holdId", holdId)
+                .query((rs, n) -> new HoldOverride(UUID.fromString(rs.getString("id")),
+                        UUID.fromString(rs.getString("hold_id")), rs.getString("transaction_reference"),
+                        rs.getString("service_code"), rs.getString("reason"),
+                        new HoldOverride.Document(rs.getString("document_type"), rs.getString("document_number")),
+                        new Actor(rs.getString("overridden_by"), rs.getString("overridden_by_username")),
+                        Channel.valueOf(rs.getString("overridden_channel")),
+                        rs.getTimestamp("overridden_at").toInstant()))
+                .list();
+    }
+
+    @Override
+    public Set<UUID> overriddenFor(String transactionReference) {
+        return new LinkedHashSet<>(jdbc.sql("select hold_id from hold_override where transaction_reference = :reference")
+                .param("reference", transactionReference)
+                .query((rs, n) -> UUID.fromString(rs.getString("hold_id")))
+                .list());
     }
 
     @Override

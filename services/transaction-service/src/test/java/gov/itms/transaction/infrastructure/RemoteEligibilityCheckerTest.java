@@ -34,6 +34,7 @@ import org.springframework.web.client.RestClient;
 @Tag("CC-032")
 class RemoteEligibilityCheckerTest {
 
+    private static final String REF = "VL_RENEW-R1-2026-0000001";
     private static final List<Subject> PARTIES = List.of(new Subject(Subject.Type.VEHICLE, "VIN-1"),
             new Subject(Subject.Type.TRAFFIC_FILE, "TF-1"));
 
@@ -71,20 +72,20 @@ class RemoteEligibilityCheckerTest {
                 .andExpect(header("Authorization", "Bearer svc-tok"))
                 .andExpect(header("X-Channel", "PORTAL"))
                 .andExpect(content().json("""
-                        {"serviceCode":"VL_RENEW","subjects":[{"type":"VEHICLE","id":"VIN-1"},
-                         {"type":"TRAFFIC_FILE","id":"TF-1"}]}""", org.springframework.test.json.JsonCompareMode.STRICT))
+                        {"serviceCode":"VL_RENEW","transactionReference":"VL_RENEW-R1-2026-0000001",
+                         "subjects":[{"type":"VEHICLE","id":"VIN-1"},{"type":"TRAFFIC_FILE","id":"TF-1"}]}""", org.springframework.test.json.JsonCompareMode.STRICT))
                 .andRespond(withSuccess("""
                         {"serviceCode":"VL_RENEW","checkedOn":"2026-10-05","eligible":false,"blocks":[
                           {"reasonCode":"UNPAID_FINES","nextStep":"PAY_FINES","message":"Pay the fines."}]}""",
                         MediaType.APPLICATION_JSON));
-        assertThat(checker.check("VL_RENEW", PARTIES, Channel.PORTAL))
+        assertThat(checker.check("VL_RENEW", PARTIES, REF, Channel.PORTAL))
                 .containsExactly(new Block("UNPAID_FINES", "PAY_FINES", "Pay the fines."));
 
         hold.reset();
         hold.expect(requestTo("http://hold/v1/eligibility-checks")).andRespond(withSuccess("""
                 {"serviceCode":"VL_RENEW","checkedOn":"2026-10-05","eligible":true,"blocks":[]}""",
                 MediaType.APPLICATION_JSON));
-        assertThat(checker.check("VL_RENEW", PARTIES, Channel.BACKOFFICE)).isEmpty();
+        assertThat(checker.check("VL_RENEW", PARTIES, REF, Channel.BACKOFFICE)).isEmpty();
         hold.verify();
     }
 
@@ -106,19 +107,19 @@ class RemoteEligibilityCheckerTest {
             hold.reset();
             hold.expect(requestTo("http://hold/v1/eligibility-checks"))
                     .andRespond(withSuccess(body, MediaType.APPLICATION_JSON));
-            assertThat(code(() -> checker.check("VL_RENEW", PARTIES, Channel.PORTAL))).as(body)
+            assertThat(code(() -> checker.check("VL_RENEW", PARTIES, REF, Channel.PORTAL))).as(body)
                     .isEqualTo("UNAVAILABLE ELIGIBILITY_UNAVAILABLE");
         }
         for (HttpStatus status : new HttpStatus[] {HttpStatus.FORBIDDEN, HttpStatus.UNAUTHORIZED,
                 HttpStatus.BAD_REQUEST, HttpStatus.SERVICE_UNAVAILABLE}) {
             hold.reset();
             hold.expect(requestTo("http://hold/v1/eligibility-checks")).andRespond(withStatus(status));
-            assertThat(code(() -> checker.check("VL_RENEW", PARTIES, Channel.PORTAL))).as(status.toString())
+            assertThat(code(() -> checker.check("VL_RENEW", PARTIES, REF, Channel.PORTAL))).as(status.toString())
                     .isEqualTo("UNAVAILABLE ELIGIBILITY_UNAVAILABLE");
         }
         hold.reset();
         hold.expect(requestTo("http://hold/v1/eligibility-checks")).andRespond(withServerError());
-        assertThat(code(() -> checker.check("VL_RENEW", PARTIES, Channel.PORTAL)))
+        assertThat(code(() -> checker.check("VL_RENEW", PARTIES, REF, Channel.PORTAL)))
                 .isEqualTo("UNAVAILABLE ELIGIBILITY_UNAVAILABLE");
     }
 
@@ -132,7 +133,7 @@ class RemoteEligibilityCheckerTest {
         MockRestServiceServer untouched = MockRestServiceServer.bindTo(holdBuilder).build();
         RemoteEligibilityChecker noToken = new RemoteEligibilityChecker(ServiceClients.create(holdBuilder,
                 new ServiceTokenProvider(idpBuilder.build(), "c", "s", Clock.systemUTC())));
-        assertThat(code(() -> noToken.check("VL_RENEW", PARTIES, Channel.PORTAL)))
+        assertThat(code(() -> noToken.check("VL_RENEW", PARTIES, REF, Channel.PORTAL)))
                 .isEqualTo("UNAVAILABLE ELIGIBILITY_UNAVAILABLE");
         untouched.verify();
     }

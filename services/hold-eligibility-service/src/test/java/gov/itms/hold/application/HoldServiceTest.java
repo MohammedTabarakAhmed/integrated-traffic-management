@@ -6,6 +6,7 @@ import gov.itms.hold.domain.Actor;
 import gov.itms.hold.domain.Channel;
 import gov.itms.hold.domain.DomainException;
 import gov.itms.hold.domain.Hold;
+import gov.itms.hold.domain.HoldOverride;
 import gov.itms.hold.domain.HoldStatus;
 import gov.itms.hold.domain.Subject;
 import gov.itms.platform.audit.AuditRecorder;
@@ -15,6 +16,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -118,6 +120,43 @@ class HoldServiceTest {
         assertThat(code(() -> service.lift(placed.id(), "paid", liftOnly))).isEqualTo("HOLD_NOT_ACTIVE");
     }
 
+    private static final HoldOverride.Document RULING = new HoldOverride.Document("COURT_RULING", "CR-1");
+    private static final String REF = "VL_RENEW-R1-2026-0000001";
+
+    private static Caller supervisor(String userId, Set<String> modules) {
+        Caller base = caller("HOLD_SUPERVISOR", Set.of(HoldService.OVERRIDE, HoldService.READ), modules,
+                Channel.BACKOFFICE);
+        return new Caller(new Actor(userId, userId), base.channel(), base.grants());
+    }
+
+    @Test
+    @Tag("CC-034")
+    void overrideNeedsASupervisorOfTheModuleOtherThanThePlacerAndIsAudited() {
+        Hold placed = service.place(spec("VIOLATIONS"), OFFICER_VIOLATIONS);
+        audit.clear();
+        assertThat(code(() -> service.override(placed.id(), REF, "court ruling", RULING, OFFICER_VIOLATIONS)))
+                .as("hold.place/lift/read are not hold.override").isEqualTo("OVERRIDE_NOT_ALLOWED");
+        assertThat(code(() -> service.override(placed.id(), REF, "court ruling", RULING,
+                supervisor("u-super", Set.of("LICENSING"))))).isEqualTo("HOLD_NOT_FOUND");
+        assertThat(code(() -> service.override(placed.id(), REF, "court ruling", RULING,
+                supervisor(OFFICER.id(), Set.of("VIOLATIONS"))))).isEqualTo("OVERRIDE_BY_PLACER");
+        Caller overrideOnly = new Caller(new Actor("u-super", "super"), Channel.BACKOFFICE,
+                caller("HOLD_SUPERVISOR", Set.of(HoldService.OVERRIDE), Set.of("VIOLATIONS"), null).grants());
+        HoldOverride made = service.override(placed.id(), REF, "court ruling", RULING, overrideOnly);
+        assertThat(made.serviceCode()).isEqualTo("VL_RENEW");
+        assertThat(made.actor().id()).isEqualTo("u-super");
+        assertThat(holds.overriddenFor(REF)).containsExactly(placed.id());
+        assertThat(placed.storedStatus()).as("the hold itself does not change").isEqualTo(HoldStatus.ACTIVE);
+        assertThat(service.overrides(placed.id(), OFFICER_VIOLATIONS)).containsExactly(made);
+        assertThat(code(() -> service.overrides(placed.id(), overrideOnly))).as("listing needs hold.read")
+                .isEqualTo("HOLD_NOT_FOUND");
+        String id = placed.id().toString();
+        assertThat(audit).containsExactly("HOLD_OVERRIDDEN Hold " + id, "HOLD_OVERRIDES_VIEWED Hold " + id);
+        Caller noChannel = new Caller(new Actor("u-super", "super"), null, overrideOnly.grants());
+        assertThat(code(() -> service.override(placed.id(), REF, "court ruling", RULING, noChannel)))
+                .isEqualTo("CHANNEL_REQUIRED");
+    }
+
     @Test
     void aChannelIsRequired() {
         Caller noChannel = caller("HOLD_OFFICER", Set.of(HoldService.PLACE, HoldService.LIFT), Set.of("VIOLATIONS"),
@@ -132,6 +171,7 @@ class HoldServiceTest {
     static final class Holds implements HoldRepository {
         final Map<UUID, Hold> rows = new LinkedHashMap<>();
         final List<HoldVersion> versions = new ArrayList<>();
+        final List<HoldOverride> overrides = new ArrayList<>();
 
         @Override
         public void insert(Hold hold) {
@@ -158,6 +198,29 @@ class HoldServiceTest {
         @Override
         public void saveLift(Hold hold) {
             versions.add(new HoldVersion(hold, hold.lifted().at(), null, hold.lifted().actor().id()));
+        }
+
+        @Override
+        public void insertOverride(HoldOverride override) {
+            if (overrides.stream().anyMatch(o -> o.holdId().equals(override.holdId())
+                    && o.transactionReference().equals(override.transactionReference()))) {
+                throw new DomainException(DomainException.Kind.CONFLICT, "OVERRIDE_EXISTS", "exists",
+                        List.of("CC-034"));
+            }
+            overrides.add(override);
+        }
+
+        @Override
+        public List<HoldOverride> findOverrides(UUID holdId) {
+            return overrides.stream().filter(o -> o.holdId().equals(holdId)).toList();
+        }
+
+        @Override
+        public Set<UUID> overriddenFor(String transactionReference) {
+            Set<UUID> ids = new LinkedHashSet<>();
+            overrides.stream().filter(o -> o.transactionReference().equals(transactionReference))
+                    .forEach(o -> ids.add(o.holdId()));
+            return ids;
         }
 
         @Override

@@ -34,15 +34,17 @@ class RemoteEligibilityChecker implements EligibilityChecker {
     }
 
     @Override
-    public List<Block> check(String serviceCode, List<Subject> subjects, Channel channel) {
+    public List<Block> check(String serviceCode, List<Subject> subjects, String transactionReference,
+                             Channel channel) {
         Answer answer;
         try {
             answer = client.post().uri("/v1/eligibility-checks")
                     .header("X-Channel", channel.name())
                     .contentType(MediaType.APPLICATION_JSON)
                     .accept(MediaType.APPLICATION_JSON)
-                    .body(Map.of("serviceCode", serviceCode, "subjects", subjects.stream()
-                            .map(s -> Map.of("type", s.type().name(), "id", s.id())).toList()))
+                    .body(Map.of("serviceCode", serviceCode, "transactionReference", transactionReference,
+                            "subjects", subjects.stream().map(s -> Map.of("type", s.type().name(), "id", s.id()))
+                                    .toList()))
                     .retrieve()
                     .body(Answer.class);
         } catch (RestClientResponseException e) {

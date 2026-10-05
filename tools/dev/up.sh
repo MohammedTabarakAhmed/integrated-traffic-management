@@ -99,6 +99,8 @@ grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker CATALOGUE_CHECKER
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker TRANSACTION_OFFICER
 # Holds (CC-030; ADR-033): dev.checker places, reads and lifts holds.
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker HOLD_OFFICER
+# Hold overrides for one transaction (CC-034; ADR-035): dev.maker is the supervisor, so it is not the placer.
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker HOLD_SUPERVISOR
 # dev.checker is also the development access reviewer ("manager", SEC-007, ADR-026); dev.iam-admin, the IT
 # administrator, opens and closes reviews.
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker ACCESS_REVIEWER

@@ -18,8 +18,11 @@ import java.util.regex.Pattern;
  * @param checkedOn   the day the holds were evaluated (service clock, Q-053)
  * @param blocks      what the customer is told, without repeats, in the order the holds were found
  * @param blockingHolds the holds that block, for staff and audit only; never shown to the customer
+ * @param overriddenHolds holds that would block but are overridden for the transaction checked (CC-034), for staff and
+ *                        audit only
  */
-public record Eligibility(String serviceCode, LocalDate checkedOn, List<Block> blocks, List<UUID> blockingHolds) {
+public record Eligibility(String serviceCode, LocalDate checkedOn, List<Block> blocks, List<UUID> blockingHolds,
+                          List<UUID> overriddenHolds) {
 
     /** A subject may be named once per check; a check covers at most this many (the transaction and its parties). */
     public static final int MAX_SUBJECTS = 5;
@@ -28,6 +31,7 @@ public record Eligibility(String serviceCode, LocalDate checkedOn, List<Block> b
     public Eligibility {
         blocks = List.copyOf(blocks);
         blockingHolds = List.copyOf(blockingHolds);
+        overriddenHolds = List.copyOf(overriddenHolds);
     }
 
     public boolean eligible() {
@@ -54,14 +58,30 @@ public record Eligibility(String serviceCode, LocalDate checkedOn, List<Block> b
     /** Evaluates {@code holds} (all holds on the subjects) for {@code serviceCode} on {@code today}. */
     public static Eligibility evaluate(String serviceCode, List<Hold> holds, EligibilityPolicy policy,
                                        LocalDate today) {
+        return evaluate(serviceCode, holds, Set.of(), policy, today);
+    }
+
+    /**
+     * Evaluates {@code holds} for {@code serviceCode} on {@code today}, ignoring the holds in {@code overridden}: those
+     * a supervisor overrode for the transaction being checked (CC-034). An overridden hold that would not block is not
+     * listed as overridden.
+     */
+    public static Eligibility evaluate(String serviceCode, List<Hold> holds, Set<UUID> overridden,
+                                       EligibilityPolicy policy, LocalDate today) {
         Set<Block> blocks = new LinkedHashSet<>();
         List<UUID> blocking = new ArrayList<>();
+        List<UUID> skipped = new ArrayList<>();
         for (Hold hold : holds) {
-            if (hold.blocks(serviceCode, today)) {
+            if (!hold.blocks(serviceCode, today)) {
+                continue;
+            }
+            if (overridden.contains(hold.id())) {
+                skipped.add(hold.id());
+            } else {
                 blocks.add(policy.blockFor(hold.spec().holdType()));
                 blocking.add(hold.id());
             }
         }
-        return new Eligibility(serviceCode, today, List.copyOf(blocks), blocking);
+        return new Eligibility(serviceCode, today, List.copyOf(blocks), blocking, skipped);
     }
 }

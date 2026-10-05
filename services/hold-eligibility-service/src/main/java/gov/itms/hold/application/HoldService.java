@@ -4,6 +4,7 @@ import gov.itms.hold.application.HoldRepository.HoldVersion;
 import gov.itms.hold.domain.Channel;
 import gov.itms.hold.domain.DomainException;
 import gov.itms.hold.domain.Hold;
+import gov.itms.hold.domain.HoldOverride;
 import gov.itms.hold.domain.Subject;
 import gov.itms.platform.audit.AuditRecorder;
 import java.time.Clock;
@@ -21,8 +22,11 @@ import org.springframework.transaction.annotation.Transactional;
  *   <li>placing needs {@value #PLACE} in a grant that reaches the hold's module (CC-001);</li>
  *   <li>lifting needs {@value #LIFT} in a grant of one of the roles the hold names as able to lift it, reaching the
  *       module (CC-030 "who may lift it"), with a reason;</li>
+ *   <li>overriding for one transaction needs {@value #OVERRIDE} reaching the module, a reason and a supporting
+ *       document reference; the officer who placed the hold cannot override it (CC-034, Q-055);</li>
  *   <li>reading needs {@value #READ} reaching the module; a hold outside the caller's scope answers as if it did
- *       not exist (for a lift, {@value #LIFT} in the module also makes it visible);</li>
+ *       not exist (for a lift or an override, {@value #LIFT} or {@value #OVERRIDE} in the module also makes it
+ *       visible);</li>
  *   <li>every change and every view is audited in the same database transaction (CC-120); the database keeps the
  *       temporal history (DAT-002).</li>
  * </ul>
@@ -32,6 +36,7 @@ public class HoldService {
     public static final String PLACE = "hold.place";
     public static final String LIFT = "hold.lift";
     public static final String READ = "hold.read";
+    public static final String OVERRIDE = "hold.override";
     static final String ENTITY = "Hold";
     /** Audit entity of a list view: the subject whose holds were shown. */
     static final String ENTITY_SUBJECT = "SubjectHolds";
@@ -77,6 +82,37 @@ public class HoldService {
         holds.saveLift(hold);
         audit.record("HOLD_LIFTED", ENTITY, id.toString(), before, snapshot(hold), hold.lifted().reason());
         return hold;
+    }
+
+    /**
+     * Overrides the hold for one transaction (CC-034). The hold is locked so that a lift and an override do not cross;
+     * the hold row itself does not change.
+     */
+    @Transactional
+    public HoldOverride override(UUID id, String transactionReference, String reason, HoldOverride.Document document,
+                                 Caller caller) {
+        Channel channel = channelOf(caller);
+        Hold hold = holds.findForUpdate(id)
+                .filter(h -> readable(h, caller) || caller.grants().allows(OVERRIDE, h.spec().module()))
+                .orElseThrow(() -> notFound(id));
+        if (!caller.grants().allows(OVERRIDE, hold.spec().module())) {
+            throw new DomainException(DomainException.Kind.OUT_OF_SCOPE, "OVERRIDE_NOT_ALLOWED",
+                    "only an authorised supervisor of the hold's module may override it", List.of("CC-034", "CC-001"));
+        }
+        Instant now = clock.instant();
+        HoldOverride override = HoldOverride.grant(UUID.randomUUID(), hold, transactionReference, reason, document,
+                caller.actor(), channel, now, today(now));
+        holds.insertOverride(override);
+        audit.record("HOLD_OVERRIDDEN", ENTITY, id.toString(), null, snapshot(override), override.reason());
+        return override;
+    }
+
+    /** The hold's overrides, oldest first. */
+    @Transactional
+    public List<HoldOverride> overrides(UUID id, Caller caller) {
+        holds.find(id).filter(h -> readable(h, caller)).orElseThrow(() -> notFound(id));
+        audit.record("HOLD_OVERRIDES_VIEWED", ENTITY, id.toString(), null, null, null);
+        return holds.findOverrides(id);
     }
 
     @Transactional
@@ -127,6 +163,16 @@ public class HoldService {
     private static DomainException notFound(UUID id) {
         return new DomainException(DomainException.Kind.NOT_FOUND, "HOLD_NOT_FOUND", "hold " + id + " does not exist",
                 List.of("CC-030"));
+    }
+
+    private static Map<String, Object> snapshot(HoldOverride o) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("overrideId", o.id().toString());
+        m.put("transactionReference", o.transactionReference());
+        m.put("serviceCode", o.serviceCode());
+        m.put("documentType", o.document().type());
+        m.put("documentNumber", o.document().number());
+        return m;
     }
 
     private static Map<String, Object> snapshot(Hold hold) {

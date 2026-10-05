@@ -2,12 +2,15 @@ package gov.itms.hold.api;
 
 import gov.itms.hold.api.ApiModels.Collection;
 import gov.itms.hold.api.ApiModels.HoldDto;
+import gov.itms.hold.api.ApiModels.HoldOverrideDto;
 import gov.itms.hold.api.ApiModels.HoldVersionDto;
 import gov.itms.hold.api.ApiModels.LiftHoldRequest;
+import gov.itms.hold.api.ApiModels.OverrideHoldRequest;
 import gov.itms.hold.api.ApiModels.PlaceHoldRequest;
 import gov.itms.hold.application.Caller;
 import gov.itms.hold.application.HoldService;
 import gov.itms.hold.domain.Hold;
+import gov.itms.hold.domain.HoldOverride;
 import gov.itms.hold.domain.Subject;
 import jakarta.validation.Valid;
 import java.net.URI;
@@ -69,6 +72,21 @@ class HoldController {
     @PreAuthorize("hasAuthority('hold.lift')")
     HoldDto lift(@PathVariable UUID id, @Valid @RequestBody LiftHoldRequest body) {
         return HoldDto.of(service.lift(id, body.reason(), caller()), service.today());
+    }
+
+    @PostMapping("/{id}/overrides")
+    @PreAuthorize("hasAuthority('hold.override')")
+    ResponseEntity<HoldOverrideDto> override(@PathVariable UUID id, @Valid @RequestBody OverrideHoldRequest body) {
+        HoldOverride override = service.override(id, body.transactionReference(), body.reason(),
+                body.supportingDocument().toDomain(), caller());
+        return ResponseEntity.created(URI.create("/v1/holds/" + id + "/overrides"))
+                .body(HoldOverrideDto.of(override));
+    }
+
+    @GetMapping("/{id}/overrides")
+    @PreAuthorize("hasAuthority('hold.read')")
+    Collection<HoldOverrideDto> overrides(@PathVariable UUID id) {
+        return new Collection<>(service.overrides(id, caller()).stream().map(HoldOverrideDto::of).toList());
     }
 
     private Caller caller() {

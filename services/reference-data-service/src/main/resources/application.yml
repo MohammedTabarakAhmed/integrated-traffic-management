@@ -13,6 +13,12 @@ spring:
     password: ${REFDATA_DB_PASSWORD}
   flyway:
     locations: classpath:db/platform,classpath:db/migration
+    # Platform migrations (db/platform, V0_x) can be added after the service's own; apply them out of order
+    # (ADR-040). Each is additive and touches only platform tables.
+    out-of-order: true
+  # Message broker (INT-005, ADR-002). Producer defaults are kept: acks=all and idempotence on.
+  kafka:
+    bootstrap-servers: ${ITMS_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
   messages:
     basename: messages
     fallback-to-system-locale: false
@@ -21,6 +27,15 @@ spring:
       enabled: true
 
 itms:
+  # Domain events and audit records leave through the transactional outbox (INT-005, CC-120, ADR-040). Off by default
+  # so the service runs without a broker; rows wait in the outbox until the relay is switched on.
+  events:
+    enabled: ${ITMS_EVENTS_ENABLED:false}
+    audit-topic: ${ITMS_EVENTS_AUDIT_TOPIC:itms.audit.v1}
+    domain-topic: ${ITMS_EVENTS_DOMAIN_TOPIC:}
+    batch-size: ${ITMS_EVENTS_BATCH_SIZE:100}
+    send-timeout: ${ITMS_EVENTS_SEND_TIMEOUT:10s}
+    relay-interval: ${ITMS_EVENTS_RELAY_INTERVAL:1s}
   security:
     issuer: ${ITMS_OIDC_ISSUER}
     jwk-set-uri: ${ITMS_OIDC_JWKS_URI}

@@ -139,6 +139,7 @@ grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000011 service-account-itms-transaction-serv
 cat <<EOF
 
 ITMS local stack is up:
+  API gateway (APISIX)    http://localhost:9080/v1/...               (every service's /v1/ API; bearer token required)
   iam-service             http://localhost:8082/v1/roles             (bearer token required)
   reference-data-service  http://localhost:8081/v1/reference-lists   (bearer token required)
   transaction-service     http://localhost:8083/v1/services          (bearer token required)

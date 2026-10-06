@@ -5,6 +5,11 @@ name: itms
 
 # Observability settings shared by every ITMS service (NFR-040, ADR-037): traces and logs to the collector, every
 # trace sampled locally; probes and metrics on the management port 8090 (not published; Prometheus scrapes it).
+# Event relay settings shared by every ITMS service (INT-005, ADR-040): outbox rows go to the local broker.
+x-itms-events: &itms-events
+  ITMS_EVENTS_ENABLED: "true"
+  ITMS_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+
 x-itms-observability: &itms-observability
   MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT: http://otel-collector:4318/v1/traces
   MANAGEMENT_OPENTELEMETRY_LOGGING_EXPORT_OTLP_ENDPOINT: http://otel-collector:4318/v1/logs
@@ -98,7 +103,7 @@ services:
   iam-service:
     build: ../../services/iam-service
     environment:
-      <<: *itms-observability
+      <<: [*itms-observability, *itms-events]
       IAM_DB_URL: jdbc:postgresql://iam-postgres:5432/iam
       # Short-lived login from OpenBao (ADR-039), files under /run/secrets/spring/datasource; owner role on connect.
       SPRING_DATASOURCE_HIKARI_CONNECTIONINITSQL: SET ROLE itms_owner
@@ -121,6 +126,8 @@ services:
         condition: service_healthy
       otel-collector:
         condition: service_started
+      kafka:
+        condition: service_healthy
       iam-postgres:
         condition: service_healthy
       keycloak:
@@ -134,7 +141,7 @@ services:
   reference-data-service:
     build: ../../services/reference-data-service
     environment:
-      <<: *itms-observability
+      <<: [*itms-observability, *itms-events]
       REFDATA_DB_URL: jdbc:postgresql://postgres:5432/refdata
       # Short-lived login from OpenBao (ADR-039), files under /run/secrets/spring/datasource; owner role on connect.
       SPRING_DATASOURCE_HIKARI_CONNECTIONINITSQL: SET ROLE itms_owner
@@ -156,6 +163,8 @@ services:
         condition: service_healthy
       otel-collector:
         condition: service_started
+      kafka:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       keycloak:
@@ -171,7 +180,7 @@ services:
   transaction-service:
     build: ../../services/transaction-service
     environment:
-      <<: *itms-observability
+      <<: [*itms-observability, *itms-events]
       TXN_DB_URL: jdbc:postgresql://transaction-postgres:5432/transaction
       # Short-lived login from OpenBao (ADR-039), files under /run/secrets/spring/datasource; owner role on connect.
       SPRING_DATASOURCE_HIKARI_CONNECTIONINITSQL: SET ROLE itms_owner
@@ -201,6 +210,8 @@ services:
         condition: service_healthy
       otel-collector:
         condition: service_started
+      kafka:
+        condition: service_healthy
       transaction-postgres:
         condition: service_healthy
       keycloak:
@@ -216,7 +227,7 @@ services:
   hold-eligibility-service:
     build: ../../services/hold-eligibility-service
     environment:
-      <<: *itms-observability
+      <<: [*itms-observability, *itms-events]
       HOLD_DB_URL: jdbc:postgresql://hold-postgres:5432/hold
       # Short-lived login from OpenBao (ADR-039), files under /run/secrets/spring/datasource; owner role on connect.
       SPRING_DATASOURCE_HIKARI_CONNECTIONINITSQL: SET ROLE itms_owner
@@ -238,6 +249,8 @@ services:
         condition: service_healthy
       otel-collector:
         condition: service_started
+      kafka:
+        condition: service_healthy
       hold-postgres:
         condition: service_healthy
       keycloak:
@@ -246,6 +259,59 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8090/actuator/health/readiness | grep -q UP"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  # ---- Message broker (INT-005, ADR-002, ADR-040). Local development only: one KRaft node, plain text, inside the
+  # compose network (not published to the host). Real environments run >= 3 brokers per site with TLS and SASL.
+  kafka:
+    image: apache/kafka:4.2.1
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_LOG_RETENTION_HOURS: 168
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+
+  # ---- API gateway (INT-001, ADR-003, ADR-040). Every external call enters here: token check, /v1/ routing, rate
+  # limits and usage metrics. Declarative (standalone) mode; routes are in apisix/apisix.yaml.
+  apisix:
+    image: apache/apisix:3.14.1-debian
+    volumes:
+      - ./apisix/config.yaml:/usr/local/apisix/conf/config.yaml:ro
+      - ./apisix/apisix.yaml:/usr/local/apisix/conf/apisix.yaml:ro
+    ports:
+      - "127.0.0.1:9080:9080"
+    depends_on:
+      keycloak:
+        condition: service_healthy
+      iam-service:
+        condition: service_healthy
+      reference-data-service:
+        condition: service_healthy
+      transaction-service:
+        condition: service_healthy
+      hold-eligibility-service:
+        condition: service_healthy
+    healthcheck:
+      # Ready once routes are loaded and the token check answers: an unauthenticated call gets 401.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9080 && printf 'GET /v1/roles HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && head -1 <&3 | grep -q ' 401 '"]
       interval: 5s
       timeout: 3s
       retries: 30
@@ -385,3 +451,4 @@ volumes:
   prometheus-data:
   grafana-data:
   db-credentials:
+  kafka-data:

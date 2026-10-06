@@ -390,4 +390,39 @@ status=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $MAKER
 [[ "$status" == 200 ]] || { echo "FAIL: iam-service after rotation returned $status"; exit 1; }
 echo "   iam-service: $old -> $new (no restart); old login dropped; API still answers"
 
+echo "22. API gateway (INT-001) and audit events on the broker (INT-005, CC-120, ADR-040)"
+GW=http://localhost:9080
+GW_TOKEN=$(token dev.iam-admin "$DEV_IAM_ADMIN_PASSWORD") # fresh: earlier tokens may have expired
+status=$(curl -s -o /dev/null -w '%{http_code}' "$GW/v1/roles")
+[[ "$status" == 401 ]] || { echo "FAIL: gateway without a token returned $status, expected 401"; exit 1; }
+status=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer not-a-token" "$GW/v1/roles")
+[[ "$status" == 401 ]] || { echo "FAIL: gateway with a forged token returned $status, expected 401"; exit 1; }
+# Routed to the owning service: the administrator may read roles; for the other services the service itself answers
+# (200, or 403 from its own authorisation), never the gateway's 404.
+for path in /v1/roles /v1/me/assignments /v1/reference-lists /v1/services /v1/holds; do
+  status=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $GW_TOKEN" "$GW$path")
+  [[ "$status" == 200 || ( "$status" == 403 && "$path" != /v1/roles && "$path" != /v1/me/* ) ]] \
+    || { echo "FAIL: gateway $path returned $status"; exit 1; }
+done
+status=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $GW_TOKEN" "$GW/actuator/health")
+[[ "$status" == 404 ]] || { echo "FAIL: gateway exposes /actuator ($status)"; exit 1; }
+cid=$(curl -s -D - -o /dev/null -H "Authorization: Bearer $GW_TOKEN" "$GW/v1/roles" | tr -d '\r' | awk -F': ' 'tolower($1)=="x-correlation-id"{print $2}')
+[[ -n "$cid" ]] || { echo "FAIL: gateway did not return X-Correlation-Id"; exit 1; }
+limit=$(curl -s -D - -o /dev/null -H "Authorization: Bearer $GW_TOKEN" "$GW/v1/roles" | tr -d '\r' | awk -F': ' 'tolower($1)=="x-ratelimit-limit"{print $2}')
+[[ "$limit" == 600 ]] || { echo "FAIL: rate limit header missing or wrong ('$limit')"; exit 1; }
+# Earlier steps wrote audit records; the relay must have sent them to itms.audit.v1 as CloudEvents.
+unpublished=1
+for _ in $(seq 1 30); do
+  unpublished=$(iam_sql "select count(*) from audit_outbox where published_at is null")
+  [[ "$unpublished" == 0 ]] && break
+  sleep 1
+done
+[[ "$unpublished" == 0 ]] || { echo "FAIL: $unpublished iam audit records not relayed"; exit 1; }
+first=$(MSYS_NO_PATHCONV=1 "${DC[@]}" exec -T kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 \
+  --topic itms.audit.v1 --from-beginning --max-messages 1 --timeout-ms 20000 2>/dev/null)
+printf '%s' "$first" | "$PY" -c "import json,sys; e=json.load(sys.stdin); assert e['specversion']=='1.0' and e['type']=='itms.audit.recorded' and e['data']['action'], e" \
+  || { echo "FAIL: itms.audit.v1 does not hold CloudEvents audit records"; exit 1; }
+echo "   gateway: 401 without or with a forged token, routed to all four services, no /actuator, correlation id and rate limit set"
+echo "   broker: every iam audit record relayed; itms.audit.v1 holds CloudEvents"
+
 echo "SMOKE OK"

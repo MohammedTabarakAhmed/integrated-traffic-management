@@ -1,0 +1,114 @@
+# APISIX routes, local development (INT-001, ADR-003, ADR-040). One route per service, matching the /v1/ path roots of
+# its OpenAPI specification (services/*/src/main/resources/openapi/*.v1.yaml). Anything else gets 404 from the gateway:
+# management endpoints (port 8090) are never routed.
+#
+# Every route:
+#   - checks the bearer token (signature from Keycloak's published keys, expiry, issuer) before the request reaches a
+#     service; services check it again, with the audience, and authorise per request (defence in depth, ADR-022);
+#   - limits requests per client address (limit-count); per-consumer quotas need the consumer registry (ADR-040 gap);
+#   - is counted by the prometheus plugin (usage analytics).
+# The X-Correlation-Id header is kept if the caller sent one, otherwise the gateway creates it (request-id).
+
+upstreams:
+  - id: iam-service
+    type: roundrobin
+    nodes:
+      "iam-service:8080": 1
+  - id: reference-data-service
+    type: roundrobin
+    nodes:
+      "reference-data-service:8080": 1
+  - id: transaction-service
+    type: roundrobin
+    nodes:
+      "transaction-service:8080": 1
+  - id: hold-eligibility-service
+    type: roundrobin
+    nodes:
+      "hold-eligibility-service:8080": 1
+
+plugin_configs:
+  - id: protected-api
+    plugins:
+      openid-connect:
+        discovery: http://keycloak:8080/realms/itms/.well-known/openid-configuration
+        # Bearer-only token check against the realm's published keys: no login redirect, no introspection call, so
+        # the client credentials below are never sent to Keycloak. The plugin's schema requires them; the value is
+        # not a secret.
+        client_id: itms-gateway
+        client_secret: bearer-only-not-used
+        bearer_only: true
+        use_jwks: true
+        realm: itms
+        set_userinfo_header: false
+        set_access_token_header: false
+      limit-count:
+        count: 600
+        time_window: 60
+        key_type: var
+        key: remote_addr
+        policy: local
+        rejected_code: 429
+        show_limit_quota_header: true
+      prometheus:
+        prefer_name: true
+
+global_rules:
+  - id: correlation-id
+    plugins:
+      request-id:
+        header_name: X-Correlation-Id
+        include_in_response: true
+        algorithm: uuid
+
+routes:
+  - id: iam-service
+    name: iam-service
+    upstream_id: iam-service
+    plugin_config_id: protected-api
+    uris:
+      - /v1/me/*
+      - /v1/permissions
+      - /v1/permissions/*
+      - /v1/roles
+      - /v1/roles/*
+      - /v1/role-assignments
+      - /v1/role-assignments/*
+      - /v1/role-conflicts
+      - /v1/role-conflicts/*
+      - /v1/delegations
+      - /v1/delegations/*
+      - /v1/subjects/*
+      - /v1/access-reviews
+      - /v1/access-reviews/*
+      - /v1/access-review-items/*
+  - id: reference-data-service
+    name: reference-data-service
+    upstream_id: reference-data-service
+    plugin_config_id: protected-api
+    uris:
+      - /v1/reference-lists
+      - /v1/reference-lists/*
+      - /v1/reference-data-changes
+      - /v1/reference-data-changes/*
+  - id: transaction-service
+    name: transaction-service
+    upstream_id: transaction-service
+    plugin_config_id: protected-api
+    uris:
+      - /v1/services
+      - /v1/services/*
+      - /v1/catalogue-changes
+      - /v1/catalogue-changes/*
+      - /v1/transactions
+      - /v1/transactions/*
+  - id: hold-eligibility-service
+    name: hold-eligibility-service
+    upstream_id: hold-eligibility-service
+    plugin_config_id: protected-api
+    uris:
+      - /v1/holds
+      - /v1/holds/*
+      - /v1/eligibility-checks
+      - /v1/eligibility-checks/*
+#END

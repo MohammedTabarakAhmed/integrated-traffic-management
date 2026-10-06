@@ -1,0 +1,26 @@
+# APISIX node settings, local development (INT-001, ADR-003, ADR-040). Declarative (standalone) mode: routes come from
+# apisix.yaml, there is no etcd and no Admin API, so the gateway cannot be changed at run time; a change is a reviewed
+# commit (NFR-043). Real environments generate apisix.yaml from the OpenAPI specifications and a consumer registry.
+deployment:
+  role: data_plane
+  role_data_plane:
+    config_provider: yaml
+
+apisix:
+  node_listen: 9080
+  enable_admin: false
+  # Do not tell clients which gateway product or version they are talking to.
+  show_upstream_status_in_response_header: false
+
+nginx_config:
+  error_log_level: warn
+  http:
+    # Request bodies above 10 MB are refused at the edge; document upload limits are enforced by the services.
+    client_max_body_size: 10m
+
+plugin_attr:
+  prometheus:
+    # Scraped by Prometheus on the compose network only (not published to the host).
+    export_addr:
+      ip: 0.0.0.0
+      port: 9091

@@ -3,3 +3,4 @@ gov.itms.platform.ItmsPlatformAutoConfiguration
 gov.itms.platform.idempotency.IdempotencyAutoConfiguration
 gov.itms.platform.observability.ItmsObservabilityAutoConfiguration
 gov.itms.platform.credentials.ItmsSecretsAutoConfiguration
+gov.itms.platform.events.ItmsEventsAutoConfiguration

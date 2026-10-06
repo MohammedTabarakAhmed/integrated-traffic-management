@@ -2,15 +2,19 @@ package gov.itms.trafficfile.api;
 
 import gov.itms.trafficfile.api.ApiModels.Collection;
 import gov.itms.trafficfile.api.ApiModels.FileVersionDto;
+import gov.itms.trafficfile.api.ApiModels.OpenCompanyRequest;
 import gov.itms.trafficfile.api.ApiModels.OpenIndividualRequest;
 import gov.itms.trafficfile.api.ApiModels.ProfileUpdateRequest;
+import gov.itms.trafficfile.api.ApiModels.RepresentativesUpdateRequest;
 import gov.itms.trafficfile.api.ApiModels.SearchRequest;
 import gov.itms.trafficfile.api.ApiModels.TrafficFileDto;
 import gov.itms.trafficfile.application.Caller;
+import gov.itms.trafficfile.application.CompanyFileService;
 import gov.itms.trafficfile.application.TrafficFileService;
 import gov.itms.trafficfile.domain.TrafficFile;
 import jakarta.validation.Valid;
 import java.net.URI;
+import java.util.List;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -29,11 +33,32 @@ import org.springframework.web.bind.annotation.RestController;
 class TrafficFileController {
 
     private final TrafficFileService service;
+    private final CompanyFileService companies;
     private final Callers callers;
 
-    TrafficFileController(TrafficFileService service, Callers callers) {
+    TrafficFileController(TrafficFileService service, CompanyFileService companies, Callers callers) {
         this.service = service;
+        this.companies = companies;
         this.callers = callers;
+    }
+
+    @PostMapping("/companies")
+    @PreAuthorize("hasAuthority('trafficfile.create')")
+    ResponseEntity<TrafficFileDto> openCompany(@Valid @RequestBody OpenCompanyRequest body) {
+        Caller caller = callers.current();
+        TrafficFile file = companies.open(body.toDomain(), caller);
+        return ResponseEntity.created(URI.create("/v1/traffic-files/" + file.fileNumber()))
+                .body(TrafficFileDto.of(file, sensitive(caller)));
+    }
+
+    @PostMapping("/{fileNumber}/representatives-updates")
+    @PreAuthorize("hasAuthority('trafficfile.update')")
+    TrafficFileDto updateRepresentatives(@PathVariable String fileNumber,
+                                         @Valid @RequestBody RepresentativesUpdateRequest body) {
+        Caller caller = callers.current();
+        TrafficFile file = companies.updateRepresentatives(fileNumber, body.version(), body.signatories(),
+                body.fleetManagers() == null ? List.of() : body.fleetManagers(), caller);
+        return TrafficFileDto.of(file, sensitive(caller));
     }
 
     @PostMapping("/individuals")

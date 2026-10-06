@@ -292,6 +292,9 @@ services:
       ITMS_IAM_URL: http://iam-service:8080
       # Partner #1 mock (ICD-01; infra/local/mocks/identity-register).
       ITMS_IDENTITY_REGISTER_URL: http://identity-register-mock:8080
+      # Partner #9 mocks (ICD-04; infra/local/mocks/licensing-authority): one authority per licence source.
+      # A map keyed by source code: set as JSON, because environment-variable binding would lower-case the keys.
+      SPRING_APPLICATION_JSON: '{"itms":{"traffic-file":{"licensing":{"authorities":{"DXB_DED":"http://licensing-authority-mock:8080/dxb","AUH_ADDED":"http://licensing-authority-mock:8080/auh"}}}}}'
     volumes:
       - type: volume
         source: db-credentials
@@ -316,6 +319,8 @@ services:
         condition: service_healthy
       identity-register-mock:
         condition: service_started
+      licensing-authority-mock:
+        condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8090/actuator/health/readiness | grep -q UP"]
       interval: 5s
@@ -328,6 +333,12 @@ services:
     command: ["--port", "8080", "--disable-banner"]
     volumes:
       - ./mocks/identity-register/mappings:/home/wiremock/mappings:ro
+
+  licensing-authority-mock:
+    image: wiremock/wiremock:3.13.1
+    command: ["--port", "8080", "--disable-banner"]
+    volumes:
+      - ./mocks/licensing-authority/mappings:/home/wiremock/mappings:ro
 
   # ---- Message broker (INT-005, ADR-002, ADR-040). Local development only: one KRaft node, plain text, inside the
   # compose network (not published to the host). Real environments run >= 3 brokers per site with TLS and SASL.

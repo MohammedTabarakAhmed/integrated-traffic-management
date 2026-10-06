@@ -1,9 +1,11 @@
 package gov.itms.trafficfile.api;
 
 import gov.itms.trafficfile.application.TrafficFileRepository.FileVersion;
+import gov.itms.trafficfile.application.CompanyFileService;
 import gov.itms.trafficfile.application.TrafficFileService;
 import gov.itms.trafficfile.domain.Channel;
 import gov.itms.trafficfile.domain.Codes;
+import gov.itms.trafficfile.domain.Company;
 import gov.itms.trafficfile.domain.DomainException;
 import gov.itms.trafficfile.domain.Identity;
 import gov.itms.trafficfile.domain.PersonName;
@@ -117,6 +119,48 @@ final class ApiModels {
     record SearchRequest(@NotNull @Valid DocumentDto document) {
     }
 
+    record LicenceDto(@NotNull @Pattern(regexp = Codes.CODE) String source,
+                      @NotNull @Pattern(regexp = Company.Licence.NUMBER) String number) {
+
+        static LicenceDto of(Company.Licence l) {
+            return new LicenceDto(l.source(), l.number());
+        }
+
+        Company.Licence toDomain() {
+            return new Company.Licence(source, number);
+        }
+    }
+
+    record OpenCompanyRequest(
+            @NotNull @Valid LicenceDto licence,
+            @NotNull @Pattern(regexp = Codes.CODE) String category,
+            @NotNull @Pattern(regexp = Codes.CODE) String type,
+            @NotNull @Pattern(regexp = Codes.CODE) String regionOpened,
+            @NotNull @Size(min = 1, max = 20) List<@NotNull @Pattern(regexp = Codes.FILE_NUMBER) String> signatories,
+            @Size(max = 20) List<@NotNull @Pattern(regexp = Codes.FILE_NUMBER) String> fleetManagers) {
+
+        CompanyFileService.OpenCompany toDomain() {
+            return new CompanyFileService.OpenCompany(licence.toDomain(),
+                    new TrafficFile.Classification(category, type), regionOpened, signatories,
+                    fleetManagers == null ? List.of() : fleetManagers);
+        }
+    }
+
+    record RepresentativesUpdateRequest(
+            @NotNull @Min(1) Long version,
+            @NotNull @Size(min = 1, max = 20) List<@NotNull @Pattern(regexp = Codes.FILE_NUMBER) String> signatories,
+            @Size(max = 20) List<@NotNull @Pattern(regexp = Codes.FILE_NUMBER) String> fleetManagers) {
+    }
+
+    record CompanyDto(LicenceDto licence, String nameNl, String nameEn, List<String> activities,
+                      LocalDate licenceExpiry, List<String> signatories, List<String> fleetManagers) {
+
+        static CompanyDto of(Company c) {
+            return new CompanyDto(LicenceDto.of(c.licence()), c.nameNl(), c.nameEn(), c.activities(),
+                    c.licenceExpiry(), c.signatories(), c.fleetManagers());
+        }
+    }
+
     record ProfileUpdateRequest(@NotNull @Min(1) Long version, @NotNull @Valid ProfileDto profile) {
     }
 
@@ -152,6 +196,7 @@ final class ApiModels {
             TrafficFile.IdentitySource identitySource,
             Instant registerSyncedAt,
             IdentityDto identity,
+            CompanyDto company,
             Set<String> lockedFields,
             ProfileDto profile,
             ChangeDto opened,
@@ -159,13 +204,16 @@ final class ApiModels {
             long version) {
 
         static TrafficFileDto of(TrafficFile f, boolean sensitive) {
-            Set<String> locked = f.identitySource() == TrafficFile.IdentitySource.REGISTER
+            boolean company = f.kind() == TrafficFile.Kind.COMPANY;
+            Set<String> locked = company ? new TreeSet<>(Company.REGISTER_FIELDS)
+                    : f.identitySource() == TrafficFile.IdentitySource.REGISTER
                     ? new TreeSet<>(Identity.REGISTER_FIELDS) : new TreeSet<>();
             return new TrafficFileDto(f.fileNumber(), f.kind(), f.classification().category(),
                     f.classification().type(), f.status(), f.regionOpened(), f.identitySource(),
-                    f.registerSyncedAt(), IdentityDto.of(f.identity(), sensitive), locked,
-                    ProfileDto.of(f.profile(), sensitive), ChangeDto.of(f.opened()), ChangeDto.of(f.lastChange()),
-                    f.version());
+                    f.registerSyncedAt(), company ? null : IdentityDto.of(f.identity(), sensitive),
+                    company ? CompanyDto.of(f.company()) : null, locked,
+                    company ? null : ProfileDto.of(f.profile(), sensitive), ChangeDto.of(f.opened()),
+                    ChangeDto.of(f.lastChange()), f.version());
         }
     }
 

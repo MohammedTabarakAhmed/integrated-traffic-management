@@ -63,6 +63,11 @@ itms:
       residency-codes:
         CITIZEN: CITIZEN
         RESIDENT: RESIDENT
+    # Economic licensing authorities (partner #9, ICD-04): one address per licence source code (DL-003), set per
+    # environment as itms.traffic-file.licensing.authorities.<SOURCE_CODE> (e.g. through SPRING_APPLICATION_JSON, since
+    # environment-variable binding lower-cases map keys). A source without an address is treated as unknown.
+    licensing:
+      timeout: ${ITMS_LICENSING_TIMEOUT:3s}
   # API_SPECIFICATION §2, ADR-032: opening a file and updating a profile need an Idempotency-Key; a retry with the same
   # key and request replays the stored response. Retention and lock timeout are set per environment (Q-052).
   idempotency:
@@ -70,6 +75,8 @@ itms:
     paths:
       - /v1/traffic-files/individuals
       - /v1/traffic-files/*/profile-updates
+      - /v1/traffic-files/companies
+      - /v1/traffic-files/*/representatives-updates
     retention: ${ITMS_IDEMPOTENCY_RETENTION:24h}
     lock-timeout: ${ITMS_IDEMPOTENCY_LOCK_TIMEOUT:30s}
     cleanup-interval: ${ITMS_IDEMPOTENCY_CLEANUP_INTERVAL:15m}

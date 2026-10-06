@@ -75,6 +75,7 @@ class TrafficFileApiIT {
     @DynamicPropertySource
     static void register(DynamicPropertyRegistry registry) {
         registry.add("itms.traffic-file.register.base-url", REGISTER::baseUrl);
+        registry.add("itms.traffic-file.licensing.authorities[DXB_DED]", () -> REGISTER.baseUrl() + "/dxb");
     }
 
     @BeforeAll
@@ -403,5 +404,110 @@ class TrafficFileApiIT {
                 .isInstanceOf(DataAccessException.class).hasMessageContaining("never deleted");
         assertThatThrownBy(() -> db.sql("delete from traffic_file_history").update())
                 .isInstanceOf(DataAccessException.class).hasMessageContaining("append-only");
+    }
+
+    // ------------------------------------------------------------------ companies (DL-003, DL-004)
+
+    private String individualFile() throws Exception {
+        MvcResult r = postAs("/v1/traffic-files/individuals", visitor(newPassport(), LocalDate.of(1980, 1, 1)),
+                officer());
+        assertThat(r.getResponse().getStatus()).isEqualTo(201);
+        return body(r).get("fileNumber").asString();
+    }
+
+    private static Map<String, Object> company(String licenceNo, List<String> signatories, List<String> managers) {
+        Map<String, Object> m = new HashMap<>();
+        m.put("licence", Map.of("source", "DXB_DED", "number", licenceNo));
+        m.put("category", "COMPANY");
+        m.put("type", "LLC");
+        m.put("regionOpened", "DXB");
+        m.put("signatories", signatories);
+        m.put("fleetManagers", managers);
+        return m;
+    }
+
+    @Test
+    @Tag("DL-003")
+    @Tag("DL-004")
+    @DisplayName("a company file comes from the licensing authority, names representatives, and replaces them")
+    void companyFile() throws Exception {
+        String signatory = individualFile();
+        String manager = individualFile();
+        MvcResult r = postAs("/v1/traffic-files/companies",
+                company(IdentityRegisterStub.LICENCE_ACTIVE, List.of(signatory), List.of(manager)), officer());
+        String number;
+        if (r.getResponse().getStatus() == 409) {
+            // A rerun against the same database: the licence already has its file.
+            number = body(r).get("detail").asString().replaceAll(".*?([0-9]{11}).*", "$1");
+        } else {
+            assertThat(r.getResponse().getStatus()).as(r.getResponse().getContentAsString()).isEqualTo(201);
+            JsonNode file = body(r);
+            number = file.get("fileNumber").asString();
+            assertThat(file.get("kind").asString()).isEqualTo("COMPANY");
+            assertThat(file.get("identity").isNull()).isTrue();
+            assertThat(file.get("profile").isNull()).isTrue();
+            assertThat(file.get("company").get("nameEn").asString()).isEqualTo("Rapid Transport LLC");
+            assertThat(file.get("company").get("licenceExpiry").asString()).isEqualTo("2030-12-31");
+            assertThat(file.get("company").get("signatories").get(0).asString()).isEqualTo(signatory);
+            assertThat(file.get("lockedFields").toString()).contains("activities", "licenceExpiry");
+        }
+        long version = body(getAs("/v1/traffic-files/" + number, reader())).get("version").asLong();
+        MvcResult updated = postAs("/v1/traffic-files/" + number + "/representatives-updates",
+                Map.of("version", version, "signatories", List.of(manager), "fleetManagers", List.of()), officer());
+        assertThat(updated.getResponse().getStatus()).as(updated.getResponse().getContentAsString()).isEqualTo(200);
+        assertThat(body(updated).get("company").get("signatories").get(0).asString()).isEqualTo(manager);
+        assertThat(body(updated).get("version").asLong()).isEqualTo(version + 1);
+
+        MvcResult profileOnCompany = postAs("/v1/traffic-files/" + number + "/profile-updates",
+                Map.of("version", version + 1, "profile", Map.of()), officer());
+        assertThat(code(profileOnCompany)).isEqualTo("WRONG_FILE_KIND");
+        MvcResult companyAsSignatory = postAs("/v1/traffic-files/companies",
+                company(IdentityRegisterStub.LICENCE_ACTIVE_2, List.of(number), List.of()), officer());
+        assertThat(code(companyAsSignatory)).isIn("REPRESENTATIVE_INVALID", "FILE_ALREADY_EXISTS");
+    }
+
+    @Test
+    @Tag("DL-003")
+    @DisplayName("unknown, expired, cancelled and unanswered licences are refused; a second file is 409")
+    void companyLicenceOutcomes() throws Exception {
+        String signatory = individualFile();
+        assertThat(code(postAs("/v1/traffic-files/companies", company("CN-0000404", List.of(signatory), List.of()),
+                officer()))).isEqualTo("COMPANY_LICENCE_NOT_FOUND");
+        assertThat(code(postAs("/v1/traffic-files/companies",
+                company(IdentityRegisterStub.LICENCE_EXPIRED, List.of(signatory), List.of()), officer())))
+                .isEqualTo("COMPANY_LICENCE_EXPIRED");
+        assertThat(code(postAs("/v1/traffic-files/companies",
+                company(IdentityRegisterStub.LICENCE_CANCELLED, List.of(signatory), List.of()), officer())))
+                .isEqualTo("COMPANY_LICENCE_CANCELLED");
+        MvcResult down = postAs("/v1/traffic-files/companies",
+                company(IdentityRegisterStub.LICENCE_FAILING, List.of(signatory), List.of()), officer());
+        assertThat(down.getResponse().getStatus()).isEqualTo(503);
+        Map<String, Object> otherSource = company(IdentityRegisterStub.LICENCE_ACTIVE, List.of(signatory), List.of());
+        otherSource.put("licence", Map.of("source", "SHJ_SEDD", "number", IdentityRegisterStub.LICENCE_ACTIVE));
+        assertThat(code(postAs("/v1/traffic-files/companies", otherSource, officer())))
+                .as("a source without a configured authority is unknown").isEqualTo("COMPANY_LICENCE_NOT_FOUND");
+        assertThat(postAs("/v1/traffic-files/companies",
+                company(IdentityRegisterStub.LICENCE_ACTIVE, List.of(), List.of()), officer())
+                .getResponse().getStatus()).isIn(400, 422);
+    }
+
+    @Test
+    @Tag("DL-003")
+    @DisplayName("the database keeps a company's licence and authority fields")
+    void companyDatabaseGuards() throws Exception {
+        String signatory = individualFile();
+        MvcResult r = postAs("/v1/traffic-files/companies",
+                company(IdentityRegisterStub.LICENCE_ACTIVE, List.of(signatory), List.of()), officer());
+        String number = r.getResponse().getStatus() == 201 ? body(r).get("fileNumber").asString()
+                : body(r).get("detail").asString().replaceAll(".*?([0-9]{11}).*", "$1");
+        assertThatThrownBy(() -> db.sql("update traffic_file set commercial_licence_no = 'CN-1', version = version + 1 "
+                + "where file_number = :n").param("n", number).update())
+                .isInstanceOf(DataAccessException.class).hasMessageContaining("identity document");
+        assertThatThrownBy(() -> db.sql("update traffic_file set licence_expiry = date '2040-01-01', "
+                + "version = version + 1 where file_number = :n").param("n", number).update())
+                .isInstanceOf(DataAccessException.class).hasMessageContaining("register sync");
+        assertThatThrownBy(() -> db.sql("update traffic_file set signatories = '{}', version = version + 1 "
+                + "where file_number = :n").param("n", number).update())
+                .isInstanceOf(DataAccessException.class);
     }
 }

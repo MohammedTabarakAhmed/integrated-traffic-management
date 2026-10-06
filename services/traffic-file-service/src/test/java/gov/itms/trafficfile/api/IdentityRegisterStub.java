@@ -11,7 +11,8 @@ import java.nio.charset.StandardCharsets;
 /**
  * A real HTTP stand-in for the identity register's lookup (ICD-01), with the same people as the local WireMock mappings
  * (infra/local/mocks/identity-register): a citizen, a resident, a deceased person, a number that fails with 503, and
- * 404 for anything else.
+ * 404 for anything else. It also stands in for one economic licensing authority (ICD-04) under {@code /dxb}: an active,
+ * a second active, an expired and a cancelled licence, one that fails with 503, and 404 for anything else.
  */
 final class IdentityRegisterStub {
 
@@ -19,6 +20,11 @@ final class IdentityRegisterStub {
     static final String RESIDENT = "784198812345672";
     static final String DECEASED = "784197012345673";
     static final String FAILING = "999999999999999";
+    static final String LICENCE_ACTIVE = "CN-1001234";
+    static final String LICENCE_ACTIVE_2 = "CN-1005678";
+    static final String LICENCE_EXPIRED = "CN-2000001";
+    static final String LICENCE_CANCELLED = "CN-3000001";
+    static final String LICENCE_FAILING = "CN-9999999";
 
     private final HttpServer server;
 
@@ -29,6 +35,7 @@ final class IdentityRegisterStub {
             throw new IllegalStateException(e);
         }
         server.createContext("/v1/persons/", this::lookup);
+        server.createContext("/dxb/v1/licences/", this::licence);
         server.start();
     }
 
@@ -52,6 +59,24 @@ final class IdentityRegisterStub {
             case FAILING -> respond(exchange, 503, "");
             default -> respond(exchange, 404, "");
         }
+    }
+
+    private void licence(HttpExchange exchange) throws IOException {
+        String no = exchange.getRequestURI().getPath().substring("/dxb/v1/licences/".length());
+        switch (no) {
+            case LICENCE_ACTIVE -> respond(exchange, 200, licence(no, "Rapid Transport LLC", "2030-12-31", "ACTIVE"));
+            case LICENCE_ACTIVE_2 -> respond(exchange, 200, licence(no, "Fleet Establishment", "2029-06-30", "ACTIVE"));
+            case LICENCE_EXPIRED -> respond(exchange, 200, licence(no, "Old Trading", "2020-01-31", "ACTIVE"));
+            case LICENCE_CANCELLED -> respond(exchange, 200, licence(no, "Closed Company", "2031-01-31", "CANCELLED"));
+            case LICENCE_FAILING -> respond(exchange, 503, "");
+            default -> respond(exchange, 404, "");
+        }
+    }
+
+    private static String licence(String no, String nameEn, String expiry, String status) {
+        return """
+                {"licenceNo":"%s","tradeNameNl":"شركة","tradeNameEn":"%s","activityCodes":["LAND_TRANSPORT"],
+                 "expiryDate":"%s","status":"%s"}""".formatted(no, nameEn, expiry, status);
     }
 
     private static String person(String id, String givenNl, String familyNl, String givenEn, String familyEn,

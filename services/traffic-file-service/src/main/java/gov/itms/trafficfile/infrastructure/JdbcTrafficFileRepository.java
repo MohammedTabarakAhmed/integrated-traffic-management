@@ -3,6 +3,7 @@ package gov.itms.trafficfile.infrastructure;
 import gov.itms.trafficfile.application.TrafficFileRepository;
 import gov.itms.trafficfile.domain.Actor;
 import gov.itms.trafficfile.domain.Channel;
+import gov.itms.trafficfile.domain.Company;
 import gov.itms.trafficfile.domain.Identity;
 import gov.itms.trafficfile.domain.PersonName;
 import gov.itms.trafficfile.domain.Profile;
@@ -37,7 +38,8 @@ class JdbcTrafficFileRepository implements TrafficFileRepository {
             birth_date, gender, residency_status, residency_expiry, mobile, email, address, blood_group,
             education_level, profession, languages, physical_conditions, religion, determination_status, opened_at,
             opened_by, opened_by_username, opened_channel, changed_at, changed_by, changed_by_username,
-            changed_channel, version""";
+            changed_channel, version, licence_source, commercial_licence_no, company_name_nl, company_name_en,
+            activities, licence_expiry, signatories, fleet_managers""";
     private static final String SELECT = "select " + COLUMNS + " from traffic_file";
 
     private final JdbcClient jdbc;
@@ -82,6 +84,10 @@ class JdbcTrafficFileRepository implements TrafficFileRepository {
 
     @Override
     public void insert(TrafficFile file) {
+        if (file.kind() == TrafficFile.Kind.COMPANY) {
+            insertCompany(file);
+            return;
+        }
         Identity identity = file.identity();
         String nationalId = identity.document() instanceof Identity.NationalId n ? n.number() : null;
         String passportNo = identity.document() instanceof Identity.Passport p ? p.number() : null;
@@ -142,6 +148,84 @@ class JdbcTrafficFileRepository implements TrafficFileRepository {
                     .update();
         } catch (DuplicateKeyException e) {
             throw new DuplicateIdentityException(e);
+        }
+    }
+
+    private void insertCompany(TrafficFile file) {
+        Company company = file.company();
+        try {
+            jdbc.sql("""
+                            insert into traffic_file (id, file_number, kind, category, type, status, region_opened,
+                                identity_source, register_synced_at, licence_source, commercial_licence_no,
+                                company_name_nl, company_name_en, activities, licence_expiry, signatories,
+                                fleet_managers, opened_at, opened_by, opened_by_username, opened_channel, changed_at,
+                                changed_by, changed_by_username, changed_channel, version)
+                            values (:id, :fileNumber, 'COMPANY', :category, :type, :status, :region, 'REGISTER',
+                                :syncedAt, :source, :licenceNo, :nameNl, :nameEn, string_to_array(:activities, ','),
+                                :expiry, string_to_array(:signatories, ','), string_to_array(:fleetManagers, ','),
+                                :at, :by, :byName, :channel, :at, :by, :byName, :channel, :version)""")
+                    .param("id", file.id())
+                    .param("fileNumber", file.fileNumber())
+                    .param("category", file.classification().category())
+                    .param("type", file.classification().type())
+                    .param("status", file.status().name())
+                    .param("region", file.regionOpened())
+                    .param("syncedAt", timestamp(file.registerSyncedAt()))
+                    .param("source", company.licence().source())
+                    .param("licenceNo", company.licence().number())
+                    .param("nameNl", company.nameNl())
+                    .param("nameEn", company.nameEn())
+                    .param("activities", String.join(",", company.activities()))
+                    .param("expiry", Date.valueOf(company.licenceExpiry()))
+                    .param("signatories", String.join(",", company.signatories()))
+                    .param("fleetManagers", String.join(",", company.fleetManagers()))
+                    .param("at", Timestamp.from(file.opened().at()))
+                    .param("by", file.opened().actor().id())
+                    .param("byName", file.opened().actor().username())
+                    .param("channel", file.opened().channel().name())
+                    .param("version", file.version())
+                    .update();
+        } catch (DuplicateKeyException e) {
+            throw new DuplicateIdentityException(e);
+        }
+    }
+
+    @Override
+    public Optional<TrafficFile> findByLicence(String source, String licenceNo) {
+        return jdbc.sql(SELECT + " where licence_source = :s and commercial_licence_no = :n and status <> 'MERGED'")
+                .param("s", source).param("n", licenceNo).query(this::map).optional();
+    }
+
+    @Override
+    public List<TrafficFile> findByNumbers(List<String> fileNumbers) {
+        if (fileNumbers.isEmpty()) {
+            return List.of();
+        }
+        return jdbc.sql(SELECT + " where file_number in (:numbers)").param("numbers", fileNumbers).query(this::map)
+                .list();
+    }
+
+    @Override
+    public void saveRepresentatives(TrafficFile file) {
+        Company company = file.company();
+        TrafficFile.Change change = file.lastChange();
+        int updated = jdbc.sql("""
+                        update traffic_file set signatories = string_to_array(:signatories, ','),
+                            fleet_managers = string_to_array(:fleetManagers, ','), changed_at = :at, changed_by = :by,
+                            changed_by_username = :byName, changed_channel = :channel, version = :version
+                        where id = :id and version = :previous""")
+                .param("signatories", String.join(",", company.signatories()))
+                .param("fleetManagers", String.join(",", company.fleetManagers()))
+                .param("at", Timestamp.from(change.at()))
+                .param("by", change.actor().id())
+                .param("byName", change.actor().username())
+                .param("channel", change.channel().name())
+                .param("version", file.version())
+                .param("previous", file.version() - 1)
+                .param("id", file.id())
+                .update();
+        if (updated != 1) {
+            throw new OptimisticLockingFailureException("traffic file " + file.fileNumber() + " changed concurrently");
         }
     }
 
@@ -217,22 +301,27 @@ class JdbcTrafficFileRepository implements TrafficFileRepository {
     }
 
     private TrafficFile map(ResultSet rs, int row) throws SQLException {
-        String nationalId = rs.getString("national_id_no");
-        Identity.IdentityDocument document = nationalId != null ? new Identity.NationalId(nationalId)
-                : new Identity.Passport(rs.getString("passport_no"), rs.getString("passport_country"));
-        Identity identity = new Identity(document,
-                new PersonName(rs.getString("given_nl"), rs.getString("family_nl"), rs.getString("given_en"),
-                        rs.getString("family_en")),
-                rs.getString("nationality"), localDate(rs.getDate("birth_date")), rs.getString("gender"),
-                rs.getString("residency_status"), localDate(rs.getDate("residency_expiry")));
-        Profile profile = new Profile(rs.getString("mobile"), rs.getString("email"), rs.getString("address"),
-                rs.getString("blood_group"), rs.getString("education_level"), rs.getString("profession"),
-                strings(rs.getArray("languages")), strings(rs.getArray("physical_conditions")),
-                rs.getString("religion"), rs.getString("determination_status"));
+        TrafficFile.Kind kind = TrafficFile.Kind.valueOf(rs.getString("kind"));
+        Identity identity = null;
+        Profile profile = null;
+        Company company = null;
+        if (kind == TrafficFile.Kind.COMPANY) {
+            company = new Company(new Company.Licence(rs.getString("licence_source"),
+                    rs.getString("commercial_licence_no")), rs.getString("company_name_nl"),
+                    rs.getString("company_name_en"), strings(rs.getArray("activities")),
+                    localDate(rs.getDate("licence_expiry")), strings(rs.getArray("signatories")),
+                    strings(rs.getArray("fleet_managers")));
+        } else {
+            identity = identity(rs);
+            profile = new Profile(rs.getString("mobile"), rs.getString("email"), rs.getString("address"),
+                    rs.getString("blood_group"), rs.getString("education_level"), rs.getString("profession"),
+                    strings(rs.getArray("languages")), strings(rs.getArray("physical_conditions")),
+                    rs.getString("religion"), rs.getString("determination_status"));
+        }
         return TrafficFile.restore(
                 rs.getObject("id", UUID.class),
                 rs.getString("file_number"),
-                TrafficFile.Kind.valueOf(rs.getString("kind")),
+                kind,
                 new TrafficFile.Classification(rs.getString("category"), rs.getString("type")),
                 rs.getString("region_opened"),
                 identity,
@@ -241,8 +330,20 @@ class JdbcTrafficFileRepository implements TrafficFileRepository {
                 change(rs, "opened"),
                 TrafficFile.Status.valueOf(rs.getString("status")),
                 profile,
+                company,
                 change(rs, "changed"),
                 rs.getLong("version"));
+    }
+
+    private static Identity identity(ResultSet rs) throws SQLException {
+        String nationalId = rs.getString("national_id_no");
+        Identity.IdentityDocument document = nationalId != null ? new Identity.NationalId(nationalId)
+                : new Identity.Passport(rs.getString("passport_no"), rs.getString("passport_country"));
+        return new Identity(document,
+                new PersonName(rs.getString("given_nl"), rs.getString("family_nl"), rs.getString("given_en"),
+                        rs.getString("family_en")),
+                rs.getString("nationality"), localDate(rs.getDate("birth_date")), rs.getString("gender"),
+                rs.getString("residency_status"), localDate(rs.getDate("residency_expiry")));
     }
 
     private static TrafficFile.Change change(ResultSet rs, String prefix) throws SQLException {

@@ -1,0 +1,79 @@
+{
+  "mappings": [
+    {
+      "name": "ICD-04 active licence (DXB_DED)",
+      "request": { "method": "GET", "url": "/dxb/v1/licences/CN-1001234" },
+      "response": {
+        "status": 200,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": {
+          "licenceNo": "CN-1001234",
+          "tradeNameNl": "شركة النقل السريع ذ.م.م", "tradeNameEn": "Rapid Transport LLC",
+          "activityCodes": ["LAND_TRANSPORT", "VEHICLE_RENTAL"],
+          "expiryDate": "2030-12-31", "status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "name": "ICD-04 second active licence (DXB_DED)",
+      "request": { "method": "GET", "url": "/dxb/v1/licences/CN-1005678" },
+      "response": {
+        "status": 200,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": {
+          "licenceNo": "CN-1005678",
+          "tradeNameNl": "مؤسسة الأسطول", "tradeNameEn": "Fleet Establishment",
+          "activityCodes": ["LAND_TRANSPORT"],
+          "expiryDate": "2029-06-30", "status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "name": "ICD-04 expired licence (DXB_DED)",
+      "request": { "method": "GET", "url": "/dxb/v1/licences/CN-2000001" },
+      "response": {
+        "status": 200,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": {
+          "licenceNo": "CN-2000001", "tradeNameEn": "Old Trading", "activityCodes": ["GENERAL_TRADING"],
+          "expiryDate": "2020-01-31", "status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "name": "ICD-04 cancelled licence (DXB_DED)",
+      "request": { "method": "GET", "url": "/dxb/v1/licences/CN-3000001" },
+      "response": {
+        "status": 200,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": {
+          "licenceNo": "CN-3000001", "tradeNameEn": "Closed Company", "activityCodes": [],
+          "expiryDate": "2031-01-31", "status": "CANCELLED"
+        }
+      }
+    },
+    {
+      "name": "ICD-04 authority failure",
+      "request": { "method": "GET", "url": "/dxb/v1/licences/CN-9999999" },
+      "response": { "status": 503 }
+    },
+    {
+      "name": "ICD-04 active licence (AUH_ADDED)",
+      "request": { "method": "GET", "url": "/auh/v1/licences/CN-7000001" },
+      "response": {
+        "status": 200,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": {
+          "licenceNo": "CN-7000001", "tradeNameNl": "شركة العاصمة", "tradeNameEn": "Capital Company",
+          "activityCodes": ["LAND_TRANSPORT"], "expiryDate": "2031-03-31", "status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "name": "ICD-04 unknown licence",
+      "priority": 10,
+      "request": { "method": "GET", "urlPathPattern": "/[a-z]+/v1/licences/.*" },
+      "response": { "status": 404 }
+    }
+  ]
+}

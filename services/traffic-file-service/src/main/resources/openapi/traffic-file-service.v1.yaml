@@ -3,8 +3,8 @@ info:
   title: ITMS Traffic File Service
   version: 1.0.0
   description: |
-    Traffic files (§6.1; DL-001, DL-002, DL-005, DL-012; ADR-041): the master record of a person (and, in a later
-    version, a company) that every licence, vehicle, violation and transaction refers to. A file number is given once
+    Traffic files (§6.1; DL-001..DL-005, DL-012; ADR-041, ADR-042): the master record of a person or a company that
+    every licence, vehicle, violation and transaction refers to. A file number is given once
     and never changes.
 
     Opening an individual's file (DL-001): with a national identity number, the identity (names in both languages,
@@ -12,6 +12,12 @@ info:
     change it (DL-002; the response lists these `lockedFields`). A visitor's file is opened from the passport, with the
     identity entered by staff. One file per identity document: a second answers 409 `FILE_ALREADY_EXISTS` naming the
     existing file.
+
+    Opening a company's file (DL-003): with the commercial licence number and its source (the issuing region's
+    economic licensing authority, ICD-04). The trade names, activities and licence expiry come from the authority and
+    are locked; an unknown, cancelled or expired licence is refused. A company names at least one authorised signatory
+    and any fleet managers (DL-004), each an active individual's traffic file; they are replaced with
+    `/representatives-updates`.
 
     Data scope (CC-001): opening needs `trafficfile.create` in a grant that reaches `regionOpened`. Reading and
     updating need `trafficfile.read` / `trafficfile.update` in any grant, since a customer may use services in any
@@ -25,13 +31,13 @@ info:
     `/history`. Opening and profile changes publish `itms.traffic-file.opened` / `itms.traffic-file.profile-updated`
     events without personal data (INT-005).
 
-    Not yet in this version: companies (DL-003, DL-004), photo (DL-006), eye and medical results (DL-007, DL-008),
+    Not yet in this version: photo (DL-006), eye and medical results (DL-007, DL-008),
     duplicate detection and merge (DL-009), register change events (DL-010), the 360° view (DL-011), rules per
     category (DL-012) and the ban list (DL-013). Codes are checked for their format only until the reference-data
     client exists (Q-044, Q-057).
 
     The channel is the `X-Channel` header (set by the gateway or BFF); a file cannot be opened or changed without a
-    known channel. Opening and profile updates need an `Idempotency-Key` (ADR-032).
+    known channel. Opening and updates need an `Idempotency-Key` (ADR-032).
 
     Only GET/POST are used (INT-003); business actions are POSTs to sub-resources.
     Request input (SEC-022), all endpoints, enforced once in itms-platform: enum values are exactly their names as
@@ -68,6 +74,43 @@ paths:
         content:
           application/json:
             schema: { $ref: '#/components/schemas/OpenIndividualRequest' }
+      responses:
+        '201':
+          description: File opened (or, on a retry with the same Idempotency-Key, the stored response)
+          headers:
+            Location: { schema: { type: string } }
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TrafficFile' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/traffic-files/companies:
+    post:
+      tags: [Traffic files]
+      operationId: openCompanyFile
+      summary: Open a company's traffic file from its commercial licence (DL-003, DL-004)
+      description: |
+        Refused when: no known `X-Channel` (422 `CHANNEL_REQUIRED`); the caller's grant of `trafficfile.create` does
+        not reach `regionOpened` (403 `SCOPE_EXCEEDED`); the licence already has a file (409 `FILE_ALREADY_EXISTS`);
+        the authority does not know it (422 `COMPANY_LICENCE_NOT_FOUND`), reports it cancelled (422
+        `COMPANY_LICENCE_CANCELLED`) or expired (422 `COMPANY_LICENCE_EXPIRED`); a signatory or fleet manager is not an
+        active individual's file (422 `REPRESENTATIVE_INVALID`); the authority does not answer (503
+        `LICENSING_AUTHORITY_UNAVAILABLE`).
+      x-itms-permission: trafficfile.create
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OpenCompanyRequest' }
       responses:
         '201':
           description: File opened (or, on a retry with the same Idempotency-Key, the stored response)
@@ -163,6 +206,40 @@ paths:
         content:
           application/json:
             schema: { $ref: '#/components/schemas/ProfileUpdateRequest' }
+      responses:
+        '200':
+          description: The updated file (or, on a retry with the same Idempotency-Key, the stored response)
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TrafficFile' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/traffic-files/{fileNumber}/representatives-updates:
+    post:
+      tags: [Traffic files]
+      operationId: updateCompanyRepresentatives
+      summary: Replace a company's authorised signatories and fleet managers (DL-004)
+      description: |
+        `version` is the version the caller last read (409 `VERSION_MISMATCH` otherwise). Only for company files (422
+        `WRONG_FILE_KIND`) that are active (409 `FILE_NOT_ACTIVE`); every named file must be an active individual's
+        file (422 `REPRESENTATIVE_INVALID`).
+      x-itms-permission: trafficfile.update
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/FileNumber'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RepresentativesUpdateRequest' }
       responses:
         '200':
           description: The updated file (or, on a retry with the same Idempotency-Key, the stored response)
@@ -297,6 +374,58 @@ components:
         regionOpened: { $ref: '#/components/schemas/Code' }
         visitorIdentity: { oneOf: [ { $ref: '#/components/schemas/VisitorIdentity' }, { type: 'null' } ] }
         profile: { oneOf: [ { $ref: '#/components/schemas/Profile' }, { type: 'null' } ] }
+    FileNumber:
+      type: string
+      pattern: '^[A-Z0-9][A-Z0-9-]{0,19}$'
+    FileNumberList:
+      type: array
+      maxItems: 20
+      uniqueItems: true
+      items: { $ref: '#/components/schemas/FileNumber' }
+    Licence:
+      type: object
+      additionalProperties: false
+      required: [source, number]
+      properties:
+        source:
+          $ref: '#/components/schemas/Code'
+          description: The issuing authority (reference list of commercial licence sources)
+        number: { type: string, pattern: '^[A-Za-z0-9/-]{1,40}$' }
+    OpenCompanyRequest:
+      type: object
+      additionalProperties: false
+      required: [licence, category, type, regionOpened, signatories]
+      properties:
+        licence: { $ref: '#/components/schemas/Licence' }
+        category: { $ref: '#/components/schemas/Code' }
+        type: { $ref: '#/components/schemas/Code' }
+        regionOpened: { $ref: '#/components/schemas/Code' }
+        signatories:
+          allOf: [ { $ref: '#/components/schemas/FileNumberList' } ]
+          minItems: 1
+        fleetManagers: { oneOf: [ { $ref: '#/components/schemas/FileNumberList' }, { type: 'null' } ] }
+    RepresentativesUpdateRequest:
+      type: object
+      additionalProperties: false
+      required: [version, signatories]
+      properties:
+        version: { type: integer, minimum: 1 }
+        signatories:
+          allOf: [ { $ref: '#/components/schemas/FileNumberList' } ]
+          minItems: 1
+        fleetManagers: { oneOf: [ { $ref: '#/components/schemas/FileNumberList' }, { type: 'null' } ] }
+    Company:
+      type: object
+      additionalProperties: false
+      required: [licence, activities, licenceExpiry, signatories, fleetManagers]
+      properties:
+        licence: { $ref: '#/components/schemas/Licence' }
+        nameNl: { oneOf: [ { type: string }, { type: 'null' } ] }
+        nameEn: { oneOf: [ { type: string }, { type: 'null' } ] }
+        activities: { type: array, items: { $ref: '#/components/schemas/Code' } }
+        licenceExpiry: { type: string, format: date }
+        signatories: { type: array, items: { $ref: '#/components/schemas/FileNumber' } }
+        fleetManagers: { type: array, items: { $ref: '#/components/schemas/FileNumber' } }
     SearchRequest:
       type: object
       additionalProperties: false
@@ -341,8 +470,8 @@ components:
     TrafficFile:
       type: object
       additionalProperties: false
-      required: [fileNumber, kind, category, type, status, regionOpened, identitySource, identity, lockedFields,
-                 profile, opened, lastChange, version]
+      required: [fileNumber, kind, category, type, status, regionOpened, identitySource, lockedFields, opened,
+                 lastChange, version]
       properties:
         fileNumber: { type: string }
         kind: { type: string, enum: [INDIVIDUAL, COMPANY] }
@@ -353,14 +482,23 @@ components:
         identitySource:
           type: string
           enum: [REGISTER, DOCUMENT]
-          description: REGISTER = from the national identity register, fields locked (DL-002); DOCUMENT = passport
+          description: |
+            REGISTER = from the national identity register or, for a company, the licensing authority; those fields are
+            locked (DL-002). DOCUMENT = a visitor's passport
         registerSyncedAt: { oneOf: [ { type: string, format: date-time }, { type: 'null' } ] }
-        identity: { $ref: '#/components/schemas/Identity' }
+        identity:
+          description: The individual's identity; null for a company
+          oneOf: [ { $ref: '#/components/schemas/Identity' }, { type: 'null' } ]
+        company:
+          description: The company; null for an individual
+          oneOf: [ { $ref: '#/components/schemas/Company' }, { type: 'null' } ]
         lockedFields:
           type: array
-          description: Identity fields staff cannot change because they come from the register (DL-002)
+          description: Fields staff cannot change because they come from the register or authority (DL-002)
           items: { type: string }
-        profile: { $ref: '#/components/schemas/Profile' }
+        profile:
+          description: The individual's profile; null for a company
+          oneOf: [ { $ref: '#/components/schemas/Profile' }, { type: 'null' } ]
         opened: { $ref: '#/components/schemas/Change' }
         lastChange: { $ref: '#/components/schemas/Change' }
         version: { type: integer, minimum: 1 }

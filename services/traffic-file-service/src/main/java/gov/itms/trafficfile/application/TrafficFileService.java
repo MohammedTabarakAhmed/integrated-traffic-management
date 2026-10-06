@@ -218,14 +218,14 @@ public class TrafficFileService {
         return files.history(file.id());
     }
 
-    private static void requireRead(Caller caller) {
+    static void requireRead(Caller caller) {
         if (!caller.grants().holds(READ)) {
             throw new DomainException(DomainException.Kind.OUT_OF_SCOPE, "SCOPE_EXCEEDED",
                     "you may not read traffic files", List.of("CC-001"));
         }
     }
 
-    private static Channel channelOf(Caller caller) {
+    static Channel channelOf(Caller caller) {
         if (caller.channel() == null) {
             throw DomainException.validation("CHANNEL_REQUIRED", "the request does not name its channel (X-Channel)",
                     List.of("CC-120"));
@@ -233,13 +233,13 @@ public class TrafficFileService {
         return caller.channel();
     }
 
-    private static DomainException notFound(String fileNumber) {
+    static DomainException notFound(String fileNumber) {
         return new DomainException(DomainException.Kind.NOT_FOUND, "FILE_NOT_FOUND",
                 "traffic file " + fileNumber + " does not exist", List.of("DL-001"), fileNumber);
     }
 
     /** Event payload: business keys only, no personal data (SEC-017 minimisation). */
-    private static Map<String, Object> eventData(TrafficFile file) {
+    static Map<String, Object> eventData(TrafficFile file) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("fileNumber", file.fileNumber());
         m.put("kind", file.kind().name());
@@ -259,6 +259,9 @@ public class TrafficFileService {
         Map<String, Object> m = eventData(file);
         m.put("identitySource", file.identitySource().name());
         Profile p = file.profile();
+        if (p == null) {
+            return m;
+        }
         m.put("mobileSet", p.mobile() != null);
         m.put("emailSet", p.email() != null);
         m.put("addressSet", p.address() != null);

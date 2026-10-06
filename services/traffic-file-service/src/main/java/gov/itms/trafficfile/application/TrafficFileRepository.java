@@ -7,7 +7,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
-/** Traffic files (individuals) and their temporal history (DAT-002). */
+/** Traffic files (individuals and companies) and their temporal history (DAT-002). */
 public interface TrafficFileRepository {
 
     /** The next file number from the database sequence, in the configured format (Q-022). */
@@ -28,6 +28,15 @@ public interface TrafficFileRepository {
     Optional<TrafficFile> findByNationalId(String nationalIdNo);
 
     Optional<TrafficFile> findByPassport(String passportNo, String passportCountry);
+
+    /** The company file of this commercial licence that is not merged away, if any (DL-003). */
+    Optional<TrafficFile> findByLicence(String source, String licenceNo);
+
+    /** The files with these numbers that exist (any status); missing numbers are left out. */
+    List<TrafficFile> findByNumbers(List<String> fileNumbers);
+
+    /** Saves a company's representatives and the new version; the stored version must be {@code version - 1}. */
+    void saveRepresentatives(TrafficFile file);
 
     /** Saves the profile and the new version; the stored version must be {@code version - 1}. */
     void saveProfile(TrafficFile file);

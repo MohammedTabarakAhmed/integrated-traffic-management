@@ -471,4 +471,25 @@ versions=$(curl -s -H "Authorization: Bearer $TF_CHECKER" "$TF/v1/traffic-files/
 [[ "$versions" == 2 ]] || { echo "FAIL: expected 2 versions, got $versions"; exit 1; }
 echo "   citizen $citizen (register, masked for the officer), visitor $visitor (passport, 2 versions); deceased 422, register down 503"
 
+echo "24. Company files (DL-003, DL-004): licence from the authority mock, signatories, refusals"
+# Rapid Transport LLC of the licensing-authority mock; a second run finds the file opened by the first (409 names it).
+res=$(post_tf "$TF_CHECKER" /v1/traffic-files/companies "{\"licence\":{\"source\":\"DXB_DED\",\"number\":\"CN-1001234\"},\"category\":\"COMPANY\",\"type\":\"LLC\",\"regionOpened\":\"DXB\",\"signatories\":[\"$visitor\"],\"fleetManagers\":[]}")
+case "$(status_of "$res")" in
+  201) company=$(body_of "$res" | json_field "['fileNumber']")
+       [[ "$(body_of "$res" | json_field "['company']['nameEn']")" == "Rapid Transport LLC" ]] || { echo "FAIL: company name not from the authority"; exit 1; } ;;
+  409) company=$(body_of "$res" | json_field "['detail']" | grep -o '[0-9]\{11\}' | head -1) ;;
+  *) echo "FAIL: opening the company file returned $(status_of "$res"): $(body_of "$res")"; exit 1 ;;
+esac
+cversion=$(curl -s -H "Authorization: Bearer $TF_CHECKER" "$TF/v1/traffic-files/$company" | json_field "['version']")
+res=$(post_tf "$TF_CHECKER" "/v1/traffic-files/$company/representatives-updates" "{\"version\":$cversion,\"signatories\":[\"$visitor\"],\"fleetManagers\":[\"$citizen\"]}")
+[[ "$(status_of "$res")" == 200 ]] || { echo "FAIL: representatives update returned $(status_of "$res"): $(body_of "$res")"; exit 1; }
+for case_ in "CN-2000001 COMPANY_LICENCE_EXPIRED" "CN-3000001 COMPANY_LICENCE_CANCELLED" "CN-0000404 COMPANY_LICENCE_NOT_FOUND"; do
+  set -- $case_
+  res=$(post_tf "$TF_CHECKER" /v1/traffic-files/companies "{\"licence\":{\"source\":\"DXB_DED\",\"number\":\"$1\"},\"category\":\"COMPANY\",\"type\":\"LLC\",\"regionOpened\":\"DXB\",\"signatories\":[\"$visitor\"]}")
+  [[ "$(body_of "$res" | json_field "['code']")" == "$2" ]] || { echo "FAIL: licence $1 expected $2, got $(body_of "$res")"; exit 1; }
+done
+res=$(post_tf "$TF_CHECKER" /v1/traffic-files/companies "{\"licence\":{\"source\":\"DXB_DED\",\"number\":\"CN-1005678\"},\"category\":\"COMPANY\",\"type\":\"LLC\",\"regionOpened\":\"DXB\",\"signatories\":[\"$company\"]}")
+[[ "$(body_of "$res" | json_field "['code']")" =~ ^(REPRESENTATIVE_INVALID|FILE_ALREADY_EXISTS)$ ]] || { echo "FAIL: a company as signatory: $(body_of "$res")"; exit 1; }
+echo "   company $company (Rapid Transport LLC); representatives replaced; expired, cancelled, unknown licences refused"
+
 echo "SMOKE OK"

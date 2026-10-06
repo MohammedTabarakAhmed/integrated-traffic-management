@@ -15,13 +15,32 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param fileNumberPrefix  letters put before the number, 0-6 upper-case letters (default none: numeric, Q-022)
  * @param fileNumberWidth   digits of the sequence number, zero-padded, 6-14; a Luhn check digit follows (Q-022)
  * @param register          the identity register (ICD-01)
+ * @param licensing         the economic licensing authorities (ICD-04)
  */
 @ConfigurationProperties("itms.traffic-file")
 public record TrafficFileProperties(
         @DefaultValue("^[0-9]{6,20}$") String nationalIdPattern,
         @DefaultValue("") String fileNumberPrefix,
         @DefaultValue("10") int fileNumberWidth,
-        Register register) {
+        Register register,
+        Licensing licensing) {
+
+    /**
+     * @param authorities licence source code (reference list of commercial licence sources) → authority address
+     * @param timeout     per lookup, 500 ms to 10 s
+     */
+    public record Licensing(Map<String, URI> authorities, @DefaultValue("3s") Duration timeout) {
+
+        public Licensing {
+            authorities = authorities == null ? Map.of() : Map.copyOf(authorities);
+            if (timeout.compareTo(Duration.ofMillis(500)) < 0 || timeout.compareTo(Duration.ofSeconds(10)) > 0) {
+                throw new IllegalArgumentException("itms.traffic-file.licensing.timeout must be 500ms..10s");
+            }
+            if (authorities.keySet().stream().anyMatch(k -> !k.matches("^[A-Z0-9_]{1,40}$"))) {
+                throw new IllegalArgumentException("itms.traffic-file.licensing.authorities keys must be source codes");
+            }
+        }
+    }
 
     /**
      * @param baseUrl        register (or mock) address
@@ -61,6 +80,9 @@ public record TrafficFileProperties(
         }
         if (register == null) {
             throw new IllegalArgumentException("itms.traffic-file.register is required");
+        }
+        if (licensing == null) {
+            licensing = new Licensing(Map.of(), Duration.ofSeconds(3));
         }
     }
 

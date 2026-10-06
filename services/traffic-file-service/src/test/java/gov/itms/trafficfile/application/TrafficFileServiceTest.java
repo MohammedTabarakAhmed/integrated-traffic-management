@@ -255,7 +255,7 @@ class TrafficFileServiceTest {
         }
     }
 
-    private static final class FakeFiles implements TrafficFileRepository {
+    static final class FakeFiles implements TrafficFileRepository {
         final Map<String, TrafficFile> byNumber = new HashMap<>();
         long sequence;
         boolean failNextInsertAsDuplicate;
@@ -301,6 +301,23 @@ class TrafficFileServiceTest {
                 return Optional.empty();
             }
             return byNumber.values().stream().filter(f -> f.identity().document().equals(document)).findFirst();
+        }
+
+        @Override
+        public Optional<TrafficFile> findByLicence(String source, String licenceNo) {
+            return byNumber.values().stream().filter(f -> f.company() != null
+                    && f.company().licence().equals(new gov.itms.trafficfile.domain.Company.Licence(source, licenceNo)))
+                    .findFirst();
+        }
+
+        @Override
+        public List<TrafficFile> findByNumbers(List<String> fileNumbers) {
+            return fileNumbers.stream().map(byNumber::get).filter(java.util.Objects::nonNull).toList();
+        }
+
+        @Override
+        public void saveRepresentatives(TrafficFile file) {
+            byNumber.put(file.fileNumber(), file);
         }
 
         @Override

@@ -1,0 +1,23 @@
+{
+  "mappings": [
+    {
+      "priority": 1,
+      "request": {
+        "method": "POST",
+        "urlPattern": "/(sms|email|push)/v1/messages",
+        "bodyPatterns": [ { "matchesJsonPath": "$[?(@.to =~ /.*0000$/ || @.to =~ /^fail@.*/)]" } ]
+      },
+      "response": { "status": 503, "jsonBody": { "error": "provider unavailable" } }
+    },
+    {
+      "priority": 5,
+      "request": { "method": "POST", "urlPattern": "/(sms|email|push)/v1/messages" },
+      "response": {
+        "status": 202,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": { "messageId": "{{randomValue type='UUID'}}" },
+        "transformers": ["response-template"]
+      }
+    }
+  ]
+}

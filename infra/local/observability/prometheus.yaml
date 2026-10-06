@@ -17,6 +17,7 @@ scrape_configs:
           - fees-service:8090
           - rules-service:8090
           - workflow-service:8090
+          - notification-service:8090
   # API gateway usage analytics (INT-001, ADR-040): requests, latency and status per route and consumer.
   - job_name: apisix
     metrics_path: /apisix/prometheus/metrics

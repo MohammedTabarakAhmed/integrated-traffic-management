@@ -1,0 +1,560 @@
+openapi: 3.1.0
+info:
+  title: ITMS Notification Service
+  version: 1.0.0
+  description: |
+    Notifications (CC-070..CC-074; ADR-050).
+
+    Templates (CC-070): bilingual content per channel (SMS, EMAIL, PUSH, INBOX) with `{{placeholder}}` fields, a
+    category and a `mandatory` flag for legal notices. Publishing creates a new version.
+
+    Sending: services send a template to a recipient (`POST /v1/notifications`), domain events trigger templates
+    through event subscriptions (CC-071), and expiries registered by the owning services get reminders at configured
+    offsets (default 30, 7 and 1 days before; CC-072). Channels follow the recipient's preferences per category, except
+    for mandatory notices (CC-073); a channel without a contact point is skipped; the inbox is always reachable.
+
+    Delivery status (CC-074): each channel delivery is QUEUED, SENT, DELIVERED or FAILED, with attempts, retries and the
+    gateways' delivery receipts (`POST /v1/delivery-receipts`). Destinations are masked in every response (SEC-014).
+
+    The recipient id is the customer's login subject (Q-066): customers read their own inbox and keep their own contacts
+    and preferences; staff need `notification.read` or `notification.recipient.manage`, and their reads are audited.
+    The channel is the `X-Channel` header. Only GET/POST are used (INT-003).
+servers:
+  - url: /
+security:
+  - bearerAuth: []
+tags:
+  - name: Templates
+  - name: Notifications
+  - name: Recipients
+  - name: Subscriptions
+
+paths:
+  /v1/notification-templates:
+    post:
+      tags: [Templates]
+      operationId: publishNotificationTemplate
+      summary: Publish a new version of a bilingual template (CC-070)
+      description: Refused when a channel's content is missing, too long or has a subject it may not have (422 `TEMPLATE_INVALID`).
+      x-itms-permission: notification.template.manage
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PublishTemplateRequest' }
+      responses:
+        '201':
+          description: Published
+          headers:
+            Location: { schema: { type: string } }
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Template' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [Templates]
+      operationId: listNotificationTemplates
+      summary: The latest version of every template
+      x-itms-permission: notification.template.read
+      x-itms-scope: national
+      responses:
+        '200':
+          description: Templates
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TemplateCollection' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+
+  /v1/notification-templates/{code}:
+    get:
+      tags: [Templates]
+      operationId: getNotificationTemplate
+      summary: The latest version of a template
+      x-itms-permission: notification.template.read
+      x-itms-scope: national
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/Code' }
+      responses:
+        '200':
+          description: Template
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Template' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/notifications:
+    post:
+      tags: [Notifications]
+      operationId: sendNotification
+      summary: Send a template to a recipient on the channels their preferences allow (CC-070, CC-073)
+      description: Refused when the template does not exist (404 `TEMPLATE_NOT_FOUND`) or a placeholder has no value (422 `TEMPLATE_DATA_MISSING`).
+      x-itms-permission: notification.send
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SendRequest' }
+      responses:
+        '201':
+          description: One delivery per channel
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [Notifications]
+      operationId: listNotifications
+      summary: A recipient's deliveries with their status, newest first (CC-074); the read is audited
+      x-itms-permission: notification.read
+      x-itms-scope: national
+      parameters:
+        - name: recipientId
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/RecipientId' }
+        - name: reference
+          in: query
+          schema: { type: string, maxLength: 60 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200':
+          description: Deliveries
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/notifications/{notificationId}:
+    get:
+      tags: [Notifications]
+      operationId: getNotification
+      summary: One delivery (its recipient, or staff with notification.read, audited)
+      x-itms-permission: notification.read
+      x-itms-scope: [own]
+      parameters:
+        - $ref: '#/components/parameters/NotificationId'
+      responses:
+        '200': { $ref: '#/components/responses/Notification' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/inbox:
+    get:
+      tags: [Notifications]
+      operationId: getInbox
+      summary: The caller's in-app inbox, newest first (CC-070)
+      x-itms-permission: authenticated
+      x-itms-scope: [own]
+      parameters:
+        - name: unreadOnly
+          in: query
+          schema: { type: boolean, default: false }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200':
+          description: Inbox messages
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/inbox/{notificationId}/reads:
+    post:
+      tags: [Notifications]
+      operationId: markInboxRead
+      summary: Mark one of the caller's inbox messages read
+      x-itms-permission: authenticated
+      x-itms-scope: [own]
+      parameters:
+        - $ref: '#/components/parameters/NotificationId'
+      responses:
+        '200': { $ref: '#/components/responses/Notification' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/recipients/{recipientId}:
+    post:
+      tags: [Recipients]
+      operationId: saveRecipient
+      summary: Contact points, language and channel preferences per category (CC-073)
+      description: The recipient themself, or staff with notification.recipient.manage. Mandatory notices ignore preferences.
+      x-itms-permission: notification.recipient.manage
+      x-itms-scope: [own]
+      parameters:
+        - $ref: '#/components/parameters/RecipientId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RecipientRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/Recipient' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [Recipients]
+      operationId: getRecipient
+      summary: A recipient's masked contact points and preferences
+      x-itms-permission: notification.recipient.manage
+      x-itms-scope: [own]
+      parameters:
+        - $ref: '#/components/parameters/RecipientId'
+      responses:
+        '200': { $ref: '#/components/responses/Recipient' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+
+  /v1/event-subscriptions:
+    post:
+      tags: [Subscriptions]
+      operationId: saveEventSubscription
+      summary: Which template a domain event type triggers, and who receives it (CC-071)
+      x-itms-permission: notification.subscription.manage
+      x-itms-scope: national
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Subscription' }
+      responses:
+        '200':
+          description: Saved
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Subscription' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [Subscriptions]
+      operationId: listEventSubscriptions
+      summary: All event subscriptions
+      x-itms-permission: notification.subscription.manage
+      x-itms-scope: national
+      responses:
+        '200':
+          description: Subscriptions
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SubscriptionCollection' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+
+  /v1/expiry-watches:
+    post:
+      tags: [Subscriptions]
+      operationId: registerExpiry
+      summary: Register or move an expiry for reminders (CC-072)
+      description: Reminders use template `EXPIRY_REMINDER_<subjectType>` with the values subjectType, subjectId, expiryDate and daysLeft.
+      x-itms-permission: notification.expiry.register
+      x-itms-scope: national
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExpiryWatch' }
+      responses:
+        '200':
+          description: Registered
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExpiryWatch' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/delivery-receipts:
+    post:
+      tags: [Notifications]
+      operationId: deliveryReceipt
+      summary: A gateway reports delivery or failure of a message (CC-074)
+      description: Unknown message id (404 `NOTIFICATION_NOT_FOUND`); not in SENT (409 `NOTIFICATION_NOT_SENT`).
+      x-itms-permission: notification.receipt
+      x-itms-scope: national
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReceiptRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/Notification' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    NotificationId:
+      name: notificationId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    RecipientId:
+      name: recipientId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/RecipientId' }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Chosen by the client, new for every intended action, and sent again unchanged on a retry (API_SPECIFICATION
+        §2, ADR-032). A retry with the same key and request gets the stored response, marked `Idempotent-Replayed`.
+      schema: { type: string, pattern: '^[A-Za-z0-9._:-]{8,128}$' }
+
+  headers:
+    IdempotentReplayed:
+      description: '`true` when the response is the stored response of an earlier request with the same Idempotency-Key'
+      schema: { type: string, enum: ['true'] }
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid bearer token
+    Problem:
+      description: Problem details (RFC 9457, API_SPECIFICATION §3)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Notification:
+      description: Delivery
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Notification' }
+    Recipient:
+      description: Recipient (masked)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Recipient' }
+
+  schemas:
+    Code:
+      type: string
+      pattern: '^[A-Z][A-Z0-9_]{1,59}$'
+    RecipientId:
+      type: string
+      pattern: '^[A-Za-z0-9._:-]{1,100}$'
+    DeliveryChannel:
+      type: string
+      enum: [SMS, EMAIL, PUSH, INBOX]
+    Language:
+      type: string
+      enum: [NL, EN]
+    NullableString:
+      oneOf: [ { type: string }, { type: 'null' } ]
+    NullableTime:
+      oneOf: [ { type: string, format: date-time }, { type: 'null' } ]
+    Content:
+      type: object
+      additionalProperties: false
+      required: [bodyNl, bodyEn]
+      properties:
+        subjectNl: { oneOf: [ { type: string, maxLength: 200 }, { type: 'null' } ] }
+        subjectEn: { oneOf: [ { type: string, maxLength: 200 }, { type: 'null' } ] }
+        bodyNl: { type: string, maxLength: 10000 }
+        bodyEn: { type: string, maxLength: 10000 }
+    Contents:
+      type: object
+      minProperties: 1
+      maxProperties: 4
+      propertyNames: { pattern: '^(SMS|EMAIL|PUSH|INBOX)$' }
+      additionalProperties: { $ref: '#/components/schemas/Content' }
+    PublishTemplateRequest:
+      type: object
+      additionalProperties: false
+      required: [code, category, mandatory, contents, reason]
+      properties:
+        code: { $ref: '#/components/schemas/Code' }
+        category: { $ref: '#/components/schemas/Code' }
+        mandatory: { type: boolean }
+        contents: { $ref: '#/components/schemas/Contents' }
+        reason: { type: string, minLength: 3, maxLength: 500 }
+    Template:
+      type: object
+      additionalProperties: false
+      required: [code, versionNo, category, mandatory, contents, publishedBy, publishedAt]
+      properties:
+        code: { type: string }
+        versionNo: { type: integer, minimum: 1 }
+        category: { type: string }
+        mandatory: { type: boolean }
+        contents: { $ref: '#/components/schemas/Contents' }
+        publishedBy: { type: string }
+        publishedAt: { type: string, format: date-time }
+    TemplateCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Template' } }
+    SendRequest:
+      type: object
+      additionalProperties: false
+      required: [templateCode, recipientId]
+      properties:
+        templateCode: { $ref: '#/components/schemas/Code' }
+        recipientId: { $ref: '#/components/schemas/RecipientId' }
+        data:
+          oneOf:
+            - type: object
+              maxProperties: 50
+              propertyNames: { pattern: '^[a-zA-Z][a-zA-Z0-9]{0,39}$' }
+              additionalProperties: { type: string, maxLength: 500 }
+            - type: 'null'
+        reference: { oneOf: [ { type: string, maxLength: 60 }, { type: 'null' } ] }
+    Notification:
+      type: object
+      additionalProperties: false
+      required: [id, recipientId, templateCode, templateVersion, category, mandatory, channel, destination, language,
+                 body, createdAt, status, attempts]
+      properties:
+        id: { type: string, format: uuid }
+        recipientId: { type: string }
+        templateCode: { type: string }
+        templateVersion: { type: integer }
+        category: { type: string }
+        mandatory: { type: boolean }
+        channel: { $ref: '#/components/schemas/DeliveryChannel' }
+        destination: { type: string, description: masked }
+        language: { $ref: '#/components/schemas/Language' }
+        subject: { $ref: '#/components/schemas/NullableString' }
+        body: { type: string }
+        reference: { $ref: '#/components/schemas/NullableString' }
+        createdAt: { type: string, format: date-time }
+        status: { type: string, enum: [QUEUED, SENT, DELIVERED, FAILED] }
+        attempts: { type: integer, minimum: 0 }
+        nextAttemptAt: { $ref: '#/components/schemas/NullableTime' }
+        lastError: { $ref: '#/components/schemas/NullableString' }
+        sentAt: { $ref: '#/components/schemas/NullableTime' }
+        deliveredAt: { $ref: '#/components/schemas/NullableTime' }
+        readAt: { $ref: '#/components/schemas/NullableTime' }
+    NotificationCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Notification' } }
+    Preferences:
+      type: object
+      maxProperties: 50
+      propertyNames: { pattern: '^[A-Z][A-Z0-9_]{1,59}$' }
+      additionalProperties: { type: array, uniqueItems: true, items: { $ref: '#/components/schemas/DeliveryChannel' } }
+    RecipientRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        language: { oneOf: [ { $ref: '#/components/schemas/Language' }, { type: 'null' } ] }
+        phone: { oneOf: [ { type: string, pattern: '^\+[1-9][0-9]{6,14}$' }, { type: 'null' } ] }
+        email: { oneOf: [ { type: string, format: email, maxLength: 254 }, { type: 'null' } ] }
+        pushToken: { oneOf: [ { type: string, maxLength: 500 }, { type: 'null' } ] }
+        preferences: { oneOf: [ { $ref: '#/components/schemas/Preferences' }, { type: 'null' } ] }
+    Recipient:
+      type: object
+      additionalProperties: false
+      required: [id, language, push, preferences]
+      properties:
+        id: { type: string }
+        language: { $ref: '#/components/schemas/Language' }
+        phone: { $ref: '#/components/schemas/NullableString' }
+        email: { $ref: '#/components/schemas/NullableString' }
+        push: { type: boolean }
+        preferences: { $ref: '#/components/schemas/Preferences' }
+    Subscription:
+      type: object
+      additionalProperties: false
+      required: [eventType, templateCode, recipientField, active]
+      properties:
+        eventType: { type: string, pattern: '^itms\.[a-z0-9-]+\.[a-z0-9-]+$' }
+        templateCode: { $ref: '#/components/schemas/Code' }
+        recipientField: { type: string, pattern: '^[a-zA-Z][a-zA-Z0-9]{0,39}$' }
+        referenceField: { oneOf: [ { type: string, pattern: '^[a-zA-Z][a-zA-Z0-9]{0,39}$' }, { type: 'null' } ] }
+        active: { type: boolean }
+    SubscriptionCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Subscription' } }
+    ExpiryWatch:
+      type: object
+      additionalProperties: false
+      required: [subjectType, subjectId, recipientId, expiryDate]
+      properties:
+        subjectType: { type: string, enum: [LICENCE, REGISTRATION, PERMIT, INSURANCE] }
+        subjectId: { type: string, pattern: '^[A-Za-z0-9-]{1,60}$' }
+        recipientId: { $ref: '#/components/schemas/RecipientId' }
+        expiryDate: { type: string, format: date }
+        reference: { oneOf: [ { type: string, maxLength: 60 }, { type: 'null' } ] }
+    ReceiptRequest:
+      type: object
+      additionalProperties: false
+      required: [messageId, delivered]
+      properties:
+        messageId: { type: string, maxLength: 200 }
+        delivered: { type: boolean }
+        error: { oneOf: [ { type: string, maxLength: 500 }, { type: 'null' } ] }
+        at: { oneOf: [ { type: string, format: date-time }, { type: 'null' } ] }
+    Problem:
+      type: object
+      required: [status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        code: { type: string }
+        detail: { type: string }
+        instance: { type: string }
+        correlationId: { type: string }
+        requirementRefs: { type: array, items: { type: string } }
+        errors: { type: array, items: { type: object } }

@@ -42,6 +42,10 @@ upstreams:
     type: roundrobin
     nodes:
       "workflow-service:8080": 1
+  - id: notification-service
+    type: roundrobin
+    nodes:
+      "notification-service:8080": 1
 
 plugin_configs:
   - id: protected-api
@@ -167,4 +171,19 @@ routes:
       - /v1/work-items
       - /v1/work-items/*
       - /v1/queue-memberships/*
+  - id: notification-service
+    name: notification-service
+    upstream_id: notification-service
+    plugin_config_id: protected-api
+    uris:
+      - /v1/notification-templates
+      - /v1/notification-templates/*
+      - /v1/notifications
+      - /v1/notifications/*
+      - /v1/inbox
+      - /v1/inbox/*
+      - /v1/recipients/*
+      - /v1/event-subscriptions
+      - /v1/expiry-watches
+      - /v1/delivery-receipts
 #END

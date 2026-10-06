@@ -1,0 +1,118 @@
+package gov.itms.notification.infrastructure;
+
+import gov.itms.notification.application.ChannelGateway;
+import gov.itms.notification.application.NotificationService;
+import gov.itms.notification.domain.DeliveryChannel;
+import gov.itms.platform.audit.AuditRecorder;
+import gov.itms.platform.events.ProcessedEvents;
+import java.net.http.HttpClient;
+import java.time.Clock;
+import java.util.EnumMap;
+import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.web.client.RestClient;
+import tools.jackson.databind.ObjectMapper;
+
+/** Wires notifications: repository, gateways, the dispatcher and reminder jobs, and the event consumer. */
+@Configuration(proxyBeanMethods = false)
+@EnableConfigurationProperties(NotificationProperties.class)
+public class NotificationServiceConfiguration {
+
+    @Bean
+    ChannelGateway channelGateway(RestClient.Builder builder, NotificationProperties properties) {
+        Map<DeliveryChannel, RestClient> clients = new EnumMap<>(DeliveryChannel.class);
+        properties.gateways().forEach((channel, url) -> {
+            HttpClient http = HttpClient.newBuilder().connectTimeout(properties.gatewayTimeout()).build();
+            JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(http);
+            factory.setReadTimeout(properties.gatewayTimeout());
+            clients.put(DeliveryChannel.valueOf(channel),
+                    builder.clone().baseUrl(url.toString()).requestFactory(factory).build());
+        });
+        return new HttpChannelGateway(clients);
+    }
+
+    @Bean
+    NotificationService notificationService(JdbcClient jdbc, ObjectMapper json, ChannelGateway gateway,
+                                            AuditRecorder audit, ProcessedEvents processed,
+                                            NotificationProperties properties, Clock clock) {
+        return new NotificationService(new JdbcNotificationRepository(jdbc, json), gateway, audit, processed,
+                new NotificationService.Settings(properties.maxAttempts(), properties.retryDelay(),
+                        properties.reminderOffsetDays()), clock);
+    }
+
+    /** Sends queued notifications and the daily expiry reminders (CC-072, CC-074); safe on every instance. */
+    public static class NotificationJobs {
+
+        private static final Logger LOG = LoggerFactory.getLogger(NotificationJobs.class);
+        private final NotificationService notifications;
+        private final NotificationProperties properties;
+
+        public NotificationJobs(NotificationService notifications, NotificationProperties properties) {
+            this.notifications = notifications;
+            this.properties = properties;
+        }
+
+        @Scheduled(initialDelayString = "${itms.notifications.dispatch-interval:5s}",
+                fixedDelayString = "${itms.notifications.dispatch-interval:5s}")
+        public void dispatch() {
+            try {
+                for (int batch = 0; batch < 20; batch++) {
+                    if (notifications.dispatch(properties.batchSize()) < properties.batchSize()) {
+                        break;
+                    }
+                }
+            } catch (RuntimeException e) {
+                LOG.error("Notification dispatch failed; it is retried on the next run", e);
+            }
+        }
+
+        @Scheduled(cron = "${itms.notifications.reminder-cron:0 0 6 * * *}",
+                zone = "${itms.notifications.reminder-zone:UTC}")
+        public void reminders() {
+            try {
+                int total = 0;
+                for (int batch = 0; batch < 1000; batch++) {
+                    int sent = notifications.sendDueReminders(properties.batchSize());
+                    total += sent;
+                    if (sent == 0) {
+                        break;
+                    }
+                }
+                LOG.info("Expiry reminders: {} notifications queued", total);
+            } catch (RuntimeException e) {
+                LOG.error("Expiry reminder run failed; it runs again on the next schedule", e);
+            }
+        }
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    @EnableScheduling
+    @ConditionalOnProperty(name = "itms.notifications.jobs.enabled", havingValue = "true", matchIfMissing = true)
+    static class JobConfiguration {
+
+        @Bean
+        NotificationJobs notificationJobs(NotificationService notifications, NotificationProperties properties) {
+            return new NotificationJobs(notifications, properties);
+        }
+    }
+
+    /** Event-driven notifications (CC-071): off unless the broker is available. */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnProperty(name = "itms.notifications.consumer.enabled", havingValue = "true")
+    static class ConsumerConfiguration {
+
+        @Bean
+        DomainEventListener domainEventListener(NotificationService notifications, ObjectMapper json) {
+            return new DomainEventListener(notifications, json);
+        }
+    }
+}

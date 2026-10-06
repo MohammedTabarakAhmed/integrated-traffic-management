@@ -110,3 +110,14 @@ template {
   destination = "/run/db-credentials/workflow-service/password"
   perms       = "0444"
 }
+
+template {
+  contents    = "{{ with secret \"database/creds/notification-service\" }}{{ .Data.username }}{{ end }}"
+  destination = "/run/db-credentials/notification-service/username"
+  perms       = "0444"
+}
+template {
+  contents    = "{{ with secret \"database/creds/notification-service\" }}{{ .Data.password }}{{ end }}"
+  destination = "/run/db-credentials/notification-service/password"
+  perms       = "0444"
+}

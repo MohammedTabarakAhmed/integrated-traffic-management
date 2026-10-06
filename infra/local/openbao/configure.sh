@@ -27,6 +27,7 @@ configure traffic-file-service traffic-file-postgres trafficfile "$TF_DB_USER" "
 configure fees-service fees-postgres fees "$FEES_DB_USER" "$FEES_DB_PASSWORD"
 configure rules-service rules-postgres rules "$RULES_DB_USER" "$RULES_DB_PASSWORD"
 configure workflow-service workflow-postgres workflow "$WORKFLOW_DB_USER" "$WORKFLOW_DB_PASSWORD"
+configure notification-service notification-postgres notification "$NOTIF_DB_USER" "$NOTIF_DB_PASSWORD"
 
 # The agent may only read database logins.
 printf 'path "database/creds/*" {\n  capabilities = ["read"]\n}\n' | bao policy write itms-db-agent - >/dev/null

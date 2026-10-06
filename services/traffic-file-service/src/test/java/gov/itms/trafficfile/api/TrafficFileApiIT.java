@@ -631,4 +631,49 @@ class TrafficFileApiIT {
         assertThatThrownBy(() -> db.sql("delete from file_merge").update())
                 .isInstanceOf(DataAccessException.class).hasMessageContaining("append-only");
     }
+
+    // ------------------------------------------------------------------ register changes (DL-010)
+
+    private static RequestPostProcessor registerFeed() {
+        return user("svc-register", "register-adapter", "IDENTITY_REGISTER_FEED", "trafficfile.register.notify");
+    }
+
+    private MvcResult notifyRegister(String eventId, String nationalId, String type) throws Exception {
+        return call(post("/v1/identity-register-notifications"), Request.Method.POST,
+                "/v1/identity-register-notifications",
+                Map.of("eventId", eventId, "nationalIdNo", nationalId, "changeType", type), registerFeed(), "PARTNER",
+                null);
+    }
+
+    @Test
+    @Tag("DL-010")
+    @DisplayName("register notices update the locked identity once each; a death makes the file DECEASED")
+    void registerChanges() throws Exception {
+        String mover = "784196512345674";
+        REGISTER.override(mover, "Lena", "Mover", "RESIDENT", "ALIVE");
+        String number = fileOf(mover);
+
+        REGISTER.override(mover, "Lena", "Mover-Changed", "RESIDENT", "ALIVE");
+        MvcResult applied = notifyRegister("ev-name-" + number, mover, "NAME");
+        assertThat(applied.getResponse().getStatus()).as(applied.getResponse().getContentAsString()).isEqualTo(200);
+        assertThat(body(applied).get("outcome").asString()).isEqualTo("APPLIED");
+        assertThat(body(getAs("/v1/traffic-files/" + number, reader())).get("identity").get("name").get("familyEn")
+                .asString()).isEqualTo("Mover-Changed");
+        assertThat(body(notifyRegister("ev-name-" + number, mover, "NAME")).get("outcome").asString())
+                .isEqualTo("DUPLICATE");
+
+        REGISTER.override(mover, "Lena", "Mover-Changed", "RESIDENT", "DECEASED");
+        assertThat(body(notifyRegister("ev-death-" + number, mover, "DEATH")).get("outcome").asString())
+                .isEqualTo("APPLIED");
+        assertThat(body(getAs("/v1/traffic-files/" + number, reader())).get("status").asString())
+                .isEqualTo("DECEASED");
+        assertThat(db.sql("select count(*) from event_outbox where event_type = 'itms.traffic-file.deceased' "
+                + "and subject = :n").param("n", number).query(Long.class).single()).isEqualTo(1);
+        assertThat(body(notifyRegister("ev-none-" + number, "123456780", "NAME")).get("outcome").asString())
+                .isEqualTo("NO_FILE");
+        assertThat(call(post("/v1/identity-register-notifications"), Request.Method.POST,
+                "/v1/identity-register-notifications",
+                Map.of("eventId", "ev-x", "nationalIdNo", mover, "changeType", "NAME"), officer(), "PARTNER", null)
+                .getResponse().getStatus()).isEqualTo(403);
+    }
 }

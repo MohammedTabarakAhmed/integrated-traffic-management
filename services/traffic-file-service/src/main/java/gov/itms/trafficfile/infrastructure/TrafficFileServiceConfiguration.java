@@ -2,11 +2,13 @@ package gov.itms.trafficfile.infrastructure;
 
 import gov.itms.platform.audit.AuditRecorder;
 import gov.itms.platform.events.DomainEventRecorder;
+import gov.itms.platform.events.ProcessedEvents;
 import gov.itms.trafficfile.application.BanListService;
 import gov.itms.trafficfile.application.CommercialRegister;
 import gov.itms.trafficfile.application.CompanyFileService;
 import gov.itms.trafficfile.application.DuplicateMergeService;
 import gov.itms.trafficfile.application.IdentityRegister;
+import gov.itms.trafficfile.application.RegisterSyncService;
 import gov.itms.trafficfile.application.TrafficFileService;
 import java.net.http.HttpClient;
 import java.time.Clock;
@@ -65,6 +67,15 @@ public class TrafficFileServiceConfiguration {
                                                 DomainEventRecorder events, Clock clock,
                                                 TrafficFileProperties properties) {
         return new DuplicateMergeService(files, audit, events, clock, properties.duplicateNameThreshold());
+    }
+
+    @Bean
+    RegisterSyncService registerSyncService(JdbcTrafficFileRepository files, IdentityRegister register,
+                                            ProcessedEvents processed, AuditRecorder audit,
+                                            DomainEventRecorder events, Clock clock,
+                                            TrafficFileProperties properties) {
+        return new RegisterSyncService(files, register, processed, audit, events, clock,
+                properties.nationalIdRegex());
     }
 
     @Bean

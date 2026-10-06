@@ -45,9 +45,9 @@ public final class TrafficFile {
     private final Kind kind;
     private final Classification classification;
     private final String regionOpened;
-    private final Identity identity;
+    private Identity identity;
     private final IdentitySource identitySource;
-    private final Instant registerSyncedAt;
+    private Instant registerSyncedAt;
     private final Change opened;
     private Status status;
     private Profile profile;
@@ -165,6 +165,30 @@ public final class TrafficFile {
         this.profile = Objects.requireNonNull(newProfile);
         this.lastChange = new Change(actor, channel, now);
         this.version++;
+    }
+
+    /**
+     * Applies the identity register's current record (DL-010): names, nationality, birth date, gender and residency
+     * are replaced and the sync time moves; a reported death makes the file DECEASED. Only for an active individual's
+     * file opened from the register with the same national identity number.
+     *
+     * @return true if anything changed (a sync with identical data still records the sync time)
+     */
+    public boolean syncFromRegister(Identity current, boolean deceased, Actor actor, Channel channel, Instant now) {
+        requireKind(Kind.INDIVIDUAL);
+        requireActive();
+        if (identitySource != IdentitySource.REGISTER || !identity.document().equals(current.document())) {
+            throw new IllegalArgumentException("register data for another person");
+        }
+        boolean changed = !identity.equals(current) || deceased;
+        this.identity = current;
+        this.registerSyncedAt = now;
+        if (deceased) {
+            this.status = Status.DECEASED;
+        }
+        this.lastChange = new Change(actor, channel, now);
+        this.version++;
+        return changed;
     }
 
     /** Replaces the company's signatories and fleet managers (DL-004); the licence stays as the authority gave it. */

@@ -47,7 +47,10 @@ public interface TrafficFileRepository {
     /** Records a merge (append-only). */
     void insertMerge(DuplicateMergeService.Merge merge, UUID mergedFileId, UUID survivingFileId);
 
-        /** Saves the profile and the new version; the stored version must be {@code version - 1}. */
+        /** Saves a register sync: identity fields, sync time, status and version (DL-010). */
+    void saveRegisterSync(TrafficFile file);
+
+    /** Saves the profile and the new version; the stored version must be {@code version - 1}. */
     void saveProfile(TrafficFile file);
 
     /** Every version of the file, oldest first. */

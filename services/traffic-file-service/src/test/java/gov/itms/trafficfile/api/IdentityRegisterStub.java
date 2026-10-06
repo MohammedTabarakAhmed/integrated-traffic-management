@@ -27,6 +27,8 @@ final class IdentityRegisterStub {
     static final String LICENCE_FAILING = "CN-9999999";
 
     private final HttpServer server;
+    /** Register records that replace the built-in ones, so a test can change a person (DL-010). */
+    private final java.util.Map<String, String> overrides = new java.util.concurrent.ConcurrentHashMap<>();
 
     IdentityRegisterStub() {
         try {
@@ -43,12 +45,23 @@ final class IdentityRegisterStub {
         return "http://127.0.0.1:" + server.getAddress().getPort();
     }
 
+    /** From now on the register answers this record for the person. */
+    void override(String id, String givenEn, String familyEn, String residency, String lifeStatus) {
+        overrides.put(id, person(id, "اسم", "عائلة", givenEn, familyEn, "PHL", residency, "2029-01-31", "1988-09-03",
+                "F", lifeStatus));
+    }
+
     void stop() {
         server.stop(0);
     }
 
     private void lookup(HttpExchange exchange) throws IOException {
         String id = exchange.getRequestURI().getPath().substring("/v1/persons/".length());
+        String override = overrides.get(id);
+        if (override != null) {
+            respond(exchange, 200, override);
+            return;
+        }
         switch (id) {
             case CITIZEN -> respond(exchange, 200, person(CITIZEN, "أحمد", "المنصوري", "Ahmed", "Al Mansoori", "ARE",
                     "CITIZEN", null, "1990-04-12", "M", "ALIVE"));

@@ -123,4 +123,5 @@ routes:
       - /v1/traffic-files/*
       - /v1/ban-entries
       - /v1/ban-entries/*
+      - /v1/identity-register-notifications
 #END

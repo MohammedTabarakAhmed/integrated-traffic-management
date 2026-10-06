@@ -42,8 +42,11 @@ info:
     `/history`. Opening and profile changes publish `itms.traffic-file.opened` / `itms.traffic-file.profile-updated`
     events without personal data (INT-005).
 
-    Not yet in this version: photo (DL-006), eye and medical results (DL-007, DL-008),
-    register change events (DL-010), the 360° view (DL-011), rules per
+    Register changes (DL-010; ADR-045): the identity register's adapter posts `IdentityChanged` notices to
+    `/v1/identity-register-notifications` (`trafficfile.register.notify`). Each `eventId` is handled once; the service
+    re-reads the person from the register and updates the locked identity fields; a death makes the file DECEASED.
+
+    Not yet in this version: photo (DL-006), eye and medical results (DL-007, DL-008), the 360° view (DL-011), rules per
     category (DL-012). Codes are checked for their format only until the reference-data
     client exists (Q-044, Q-057).
 
@@ -324,6 +327,35 @@ paths:
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/identity-register-notifications:
+    post:
+      tags: [Traffic files]
+      operationId: receiveIdentityRegisterNotification
+      summary: An identity register change notice (DL-010, ICD-01 IdentityChanged)
+      description: |
+        Answers 200 with the outcome in every handled case: APPLIED, UNCHANGED, DUPLICATE (this `eventId` was handled
+        before), NO_FILE, FILE_NOT_ACTIVE (merged, closed, deceased or a passport file), NOT_IN_REGISTER. If the
+        register cannot be read, 503 `REGISTER_UNAVAILABLE` and nothing is recorded, so the register sends it again.
+        Idempotent by `eventId`, so no Idempotency-Key header.
+      x-itms-permission: trafficfile.register.notify
+      x-itms-scope: national
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterNotification' }
+      responses:
+        '200':
+          description: Handled
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RegisterNotificationResult' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
 
   /v1/ban-entries:
     post:
@@ -608,6 +640,22 @@ components:
         licenceExpiry: { type: string, format: date }
         signatories: { type: array, items: { $ref: '#/components/schemas/FileNumber' } }
         fleetManagers: { type: array, items: { $ref: '#/components/schemas/FileNumber' } }
+    RegisterNotification:
+      type: object
+      additionalProperties: false
+      required: [eventId, nationalIdNo, changeType]
+      properties:
+        eventId: { type: string, pattern: '^[A-Za-z0-9._:-]{1,100}$' }
+        nationalIdNo: { type: string, maxLength: 40 }
+        changeType: { type: string, enum: [RESIDENCY, NAME, NATIONALITY, DEATH] }
+        effectiveDate: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
+    RegisterNotificationResult:
+      type: object
+      additionalProperties: false
+      required: [outcome]
+      properties:
+        outcome: { type: string, enum: [APPLIED, UNCHANGED, DUPLICATE, NO_FILE, FILE_NOT_ACTIVE, NOT_IN_REGISTER] }
+        fileNumber: { oneOf: [ { type: string }, { type: 'null' } ] }
     MergeRequest:
       type: object
       additionalProperties: false

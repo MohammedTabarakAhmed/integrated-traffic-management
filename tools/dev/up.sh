@@ -139,6 +139,9 @@ grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker TRAFFIC_FILE_SENSITIVE_READ
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker BAN_LIST_OFFICER
 # Merging duplicate traffic files (DL-009; ADR-044): dev.maker is the supervisor.
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker TRAFFIC_FILE_SUPERVISOR
+# Identity register notifications (DL-010): locally dev.maker stands in for the register adapter's account,
+# which gets its own Keycloak client when the real adapter is built (INT-004).
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker IDENTITY_REGISTER_FEED
 # dev.checker is also the development access reviewer ("manager", SEC-007, ADR-026); dev.iam-admin, the IT
 # administrator, opens and closes reviews.
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker ACCESS_REVIEWER

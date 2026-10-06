@@ -330,6 +330,11 @@ class TrafficFileServiceTest {
         }
 
         @Override
+        public void saveRegisterSync(TrafficFile file) {
+            byNumber.put(file.fileNumber(), file);
+        }
+
+        @Override
         public void saveMerge(TrafficFile merged) {
             byNumber.put(merged.fileNumber(), merged);
         }

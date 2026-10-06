@@ -523,4 +523,16 @@ status=$(curl -s -H "Authorization: Bearer $TF_CHECKER" "$TF/v1/traffic-files/$s
 [[ "$status" == MERGED ]] || { echo "FAIL: merged file status $status"; exit 1; }
 echo "   $second merged into $first"
 
+echo "27. Register notices (DL-010): re-read from the register, handled once per event id"
+ev="smoke-$(date +%s)"
+notice() { # event-id national-id
+  curl -s -H "Authorization: Bearer $TF_MAKER" -H 'Content-Type: application/json' -H 'X-Channel: PARTNER' \
+    "$TF/v1/identity-register-notifications" -d "{\"eventId\":\"$1\",\"nationalIdNo\":\"$2\",\"changeType\":\"RESIDENCY\"}"
+}
+first_outcome=$(notice "$ev" 784199012345671 | json_field "['outcome']")
+[[ "$first_outcome" =~ ^(APPLIED|UNCHANGED)$ ]] || { echo "FAIL: first notice outcome $first_outcome"; exit 1; }
+[[ "$(notice "$ev" 784199012345671 | json_field "['outcome']")" == DUPLICATE ]] || { echo "FAIL: repeated notice not DUPLICATE"; exit 1; }
+[[ "$(notice "$ev-none" 123456780 | json_field "['outcome']")" == NO_FILE ]] || { echo "FAIL: notice without a file"; exit 1; }
+echo "   citizen notice $first_outcome, repeat DUPLICATE, unknown person NO_FILE"
+
 echo "SMOKE OK"

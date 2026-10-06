@@ -243,6 +243,43 @@ class JdbcTrafficFileRepository implements TrafficFileRepository {
     }
 
     @Override
+    public void saveRegisterSync(TrafficFile file) {
+        Identity identity = file.identity();
+        PersonName name = identity.name();
+        TrafficFile.Change change = file.lastChange();
+        int updated = jdbc.sql("""
+                        update traffic_file set given_nl = :givenNl, family_nl = :familyNl, given_en = :givenEn,
+                            family_en = :familyEn, nationality = :nationality, birth_date = :birthDate,
+                            gender = :gender, residency_status = :residencyStatus,
+                            residency_expiry = :residencyExpiry, register_synced_at = :syncedAt, status = :status,
+                            changed_at = :at, changed_by = :by, changed_by_username = :byName,
+                            changed_channel = :channel, version = :version
+                        where id = :id and version = :previous""")
+                .param("givenNl", name.givenNl())
+                .param("familyNl", name.familyNl())
+                .param("givenEn", name.givenEn())
+                .param("familyEn", name.familyEn())
+                .param("nationality", identity.nationality())
+                .param("birthDate", Date.valueOf(identity.birthDate()))
+                .param("gender", identity.gender())
+                .param("residencyStatus", identity.residencyStatus())
+                .param("residencyExpiry", date(identity.residencyExpiry()))
+                .param("syncedAt", timestamp(file.registerSyncedAt()))
+                .param("status", file.status().name())
+                .param("at", Timestamp.from(change.at()))
+                .param("by", change.actor().id())
+                .param("byName", change.actor().username())
+                .param("channel", change.channel().name())
+                .param("version", file.version())
+                .param("previous", file.version() - 1)
+                .param("id", file.id())
+                .update();
+        if (updated != 1) {
+            throw new OptimisticLockingFailureException("traffic file " + file.fileNumber() + " changed concurrently");
+        }
+    }
+
+    @Override
     public void saveMerge(TrafficFile merged) {
         TrafficFile.Change change = merged.lastChange();
         int updated = jdbc.sql("""

@@ -3,6 +3,7 @@
 #   tools/dev/up.sh          build + start PostgreSQL (one per service), Keycloak (realm "itms"), iam-service,
 #                            reference-data-service, transaction-service and hold-eligibility-service, the
 #                            observability stack (OpenTelemetry collector, Tempo, Loki, Prometheus, Grafana; NFR-040),
+#                            OpenBao issuing each service a short-lived, rotated database login (SEC-004, ADR-039),
 #                            then grant the development roles through iam-service
 #   tools/dev/up.sh down     stop the stack (data volumes kept)
 # First run generates infra/local/.env with random development secrets (git-ignored; SEC-004). Missing keys are
@@ -35,6 +36,7 @@ wanted = {
     "DEV_DIRECTORY_FEED_SECRET": lambda: secrets.token_urlsafe(32),
     "DEV_TRANSACTION_SERVICE_SECRET": lambda: secrets.token_urlsafe(32),
     "GRAFANA_ADMIN_PASSWORD": lambda: secrets.token_urlsafe(16),
+    "BAO_ROOT_TOKEN": lambda: secrets.token_urlsafe(24),
 }
 present = set()
 if os.path.exists(path):
@@ -50,6 +52,7 @@ with open(path, "a", encoding="utf-8") as f:
 PYEOF
 set -a; source "$ENV_FILE"; set +a
 
+export BAO_AGENT_TOKEN=${BAO_AGENT_TOKEN:-not-yet-issued} # minted below; compose needs a value to parse the file
 if [[ "${1:-}" == "down" ]]; then
   "${COMPOSE[@]}" down
   exit 0
@@ -57,6 +60,29 @@ fi
 
 echo "== Building service jars"
 mvn -B -ntp -q package -DskipTests -pl services/iam-service,services/reference-data-service,services/transaction-service,services/hold-eligibility-service -am
+
+echo "== Starting the databases and OpenBao"
+"${COMPOSE[@]}" up -d --wait postgres iam-postgres transaction-postgres hold-postgres openbao
+
+echo "== Database owner role itms_owner (ADR-039)"
+for db in "postgres refdata $REFDATA_DB_USER" "iam-postgres iam $IAM_DB_USER" \
+          "transaction-postgres transaction $TXN_DB_USER" "hold-postgres hold $HOLD_DB_USER"; do
+  set -- $db
+  "${COMPOSE[@]}" exec -T "$1" psql -q -v ON_ERROR_STOP=1 -U "$3" -d "$2" < infra/local/db/itms-owner.sql
+  echo "   $2: itms_owner owns the schema"
+done
+
+echo "== Configuring OpenBao: database logins per service, agent token"
+BAO_AGENT_TOKEN=$({ printf "export BAO_TOKEN='%s' ITMS_DB_LOGIN_TTL='%s' ITMS_DB_LOGIN_MAX_TTL='%s'\n" \
+      "$BAO_ROOT_TOKEN" "${ITMS_DB_LOGIN_TTL:-1h}" "${ITMS_DB_LOGIN_MAX_TTL:-24h}"
+    printf "export IAM_DB_USER='%s' IAM_DB_PASSWORD='%s' REFDATA_DB_USER='%s' REFDATA_DB_PASSWORD='%s'\n" \
+      "$IAM_DB_USER" "$IAM_DB_PASSWORD" "$REFDATA_DB_USER" "$REFDATA_DB_PASSWORD"
+    printf "export TXN_DB_USER='%s' TXN_DB_PASSWORD='%s' HOLD_DB_USER='%s' HOLD_DB_PASSWORD='%s'\n" \
+      "$TXN_DB_USER" "$TXN_DB_PASSWORD" "$HOLD_DB_USER" "$HOLD_DB_PASSWORD"
+    cat infra/local/openbao/configure.sh
+  } | "${COMPOSE[@]}" exec -T openbao sh -s | tail -n 1)
+export BAO_AGENT_TOKEN
+"${COMPOSE[@]}" up -d --force-recreate --wait bao-agent
 
 echo "== Starting stack (this waits until every container is healthy)"
 "${COMPOSE[@]}" up -d --build --wait

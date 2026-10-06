@@ -10,7 +10,9 @@
 # submission with the customer's reasons and next steps, sensitive ones masked, until lifted (CC-032) -> a supervisor
 # overrides a hold for one transaction, which then goes through (CC-034) -> Prometheus scrapes every service, a
 # submission's trace crosses transaction-service and hold-eligibility-service, and every service's logs reach Loki
-# (NFR-040) -> no ITMS container holds a password or secret in its environment; they read secret files (SEC-004).
+# (NFR-040) -> no ITMS container holds a password or secret in its environment; they read secret files (SEC-004)
+# -> services use short-lived OpenBao logins, not the database superuser; a rotated login is picked up without a
+# restart and the old one can be dropped (SEC-004, ADR-039).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 set -a; source infra/local/.env; set +a
@@ -349,15 +351,43 @@ echo "   trace $trace_id: $services; logs from $logged"
 
 echo "20. Secrets (SEC-004): no service or database container has a password or secret in its environment"
 for c in iam-service reference-data-service transaction-service hold-eligibility-service postgres iam-postgres \
-         transaction-postgres hold-postgres grafana; do
+         transaction-postgres hold-postgres grafana bao-agent; do
   id=$(docker compose -f infra/local/compose.yaml --env-file infra/local/.env ps -q "$c")
   leaked=$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$id" \
     | grep -iE '^[^=]*(PASSWORD|SECRET)[^=]*=' | grep -vE '^[^=]*_FILE=' | cut -d= -f1 || true)
   [[ -z "$leaked" ]] || { echo "FAIL: $c has secrets in its environment: $leaked"; exit 1; }
 done
-files=$(MSYS_NO_PATHCONV=1 docker compose -f infra/local/compose.yaml --env-file infra/local/.env exec -T transaction-service ls /run/secrets)
-[[ "$files" == *spring.datasource.password* && "$files" == *itms.clients.eligibility.client-secret* ]] \
-  || { echo "FAIL: transaction-service secret files missing: $files"; exit 1; }
-echo "   9 containers checked; services read their secrets from /run/secrets"
+# The client secret is a compose secret; the database login comes from OpenBao (spring/datasource/, ADR-039).
+MSYS_NO_PATHCONV=1 docker compose -f infra/local/compose.yaml --env-file infra/local/.env exec -T transaction-service \
+  sh -c 'test -s /run/secrets/itms.clients.eligibility.client-secret && test -s /run/secrets/spring/datasource/username \
+         && test -s /run/secrets/spring/datasource/password' || { echo "FAIL: transaction-service secret files missing"; exit 1; }
+echo "   10 containers checked; services read their secrets from /run/secrets"
+
+echo "21. Rotated database logins (SEC-004, ADR-039): short-lived, not superuser; a new login is used without a restart"
+DC=(docker compose -f infra/local/compose.yaml --env-file infra/local/.env)
+iam_sql() { "${DC[@]}" exec -T iam-postgres psql -qtA -U "$IAM_DB_USER" -d iam -c "$1"; }
+service_logins() { iam_sql "select string_agg(distinct usename, ',') from pg_stat_activity where usename like 'v-%'"; }
+svc_users=$(iam_sql "select count(*) from pg_stat_activity where usename = '$IAM_DB_USER' and backend_type = 'client backend' and pid <> pg_backend_pid() and application_name <> 'vault'") # OpenBao's own admin session is expected
+[[ "$svc_users" == 0 ]] || { echo "FAIL: $svc_users connections still use the superuser $IAM_DB_USER"; exit 1; }
+old=$(service_logins)
+[[ -n "$old" && "$old" != *,* ]] || { echo "FAIL: expected one OpenBao login on iam, got '$old'"; exit 1; }
+flags=$(iam_sql "select rolsuper::text || ',' || pg_has_role('$old', 'itms_owner', 'member')::text || ',' || (rolvaliduntil is not null)::text from pg_roles where rolname = '$old'")
+[[ "$flags" == "false,true,true" ]] || { echo "FAIL: login $old should be non-superuser, itms_owner member, expiring; got $flags"; exit 1; }
+owner=$(iam_sql "select pg_get_userbyid(relowner) from pg_class where relname = 'flyway_schema_history'")
+[[ "$owner" == itms_owner ]] || { echo "FAIL: flyway_schema_history is owned by $owner"; exit 1; }
+"${DC[@]}" restart bao-agent >/dev/null # a fresh agent issues new logins, as on lease renewal at the maximum TTL
+new="$old"
+for _ in $(seq 1 45); do
+  new=$(service_logins)
+  [[ "$new" != *"$old"* && -n "$new" ]] && break
+  sleep 2
+done
+[[ "$new" != *"$old"* && -n "$new" ]] || { echo "FAIL: iam-service still connects as $old (now: $new)"; exit 1; }
+# The old login ends, as when its lease expires: no session of it is left to cut, and dropping it changes nothing.
+iam_sql "select pg_terminate_backend(pid) from pg_stat_activity where usename = '$old'" >/dev/null
+iam_sql "drop role if exists \"$old\"" >/dev/null
+status=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $MAKER" "$IAM/v1/me/assignments")
+[[ "$status" == 200 ]] || { echo "FAIL: iam-service after rotation returned $status"; exit 1; }
+echo "   iam-service: $old -> $new (no restart); old login dropped; API still answers"
 
 echo "SMOKE OK"

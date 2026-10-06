@@ -100,18 +100,25 @@ services:
     environment:
       <<: *itms-observability
       IAM_DB_URL: jdbc:postgresql://iam-postgres:5432/iam
-      IAM_DB_USER: ${IAM_DB_USER}
+      # Short-lived login from OpenBao (ADR-039), files under /run/secrets/spring/datasource; owner role on connect.
+      SPRING_DATASOURCE_HIKARI_CONNECTIONINITSQL: SET ROLE itms_owner
       ITMS_OIDC_ISSUER: http://localhost:8180/realms/itms
       ITMS_OIDC_JWKS_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/certs
       # First administrator of this environment (fixed id of dev.iam-admin in the local realm).
       ITMS_IAM_BOOTSTRAP_ADMIN_SUBJECT: 7d0c1a3e-5b2f-4c1d-9e8a-000000000001
       ITMS_IAM_BOOTSTRAP_ADMIN_USERNAME: dev.iam-admin
-    secrets:
-      - source: iam_db_password
-        target: spring.datasource.password
+    volumes:
+      - type: volume
+        source: db-credentials
+        target: /run/secrets/spring/datasource
+        read_only: true
+        volume:
+          subpath: iam-service
     ports:
       - "127.0.0.1:8082:8080"
     depends_on:
+      bao-agent:
+        condition: service_healthy
       otel-collector:
         condition: service_started
       iam-postgres:
@@ -129,17 +136,24 @@ services:
     environment:
       <<: *itms-observability
       REFDATA_DB_URL: jdbc:postgresql://postgres:5432/refdata
-      REFDATA_DB_USER: ${REFDATA_DB_USER}
+      # Short-lived login from OpenBao (ADR-039), files under /run/secrets/spring/datasource; owner role on connect.
+      SPRING_DATASOURCE_HIKARI_CONNECTIONINITSQL: SET ROLE itms_owner
       ITMS_OIDC_ISSUER: http://localhost:8180/realms/itms
       ITMS_OIDC_JWKS_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/certs
       ITMS_AUTHORISATION_SOURCE: iam
       ITMS_IAM_URL: http://iam-service:8080
-    secrets:
-      - source: refdata_db_password
-        target: spring.datasource.password
+    volumes:
+      - type: volume
+        source: db-credentials
+        target: /run/secrets/spring/datasource
+        read_only: true
+        volume:
+          subpath: reference-data-service
     ports:
       - "127.0.0.1:8081:8080"
     depends_on:
+      bao-agent:
+        condition: service_healthy
       otel-collector:
         condition: service_started
       postgres:
@@ -159,7 +173,8 @@ services:
     environment:
       <<: *itms-observability
       TXN_DB_URL: jdbc:postgresql://transaction-postgres:5432/transaction
-      TXN_DB_USER: ${TXN_DB_USER}
+      # Short-lived login from OpenBao (ADR-039), files under /run/secrets/spring/datasource; owner role on connect.
+      SPRING_DATASOURCE_HIKARI_CONNECTIONINITSQL: SET ROLE itms_owner
       ITMS_OIDC_ISSUER: http://localhost:8180/realms/itms
       ITMS_OIDC_JWKS_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/certs
       ITMS_AUTHORISATION_SOURCE: iam
@@ -170,13 +185,20 @@ services:
       ITMS_SERVICE_CLIENT_ID: itms-transaction-service
       # its secret is the file itms.clients.eligibility.client-secret (below), not an environment variable
     secrets:
-      - source: txn_db_password
-        target: spring.datasource.password
       - source: transaction_service_client_secret
         target: itms.clients.eligibility.client-secret
+    volumes:
+      - type: volume
+        source: db-credentials
+        target: /run/secrets/spring/datasource
+        read_only: true
+        volume:
+          subpath: transaction-service
     ports:
       - "127.0.0.1:8083:8080"
     depends_on:
+      bao-agent:
+        condition: service_healthy
       otel-collector:
         condition: service_started
       transaction-postgres:
@@ -196,17 +218,24 @@ services:
     environment:
       <<: *itms-observability
       HOLD_DB_URL: jdbc:postgresql://hold-postgres:5432/hold
-      HOLD_DB_USER: ${HOLD_DB_USER}
+      # Short-lived login from OpenBao (ADR-039), files under /run/secrets/spring/datasource; owner role on connect.
+      SPRING_DATASOURCE_HIKARI_CONNECTIONINITSQL: SET ROLE itms_owner
       ITMS_OIDC_ISSUER: http://localhost:8180/realms/itms
       ITMS_OIDC_JWKS_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/certs
       ITMS_AUTHORISATION_SOURCE: iam
       ITMS_IAM_URL: http://iam-service:8080
-    secrets:
-      - source: hold_db_password
-        target: spring.datasource.password
+    volumes:
+      - type: volume
+        source: db-credentials
+        target: /run/secrets/spring/datasource
+        read_only: true
+        volume:
+          subpath: hold-eligibility-service
     ports:
       - "127.0.0.1:8084:8080"
     depends_on:
+      bao-agent:
+        condition: service_healthy
       otel-collector:
         condition: service_started
       hold-postgres:
@@ -218,6 +247,50 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8090/actuator/health/readiness | grep -q UP"]
       interval: 5s
+      timeout: 3s
+      retries: 30
+
+  # ---- Secret store (SEC-004, ADR-014, ADR-039). Local development only: a dev-mode OpenBao (in memory, unsealed,
+  # configured by tools/dev/up.sh on every start) and one agent writing each service's rotated database login.
+  openbao:
+    image: openbao/openbao:2.7.1
+    command: ["server", "-dev", "-dev-listen-address=0.0.0.0:8200"]
+    environment:
+      BAO_DEV_ROOT_TOKEN_ID: ${BAO_ROOT_TOKEN:?run tools/dev/up.sh} # dev mode only; never in real environments
+    cap_add: [IPC_LOCK]
+    volumes:
+      - ./openbao/configure.sh:/etc/bao/configure.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "BAO_ADDR=http://127.0.0.1:8200 bao status >/dev/null"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    depends_on:
+      postgres:
+        condition: service_healthy
+      iam-postgres:
+        condition: service_healthy
+      transaction-postgres:
+        condition: service_healthy
+      hold-postgres:
+        condition: service_healthy
+
+  bao-agent:
+    image: openbao/openbao:2.7.1
+    entrypoint: ["bao"] # the image's entrypoint would drop root, which the shared volume needs
+    command: ["agent", "-config=/etc/bao/agent.hcl"]
+    user: "0" # writes the shared credentials volume; local development only
+    volumes:
+      - ./openbao/agent.hcl:/etc/bao/agent.hcl:ro
+      - db-credentials:/run/db-credentials
+    secrets:
+      - bao_agent_token
+    depends_on:
+      openbao:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "for s in iam-service reference-data-service transaction-service hold-eligibility-service; do test -s /run/db-credentials/$$s/username && test -s /run/db-credentials/$$s/password || exit 1; done"]
+      interval: 2s
       timeout: 3s
       retries: 30
 
@@ -299,6 +372,8 @@ secrets:
     environment: DEV_TRANSACTION_SERVICE_SECRET
   grafana_admin_password:
     environment: GRAFANA_ADMIN_PASSWORD
+  bao_agent_token: # minted by tools/dev/up.sh on every start (policy itms-db-agent: read database logins only)
+    environment: BAO_AGENT_TOKEN
 
 volumes:
   refdata-db:
@@ -309,3 +384,4 @@ volumes:
   loki-data:
   prometheus-data:
   grafana-data:
+  db-credentials:

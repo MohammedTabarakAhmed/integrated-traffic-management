@@ -2,3 +2,4 @@ gov.itms.platform.security.ItmsSecurityAutoConfiguration
 gov.itms.platform.ItmsPlatformAutoConfiguration
 gov.itms.platform.idempotency.IdempotencyAutoConfiguration
 gov.itms.platform.observability.ItmsObservabilityAutoConfiguration
+gov.itms.platform.credentials.ItmsSecretsAutoConfiguration

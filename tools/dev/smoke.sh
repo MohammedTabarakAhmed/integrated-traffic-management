@@ -506,4 +506,21 @@ res=$(post_tf "$TF_CHECKER" /v1/traffic-files/individuals "$visitor_body")
 [[ "$(status_of "$res")" == 201 ]] || { echo "FAIL: after the lift the file should open, got $(status_of "$res")"; exit 1; }
 echo "   ban $ban_id placed, opening refused, lifted, file opened"
 
+echo "26. Duplicates and merge (DL-009): two passports of one person are found and merged by the supervisor"
+seed=$(date +%s)
+born="19$((60 + seed % 30))-0$((1 + seed % 9))-1$((seed % 9))"
+open_visitor() { # passport given
+  post_tf "$TF_CHECKER" /v1/traffic-files/individuals "{\"document\":{\"type\":\"PASSPORT\",\"passportNo\":\"$1\",\"passportCountry\":\"IND\"},\"category\":\"INDIVIDUAL\",\"type\":\"VISITOR\",\"regionOpened\":\"DXB\",\"visitorIdentity\":{\"name\":{\"givenEn\":\"$2\",\"familyEn\":\"Smokeduplicate$seed\"},\"nationality\":\"IND\",\"birthDate\":\"$born\",\"gender\":\"MALE\"}}"
+}
+res=$(open_visitor "SMD${seed}A" Rajesh); first=$(body_of "$res" | json_field "['fileNumber']")
+res=$(open_visitor "SMD${seed}B" Rajeshh); second=$(body_of "$res" | json_field "['fileNumber']")
+found=$(curl -s -H "Authorization: Bearer $TF_CHECKER" "$TF/v1/traffic-files/$first/probable-duplicates" \
+  | "$PY" -c "import json,sys; print(' '.join(i['file']['fileNumber'] for i in json.load(sys.stdin)['items']))")
+[[ "$found" == *"$second"* ]] || { echo "FAIL: $second not found as a duplicate of $first ($found)"; exit 1; }
+res=$(post_tf "$TF_MAKER" "/v1/traffic-files/$first/merges" "{\"mergedFileNumber\":\"$second\",\"reason\":\"smoke test merge\"}")
+[[ "$(status_of "$res")" == 201 ]] || { echo "FAIL: merge returned $(status_of "$res"): $(body_of "$res")"; exit 1; }
+status=$(curl -s -H "Authorization: Bearer $TF_CHECKER" "$TF/v1/traffic-files/$second" | json_field "['status']")
+[[ "$status" == MERGED ]] || { echo "FAIL: merged file status $status"; exit 1; }
+echo "   $second merged into $first"
+
 echo "SMOKE OK"

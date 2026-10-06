@@ -192,6 +192,7 @@ final class ApiModels {
             String category,
             String type,
             TrafficFile.Status status,
+            String survivingFileNumber,
             String regionOpened,
             TrafficFile.IdentitySource identitySource,
             Instant registerSyncedAt,
@@ -209,7 +210,8 @@ final class ApiModels {
                     : f.identitySource() == TrafficFile.IdentitySource.REGISTER
                     ? new TreeSet<>(Identity.REGISTER_FIELDS) : new TreeSet<>();
             return new TrafficFileDto(f.fileNumber(), f.kind(), f.classification().category(),
-                    f.classification().type(), f.status(), f.regionOpened(), f.identitySource(),
+                    f.classification().type(), f.status(), f.survivingFileNumber(), f.regionOpened(),
+                    f.identitySource(),
                     f.registerSyncedAt(), company ? null : IdentityDto.of(f.identity(), sensitive),
                     company ? CompanyDto.of(f.company()) : null, locked,
                     company ? null : ProfileDto.of(f.profile(), sensitive), ChangeDto.of(f.opened()),

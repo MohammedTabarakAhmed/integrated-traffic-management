@@ -19,6 +19,12 @@ info:
     and any fleet managers (DL-004), each an active individual's traffic file; they are replaced with
     `/representatives-updates`.
 
+    Duplicates and merges (DL-009; ADR-044): `/probable-duplicates` lists other active individuals' files with the
+    same birth date and nationality and a similar name in either language (Jaro-Winkler, threshold in configuration).
+    `POST /{fileNumber}/merges` merges another file into this one, with a reason (`trafficfile.merge`). The merged
+    file becomes MERGED, names its `survivingFileNumber`, and never changes again; other services move licences,
+    vehicles, violations and history when they receive `itms.traffic-file.merged`.
+
     Ban list (DL-013; ADR-043): people barred from services, entered by identity document (they may have no file),
     with a reason, a source (with its own reference, used once) and a period. A ban is lifted once with a reason, or
     expires after its end date. A person with a ban in force cannot be given a traffic file (422 `PERSON_BANNED`,
@@ -37,7 +43,7 @@ info:
     events without personal data (INT-005).
 
     Not yet in this version: photo (DL-006), eye and medical results (DL-007, DL-008),
-    duplicate detection and merge (DL-009), register change events (DL-010), the 360° view (DL-011), rules per
+    register change events (DL-010), the 360° view (DL-011), rules per
     category (DL-012). Codes are checked for their format only until the reference-data
     client exists (Q-044, Q-057).
 
@@ -255,6 +261,63 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/TrafficFile' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/traffic-files/{fileNumber}/probable-duplicates:
+    get:
+      tags: [Traffic files]
+      operationId: getProbableDuplicates
+      summary: Probable duplicates of an individual's file, most similar first (DL-009; the view is audited)
+      description: Only for individuals' files (422 `WRONG_FILE_KIND`).
+      x-itms-permission: trafficfile.read
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/FileNumber'
+      responses:
+        '200':
+          description: Candidates
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DuplicateCandidateCollection' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/traffic-files/{fileNumber}/merges:
+    post:
+      tags: [Traffic files]
+      operationId: mergeTrafficFile
+      summary: Merge another file into this one, which survives (DL-009)
+      description: |
+        Refused when: no known `X-Channel` (422 `CHANNEL_REQUIRED`); a file does not exist (404 `FILE_NOT_FOUND`);
+        both are the same file (422 `MERGE_SAME_FILE`) or of different kinds (422 `MERGE_KIND_MISMATCH`); either is
+        not active (409 `FILE_NOT_ACTIVE`); the reason is missing (422 `REASON_INVALID`). `Location` is the merged
+        file.
+      x-itms-permission: trafficfile.merge
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/FileNumber'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MergeRequest' }
+      responses:
+        '201':
+          description: Merged (or, on a retry with the same Idempotency-Key, the stored response)
+          headers:
+            Location: { schema: { type: string } }
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Merge' }
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Problem' }
@@ -545,6 +608,40 @@ components:
         licenceExpiry: { type: string, format: date }
         signatories: { type: array, items: { $ref: '#/components/schemas/FileNumber' } }
         fleetManagers: { type: array, items: { $ref: '#/components/schemas/FileNumber' } }
+    MergeRequest:
+      type: object
+      additionalProperties: false
+      required: [mergedFileNumber, reason]
+      properties:
+        mergedFileNumber: { $ref: '#/components/schemas/FileNumber' }
+        reason: { $ref: '#/components/schemas/Reason' }
+    Merge:
+      type: object
+      additionalProperties: false
+      required: [id, mergedFileNumber, survivingFileNumber, reason, actorId, channel, at]
+      properties:
+        id: { type: string, format: uuid }
+        mergedFileNumber: { type: string }
+        survivingFileNumber: { type: string }
+        reason: { type: string }
+        actorId: { type: string }
+        channel: { $ref: '#/components/schemas/Channel' }
+        at: { type: string, format: date-time }
+    DuplicateCandidate:
+      type: object
+      additionalProperties: false
+      required: [file, nameSimilarity]
+      properties:
+        file: { $ref: '#/components/schemas/TrafficFile' }
+        nameSimilarity: { type: number, minimum: 0, maximum: 1 }
+    DuplicateCandidateCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/DuplicateCandidate' }
     Reason:
       type: string
       minLength: 3
@@ -671,6 +768,9 @@ components:
         category: { $ref: '#/components/schemas/Code' }
         type: { $ref: '#/components/schemas/Code' }
         status: { type: string, enum: [ACTIVE, MERGED, CLOSED, DECEASED] }
+        survivingFileNumber:
+          description: The file this one was merged into (status MERGED); null otherwise (DL-009)
+          oneOf: [ { type: string }, { type: 'null' } ]
         regionOpened: { $ref: '#/components/schemas/Code' }
         identitySource:
           type: string

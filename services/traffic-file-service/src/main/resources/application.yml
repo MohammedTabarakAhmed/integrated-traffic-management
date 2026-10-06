@@ -68,6 +68,8 @@ itms:
     # environment-variable binding lower-cases map keys). A source without an address is treated as unknown.
     licensing:
       timeout: ${ITMS_LICENSING_TIMEOUT:3s}
+    # Probable duplicates (DL-009): how similar two names must be (Jaro-Winkler, 0.70-1.00).
+    duplicate-name-threshold: ${ITMS_TRAFFIC_FILE_DUPLICATE_NAME_THRESHOLD:0.88}
   # API_SPECIFICATION §2, ADR-032: opening a file and updating a profile need an Idempotency-Key; a retry with the same
   # key and request replays the stored response. Retention and lock timeout are set per environment (Q-052).
   idempotency:
@@ -78,6 +80,7 @@ itms:
       - /v1/traffic-files/companies
       - /v1/traffic-files/*/representatives-updates
       - /v1/ban-entries
+      - /v1/traffic-files/*/merges
       - /v1/ban-entries/*/lifts
     retention: ${ITMS_IDEMPOTENCY_RETENTION:24h}
     lock-timeout: ${ITMS_IDEMPOTENCY_LOCK_TIMEOUT:30s}

@@ -137,6 +137,8 @@ grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker TRAFFIC_FILE_OFFICER
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker TRAFFIC_FILE_SENSITIVE_READER
 # Ban list (DL-013; ADR-043): dev.checker places, reads and lifts bans.
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker BAN_LIST_OFFICER
+# Merging duplicate traffic files (DL-009; ADR-044): dev.maker is the supervisor.
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker TRAFFIC_FILE_SUPERVISOR
 # dev.checker is also the development access reviewer ("manager", SEC-007, ADR-026); dev.iam-admin, the IT
 # administrator, opens and closes reviews.
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker ACCESS_REVIEWER

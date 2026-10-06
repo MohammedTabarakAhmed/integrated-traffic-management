@@ -321,6 +321,27 @@ class TrafficFileServiceTest {
         }
 
         @Override
+        public List<TrafficFile> findDuplicateCandidates(LocalDate birthDate, String nationality, UUID excludeId) {
+            return byNumber.values().stream()
+                    .filter(f -> f.kind() == TrafficFile.Kind.INDIVIDUAL && f.isActive() && !f.id().equals(excludeId)
+                            && f.identity().birthDate().equals(birthDate)
+                            && f.identity().nationality().equals(nationality))
+                    .toList();
+        }
+
+        @Override
+        public void saveMerge(TrafficFile merged) {
+            byNumber.put(merged.fileNumber(), merged);
+        }
+
+        final List<DuplicateMergeService.Merge> merges = new ArrayList<>();
+
+        @Override
+        public void insertMerge(DuplicateMergeService.Merge merge, UUID mergedFileId, UUID survivingFileId) {
+            merges.add(merge);
+        }
+
+        @Override
         public void saveProfile(TrafficFile file) {
             byNumber.put(file.fileNumber(), file);
         }

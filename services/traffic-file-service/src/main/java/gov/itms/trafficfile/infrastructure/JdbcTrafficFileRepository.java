@@ -1,5 +1,6 @@
 package gov.itms.trafficfile.infrastructure;
 
+import gov.itms.trafficfile.application.DuplicateMergeService;
 import gov.itms.trafficfile.application.TrafficFileRepository;
 import gov.itms.trafficfile.domain.Actor;
 import gov.itms.trafficfile.domain.Channel;
@@ -38,9 +39,10 @@ class JdbcTrafficFileRepository implements TrafficFileRepository {
             birth_date, gender, residency_status, residency_expiry, mobile, email, address, blood_group,
             education_level, profession, languages, physical_conditions, religion, determination_status, opened_at,
             opened_by, opened_by_username, opened_channel, changed_at, changed_by, changed_by_username,
-            changed_channel, version, licence_source, commercial_licence_no, company_name_nl, company_name_en,
-            activities, licence_expiry, signatories, fleet_managers""";
-    private static final String SELECT = "select " + COLUMNS + " from traffic_file";
+            changed_channel, version, surviving_file_id, licence_source, commercial_licence_no, company_name_nl, company_name_en,
+            activities, licence_expiry, signatories, fleet_managers,
+            (select s.file_number from traffic_file s where s.id = t.surviving_file_id) as surviving_file_number""";
+    private static final String SELECT = "select " + COLUMNS + " from traffic_file t";
 
     private final JdbcClient jdbc;
     private final ObjectMapper json;
@@ -230,6 +232,57 @@ class JdbcTrafficFileRepository implements TrafficFileRepository {
     }
 
     @Override
+    public List<TrafficFile> findDuplicateCandidates(LocalDate birthDate, String nationality, UUID excludeId) {
+        return jdbc.sql(SELECT + " where kind = 'INDIVIDUAL' and status = 'ACTIVE' and birth_date = :birth"
+                        + " and nationality = :nationality and id <> :exclude order by file_number limit 200")
+                .param("birth", Date.valueOf(birthDate))
+                .param("nationality", nationality)
+                .param("exclude", excludeId)
+                .query(this::map)
+                .list();
+    }
+
+    @Override
+    public void saveMerge(TrafficFile merged) {
+        TrafficFile.Change change = merged.lastChange();
+        int updated = jdbc.sql("""
+                        update traffic_file set status = 'MERGED', surviving_file_id = :survivor, changed_at = :at,
+                            changed_by = :by, changed_by_username = :byName, changed_channel = :channel,
+                            version = :version
+                        where id = :id and version = :previous""")
+                .param("survivor", merged.survivingFileId())
+                .param("at", Timestamp.from(change.at()))
+                .param("by", change.actor().id())
+                .param("byName", change.actor().username())
+                .param("channel", change.channel().name())
+                .param("version", merged.version())
+                .param("previous", merged.version() - 1)
+                .param("id", merged.id())
+                .update();
+        if (updated != 1) {
+            throw new OptimisticLockingFailureException("traffic file " + merged.fileNumber() + " changed concurrently");
+        }
+    }
+
+    @Override
+    public void insertMerge(DuplicateMergeService.Merge merge, UUID mergedFileId, UUID survivingFileId) {
+        jdbc.sql("""
+                        insert into file_merge (id, merged_file_id, merged_file_number, surviving_file_id,
+                            surviving_file_number, reason, merged_at, merged_by, merged_channel)
+                        values (:id, :merged, :mergedNo, :surviving, :survivingNo, :reason, :at, :by, :channel)""")
+                .param("id", merge.id())
+                .param("merged", mergedFileId)
+                .param("mergedNo", merge.mergedFileNumber())
+                .param("surviving", survivingFileId)
+                .param("survivingNo", merge.survivingFileNumber())
+                .param("reason", merge.reason())
+                .param("at", Timestamp.from(merge.at()))
+                .param("by", merge.actorId())
+                .param("channel", merge.channel().name())
+                .update();
+    }
+
+    @Override
     public Optional<TrafficFile> findByNumber(String fileNumber) {
         return jdbc.sql(SELECT + " where file_number = :n").param("n", fileNumber).query(this::map).optional();
     }
@@ -331,6 +384,8 @@ class JdbcTrafficFileRepository implements TrafficFileRepository {
                 TrafficFile.Status.valueOf(rs.getString("status")),
                 profile,
                 company,
+                rs.getObject("surviving_file_id", UUID.class),
+                rs.getString("surviving_file_number"),
                 change(rs, "changed"),
                 rs.getLong("version"));
     }

@@ -579,4 +579,56 @@ class TrafficFileApiIT {
         ban.put("endDate", LocalDate.now().minusDays(1).toString());
         assertThat(code(postAs("/v1/ban-entries", ban, banOfficer()))).isEqualTo("BAN_DATES_INVALID");
     }
+
+    // ------------------------------------------------------------------ duplicates and merges (DL-009)
+
+    private static RequestPostProcessor supervisor() {
+        return user("u-sup", "supervisor", "TRAFFIC_FILE_SUPERVISOR", "trafficfile.read", "trafficfile.merge");
+    }
+
+    private String personFile(String given, String family, LocalDate born) throws Exception {
+        Map<String, Object> request = visitor(newPassport(), born);
+        request.put("visitorIdentity", Map.of("name", Map.of("givenEn", given, "familyEn", family),
+                "nationality", "GBR", "birthDate", born.toString(), "gender", "MALE"));
+        MvcResult r = postAs("/v1/traffic-files/individuals", request, officer());
+        assertThat(r.getResponse().getStatus()).as(r.getResponse().getContentAsString()).isEqualTo(201);
+        return body(r).get("fileNumber").asString();
+    }
+
+    @Test
+    @Tag("DL-009")
+    @DisplayName("probable duplicates are listed; a supervisor merges one into the other, which stays readable")
+    void duplicatesAndMerge() throws Exception {
+        LocalDate born = LocalDate.of(1961, 1, 1).plusDays(ThreadLocalRandom.current().nextInt(3000));
+        String survivor = personFile("Jonathan", "Smithers", born);
+        String duplicate = personFile("Jonathon", "Smithers", born);
+        personFile("Peter", "Parker", born);
+
+        JsonNode candidates = body(getAs("/v1/traffic-files/" + survivor + "/probable-duplicates", reader()));
+        assertThat(candidates.get("items")).hasSize(1);
+        assertThat(candidates.get("items").get(0).get("file").get("fileNumber").asString()).isEqualTo(duplicate);
+
+        assertThat(postAs("/v1/traffic-files/" + survivor + "/merges",
+                Map.of("mergedFileNumber", duplicate, "reason", "same person"), officer()).getResponse().getStatus())
+                .isEqualTo(403);
+        MvcResult merged = postAs("/v1/traffic-files/" + survivor + "/merges",
+                Map.of("mergedFileNumber", duplicate, "reason", "same person, two passports"), supervisor());
+        assertThat(merged.getResponse().getStatus()).as(merged.getResponse().getContentAsString()).isEqualTo(201);
+        assertThat(body(merged).get("survivingFileNumber").asString()).isEqualTo(survivor);
+
+        JsonNode mergedFile = body(getAs("/v1/traffic-files/" + duplicate, reader()));
+        assertThat(mergedFile.get("status").asString()).isEqualTo("MERGED");
+        assertThat(mergedFile.get("survivingFileNumber").asString()).isEqualTo(survivor);
+        assertThat(code(postAs("/v1/traffic-files/" + duplicate + "/profile-updates",
+                Map.of("version", 2, "profile", Map.of()), officer()))).isEqualTo("FILE_NOT_ACTIVE");
+        assertThat(body(getAs("/v1/traffic-files/" + survivor + "/probable-duplicates", reader())).get("items"))
+                .isEmpty();
+        assertThat(db.sql("select count(*) from event_outbox where event_type = 'itms.traffic-file.merged' "
+                + "and subject = :n").param("n", duplicate).query(Long.class).single()).isEqualTo(1);
+        assertThatThrownBy(() -> db.sql("update traffic_file set status = 'ACTIVE', surviving_file_id = null, "
+                + "version = version + 1 where file_number = :n").param("n", duplicate).update())
+                .isInstanceOf(DataAccessException.class).hasMessageContaining("merged");
+        assertThatThrownBy(() -> db.sql("delete from file_merge").update())
+                .isInstanceOf(DataAccessException.class).hasMessageContaining("append-only");
+    }
 }

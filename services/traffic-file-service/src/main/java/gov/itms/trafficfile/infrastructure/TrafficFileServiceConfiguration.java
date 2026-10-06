@@ -5,6 +5,7 @@ import gov.itms.platform.events.DomainEventRecorder;
 import gov.itms.trafficfile.application.BanListService;
 import gov.itms.trafficfile.application.CommercialRegister;
 import gov.itms.trafficfile.application.CompanyFileService;
+import gov.itms.trafficfile.application.DuplicateMergeService;
 import gov.itms.trafficfile.application.IdentityRegister;
 import gov.itms.trafficfile.application.TrafficFileService;
 import java.net.http.HttpClient;
@@ -57,6 +58,13 @@ public class TrafficFileServiceConfiguration {
     CompanyFileService companyFileService(JdbcTrafficFileRepository files, CommercialRegister register,
                                           AuditRecorder audit, DomainEventRecorder events, Clock clock) {
         return new CompanyFileService(files, register, audit, events, clock);
+    }
+
+    @Bean
+    DuplicateMergeService duplicateMergeService(JdbcTrafficFileRepository files, AuditRecorder audit,
+                                                DomainEventRecorder events, Clock clock,
+                                                TrafficFileProperties properties) {
+        return new DuplicateMergeService(files, audit, events, clock, properties.duplicateNameThreshold());
     }
 
     @Bean

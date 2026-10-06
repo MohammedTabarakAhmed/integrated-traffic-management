@@ -18,7 +18,7 @@ class TrafficFilePropertiesTest {
 
     @Test
     void validSettings() {
-        var p = new TrafficFileProperties("^[0-9]{15}$", "TF", 10, REGISTER, null);
+        var p = new TrafficFileProperties("^[0-9]{15}$", "TF", 10, REGISTER, null, 0.88);
         assertThat(p.nationalIdRegex().matcher("784199012345671").matches()).isTrue();
     }
 
@@ -26,12 +26,20 @@ class TrafficFilePropertiesTest {
     void licensingAuthoritiesAreKeyedBySourceCode() {
         var licensing = new TrafficFileProperties.Licensing(Map.of("DXB_DED", URI.create("http://dxb")),
                 Duration.ofSeconds(3));
-        assertThat(new TrafficFileProperties("^.+$", "", 10, REGISTER, licensing).licensing().authorities())
+        assertThat(new TrafficFileProperties("^.+$", "", 10, REGISTER, licensing, 0.88).licensing().authorities())
                 .containsKey("DXB_DED");
-        assertThat(new TrafficFileProperties("^.+$", "", 10, REGISTER, null).licensing().authorities()).isEmpty();
+        assertThat(new TrafficFileProperties("^.+$", "", 10, REGISTER, null, 0.88).licensing().authorities()).isEmpty();
         assertThatThrownBy(() -> new TrafficFileProperties.Licensing(Map.of("dxb.ded", URI.create("http://dxb")),
                 Duration.ofSeconds(3))).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new TrafficFileProperties.Licensing(Map.of(), Duration.ofSeconds(11)))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void duplicateThresholdIsBounded() {
+        assertThatThrownBy(() -> new TrafficFileProperties("^.+$", "", 10, REGISTER, null, 0.5))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new TrafficFileProperties("^.+$", "", 10, REGISTER, null, 1.01))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -44,15 +52,15 @@ class TrafficFilePropertiesTest {
 
     @Test
     void invalidSettingsStopTheService() {
-        assertThatThrownBy(() -> new TrafficFileProperties("[", "TF", 10, REGISTER, null))
+        assertThatThrownBy(() -> new TrafficFileProperties("[", "TF", 10, REGISTER, null, 0.88))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new TrafficFileProperties("^.+$", "tf", 10, REGISTER, null))
+        assertThatThrownBy(() -> new TrafficFileProperties("^.+$", "tf", 10, REGISTER, null, 0.88))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new TrafficFileProperties("^.+$", "TF", 5, REGISTER, null))
+        assertThatThrownBy(() -> new TrafficFileProperties("^.+$", "TF", 5, REGISTER, null, 0.88))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new TrafficFileProperties("^.+$", "ABCDEF", 15, REGISTER, null))
+        assertThatThrownBy(() -> new TrafficFileProperties("^.+$", "ABCDEF", 15, REGISTER, null, 0.88))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new TrafficFileProperties("^.+$", "TF", 10, null, null))
+        assertThatThrownBy(() -> new TrafficFileProperties("^.+$", "TF", 10, null, null, 0.88))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new TrafficFileProperties.Register(URI.create("http://r"), Duration.ofMillis(100),
                 Map.of("M", "MALE"), Map.of())).isInstanceOf(IllegalArgumentException.class);

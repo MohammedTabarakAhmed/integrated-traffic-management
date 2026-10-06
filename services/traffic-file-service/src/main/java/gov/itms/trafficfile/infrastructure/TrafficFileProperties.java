@@ -16,6 +16,8 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param fileNumberWidth   digits of the sequence number, zero-padded, 6-14; a Luhn check digit follows (Q-022)
  * @param register          the identity register (ICD-01)
  * @param licensing         the economic licensing authorities (ICD-04)
+ * @param duplicateNameThreshold how similar two names must be (Jaro-Winkler, 0.70-1.00) for a probable duplicate
+ *                          (DL-009)
  */
 @ConfigurationProperties("itms.traffic-file")
 public record TrafficFileProperties(
@@ -23,7 +25,8 @@ public record TrafficFileProperties(
         @DefaultValue("") String fileNumberPrefix,
         @DefaultValue("10") int fileNumberWidth,
         Register register,
-        Licensing licensing) {
+        Licensing licensing,
+        @DefaultValue("0.88") double duplicateNameThreshold) {
 
     /**
      * @param authorities licence source code (reference list of commercial licence sources) → authority address
@@ -80,6 +83,9 @@ public record TrafficFileProperties(
         }
         if (register == null) {
             throw new IllegalArgumentException("itms.traffic-file.register is required");
+        }
+        if (duplicateNameThreshold < 0.70 || duplicateNameThreshold > 1.0) {
+            throw new IllegalArgumentException("itms.traffic-file.duplicate-name-threshold must be 0.70..1.00");
         }
         if (licensing == null) {
             licensing = new Licensing(Map.of(), Duration.ofSeconds(3));

@@ -10,10 +10,19 @@ import gov.itms.trafficfile.api.ApiModels.SearchRequest;
 import gov.itms.trafficfile.api.ApiModels.TrafficFileDto;
 import gov.itms.trafficfile.application.Caller;
 import gov.itms.trafficfile.application.CompanyFileService;
+import gov.itms.trafficfile.application.DuplicateMergeService;
 import gov.itms.trafficfile.application.TrafficFileService;
 import gov.itms.trafficfile.domain.TrafficFile;
 import jakarta.validation.Valid;
+import gov.itms.trafficfile.domain.Channel;
+import gov.itms.trafficfile.domain.Codes;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 import java.net.URI;
+import java.time.Instant;
+import java.util.UUID;
 import java.util.List;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -34,12 +43,52 @@ class TrafficFileController {
 
     private final TrafficFileService service;
     private final CompanyFileService companies;
+    private final DuplicateMergeService merges;
     private final Callers callers;
 
-    TrafficFileController(TrafficFileService service, CompanyFileService companies, Callers callers) {
+    TrafficFileController(TrafficFileService service, CompanyFileService companies, DuplicateMergeService merges,
+                          Callers callers) {
         this.service = service;
         this.companies = companies;
+        this.merges = merges;
         this.callers = callers;
+    }
+
+    record CandidateDto(TrafficFileDto file, double nameSimilarity) {
+    }
+
+    record MergeRequest(@NotNull @Pattern(regexp = Codes.FILE_NUMBER) String mergedFileNumber,
+                        @NotBlank @Size(min = 3, max = 500) String reason) {
+    }
+
+    record MergeDto(UUID id, String mergedFileNumber, String survivingFileNumber, String reason, String actorId,
+                    Channel channel, Instant at) {
+        static MergeDto of(DuplicateMergeService.Merge m) {
+            return new MergeDto(m.id(), m.mergedFileNumber(), m.survivingFileNumber(), m.reason(), m.actorId(),
+                    m.channel(), m.at());
+        }
+    }
+
+    /** Probable duplicates of an individual's file (DL-009), most similar first. */
+    @GetMapping("/{fileNumber}/probable-duplicates")
+    @PreAuthorize("hasAuthority('trafficfile.read')")
+    Collection<CandidateDto> probableDuplicates(@PathVariable String fileNumber) {
+        Caller caller = callers.current();
+        boolean sensitive = sensitive(caller);
+        return new Collection<>(merges.probableDuplicates(fileNumber, caller).stream()
+                .map(c -> new CandidateDto(TrafficFileDto.of(c.file(), sensitive),
+                        Math.round(c.nameSimilarity() * 1000) / 1000.0))
+                .toList());
+    }
+
+    /** Merges another file into this one (DL-009); this file survives. */
+    @PostMapping("/{fileNumber}/merges")
+    @PreAuthorize("hasAuthority('trafficfile.merge')")
+    ResponseEntity<MergeDto> merge(@PathVariable String fileNumber, @Valid @RequestBody MergeRequest body) {
+        DuplicateMergeService.Merge merge = merges.merge(fileNumber, body.mergedFileNumber(), body.reason(),
+                callers.current());
+        return ResponseEntity.created(URI.create("/v1/traffic-files/" + body.mergedFileNumber()))
+                .body(MergeDto.of(merge));
     }
 
     @PostMapping("/companies")

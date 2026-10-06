@@ -52,12 +52,15 @@ public final class TrafficFile {
     private Status status;
     private Profile profile;
     private Company company;
+    private UUID survivingFileId;
+    private String survivingFileNumber;
     private Change lastChange;
     private long version;
 
     private TrafficFile(UUID id, String fileNumber, Kind kind, Classification classification, String regionOpened,
                         Identity identity, IdentitySource identitySource, Instant registerSyncedAt, Change opened,
-                        Status status, Profile profile, Company company, Change lastChange, long version) {
+                        Status status, Profile profile, Company company, UUID survivingFileId,
+                        String survivingFileNumber, Change lastChange, long version) {
         this.id = Objects.requireNonNull(id);
         this.fileNumber = Objects.requireNonNull(fileNumber);
         this.kind = Objects.requireNonNull(kind);
@@ -73,6 +76,11 @@ public final class TrafficFile {
         this.status = Objects.requireNonNull(status);
         this.profile = profile;
         this.company = company;
+        if ((status == Status.MERGED) != (survivingFileId != null)) {
+            throw new IllegalArgumentException("a merged file, and only a merged file, names its surviving file");
+        }
+        this.survivingFileId = survivingFileId;
+        this.survivingFileNumber = survivingFileNumber;
         this.lastChange = Objects.requireNonNull(lastChange);
         this.version = version;
     }
@@ -95,7 +103,8 @@ public final class TrafficFile {
         }
         Change change = new Change(actor, channel, now);
         return new TrafficFile(id, fileNumber, Kind.INDIVIDUAL, classification, regionOpened, identity, source,
-                registerSyncedAt, change, Status.ACTIVE, profile == null ? Profile.EMPTY : profile, null, change, 1);
+                registerSyncedAt, change, Status.ACTIVE, profile == null ? Profile.EMPTY : profile, null, null, null,
+                change, 1);
     }
 
     /**
@@ -114,15 +123,39 @@ public final class TrafficFile {
         }
         Change change = new Change(actor, channel, now);
         return new TrafficFile(id, fileNumber, Kind.COMPANY, classification, regionOpened, null,
-                IdentitySource.REGISTER, syncedAt, change, Status.ACTIVE, null, company, change, 1);
+                IdentitySource.REGISTER, syncedAt, change, Status.ACTIVE, null, company, null, null, change,
+                1);
     }
 
     public static TrafficFile restore(UUID id, String fileNumber, Kind kind, Classification classification,
                                       String regionOpened, Identity identity, IdentitySource source,
                                       Instant registerSyncedAt, Change opened, Status status, Profile profile,
-                                      Company company, Change lastChange, long version) {
+                                      Company company, UUID survivingFileId, String survivingFileNumber,
+                                      Change lastChange, long version) {
         return new TrafficFile(id, fileNumber, kind, classification, regionOpened, identity, source, registerSyncedAt,
-                opened, status, profile, company, lastChange, version);
+                opened, status, profile, company, survivingFileId, survivingFileNumber, lastChange, version);
+    }
+
+    /**
+     * Merges this file into {@code survivor} (DL-009): this file becomes MERGED and points to the survivor; its number
+     * stays known so that references to it can be followed. Both must be active files of the same kind.
+     */
+    public void mergeInto(TrafficFile survivor, Actor actor, Channel channel, Instant now) {
+        if (survivor.id.equals(id)) {
+            throw DomainException.validation("MERGE_SAME_FILE", "a file cannot be merged into itself",
+                    List.of("DL-009"));
+        }
+        if (survivor.kind != kind) {
+            throw DomainException.validation("MERGE_KIND_MISMATCH", "only files of the same kind can be merged",
+                    List.of("DL-009"));
+        }
+        requireActive();
+        survivor.requireActive();
+        this.status = Status.MERGED;
+        this.survivingFileId = survivor.id;
+        this.survivingFileNumber = survivor.fileNumber;
+        this.lastChange = new Change(actor, channel, now);
+        this.version++;
     }
 
     /** Replaces the profile (DL-005). Identity fields are not part of the profile, so register fields stay locked. */
@@ -206,6 +239,16 @@ public final class TrafficFile {
     /** The individual's profile; {@code null} for a company. */
     public Profile profile() {
         return profile;
+    }
+
+    /** The surviving file of a MERGED file; {@code null} otherwise. */
+    public UUID survivingFileId() {
+        return survivingFileId;
+    }
+
+    /** The surviving file's number of a MERGED file; {@code null} otherwise. */
+    public String survivingFileNumber() {
+        return survivingFileNumber;
     }
 
     /** The company; {@code null} for an individual. */

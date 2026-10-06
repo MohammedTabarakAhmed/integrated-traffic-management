@@ -96,8 +96,8 @@ class TrafficFileDomainTest {
         TrafficFile merged = TrafficFile.restore(UUID.randomUUID(), "TF0000000002", TrafficFile.Kind.INDIVIDUAL,
                 new TrafficFile.Classification("INDIVIDUAL", "VISITOR"), "DXB", passportIdentity(LocalDate.of(1990, 1, 1)),
                 TrafficFile.IdentitySource.DOCUMENT, null, new TrafficFile.Change(ACTOR, Channel.BACKOFFICE, NOW),
-                TrafficFile.Status.MERGED, Profile.EMPTY, null, new TrafficFile.Change(ACTOR, Channel.BACKOFFICE, NOW),
-                3);
+                TrafficFile.Status.MERGED, Profile.EMPTY, null, UUID.randomUUID(), "10000000017",
+                new TrafficFile.Change(ACTOR, Channel.BACKOFFICE, NOW), 3);
         assertThatThrownBy(() -> merged.updateProfile(Profile.EMPTY, ACTOR, Channel.BACKOFFICE, NOW))
                 .hasFieldOrPropertyWithValue("code", "FILE_NOT_ACTIVE");
     }

@@ -38,7 +38,16 @@ public interface TrafficFileRepository {
     /** Saves a company's representatives and the new version; the stored version must be {@code version - 1}. */
     void saveRepresentatives(TrafficFile file);
 
-    /** Saves the profile and the new version; the stored version must be {@code version - 1}. */
+    /** Active individuals' files with this birth date and nationality, except {@code excludeId} (DL-009). */
+    List<TrafficFile> findDuplicateCandidates(java.time.LocalDate birthDate, String nationality, UUID excludeId);
+
+    /** Saves a MERGED file (status, surviving file, version); the stored version must be {@code version - 1}. */
+    void saveMerge(TrafficFile merged);
+
+    /** Records a merge (append-only). */
+    void insertMerge(DuplicateMergeService.Merge merge, UUID mergedFileId, UUID survivingFileId);
+
+        /** Saves the profile and the new version; the stored version must be {@code version - 1}. */
     void saveProfile(TrafficFile file);
 
     /** Every version of the file, oldest first. */

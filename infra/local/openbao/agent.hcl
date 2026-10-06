@@ -99,3 +99,14 @@ template {
   destination = "/run/db-credentials/rules-service/password"
   perms       = "0444"
 }
+
+template {
+  contents    = "{{ with secret \"database/creds/workflow-service\" }}{{ .Data.username }}{{ end }}"
+  destination = "/run/db-credentials/workflow-service/username"
+  perms       = "0444"
+}
+template {
+  contents    = "{{ with secret \"database/creds/workflow-service\" }}{{ .Data.password }}{{ end }}"
+  destination = "/run/db-credentials/workflow-service/password"
+  perms       = "0444"
+}

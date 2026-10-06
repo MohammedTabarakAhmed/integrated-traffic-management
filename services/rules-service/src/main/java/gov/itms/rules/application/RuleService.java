@@ -210,7 +210,7 @@ public class RuleService {
         if (limit < 1 || limit > 500) {
             throw DomainException.validation("FIELD_INVALID", "limit must be 1..500", List.of("CC-053"), "limit");
         }
-        List<DecisionRecord> found = rules.decisions(ruleSetCode, since, limit);
+        List<DecisionRecord> found = rules.decisions(ruleSetCode, since == null ? Instant.EPOCH : since, limit);
         audit.record("RULE_DECISIONS_LISTED", "RuleDecision", ruleSetCode, null, Map.of("count", found.size()), null);
         return found;
     }

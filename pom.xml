@@ -30,6 +30,7 @@
     <module>services/traffic-file-service</module>
     <module>services/fees-service</module>
     <module>services/rules-service</module>
+    <module>services/workflow-service</module>
   </modules>
 
   <properties>

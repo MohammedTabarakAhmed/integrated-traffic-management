@@ -1,0 +1,789 @@
+openapi: 3.1.0
+info:
+  title: ITMS Workflow Service
+  version: 1.0.0
+  description: |
+    Workflows and work items (CC-060..CC-065; ADR-049).
+
+    Definitions (CC-060): a workflow of one service is a list of steps (APPROVAL, REVIEW, INSPECTION, TASK). Each step
+    names the role whose queue receives it, the assignment (MANUAL, ROUND_ROBIN, LEAST_LOADED), its SLA (ISO-8601
+    duration, 15 minutes to 365 days), the supervisor role that receives it when overdue, and where each outcome leads
+    (another step, or `END`). Publishing creates a new version; running items keep the version they started with.
+
+    Work items (CC-061): the owning service starts a case for a business reference (`workflow.item.create`). The item
+    enters the queue of the step's role for its region and service centre. With ROUND_ROBIN or LEAST_LOADED it is
+    assigned to an available member of that queue (members join with `POST /v1/queue-memberships/me`, their scopes
+    taken from their own grants); otherwise it waits to be claimed or assigned by a supervisor.
+
+    Work lists (CC-063): `list=PERSONAL` (assigned to me), `TEAM` (queues of my roles in my regions and centres) and
+    `ESCALATED` (overdue items escalated to my supervisor roles), filtered by status, service, overdue and escalated;
+    soonest due first. Supervisors assign in bulk.
+
+    SLA (CC-062): a job escalates overdue items to the step's supervisor role and emits `itms.workflow.item-overdue`
+    (supervisor alert and customer delay notice through notification-service).
+
+    Notes (CC-064) are internal and never returned by a customer-facing operation. Returning a case to the customer
+    (CC-065) pauses the SLA clock; the customer's answer (by the customer, or by staff with `workflow.item.respond`)
+    resumes it and moves the due time by the paused time.
+
+    Every change is audited and written to the item's timeline (`/history`). The channel is the `X-Channel` header.
+    Only GET/POST are used (INT-003). Request input (SEC-022) is hardened once in itms-platform.
+servers:
+  - url: /
+security:
+  - bearerAuth: []
+tags:
+  - name: Workflow definitions
+  - name: Work items
+  - name: Queues
+
+paths:
+  /v1/workflow-definitions:
+    post:
+      tags: [Workflow definitions]
+      operationId: publishWorkflow
+      summary: Publish a new version of a workflow (CC-060)
+      description: |
+        Refused when a field is malformed (422 `FIELD_INVALID`), an SLA is out of range (422 `SLA_INVALID`), the steps
+        are inconsistent (422 `WORKFLOW_INVALID`) or the workflow belongs to another service (422
+        `WORKFLOW_SERVICE_MISMATCH`).
+      x-itms-permission: workflow.definition.manage
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PublishRequest' }
+      responses:
+        '201':
+          description: Published
+          headers:
+            Location: { schema: { type: string } }
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkflowDefinition' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [Workflow definitions]
+      operationId: listWorkflows
+      summary: The latest version of every workflow, optionally of one service
+      x-itms-permission: workflow.definition.read
+      x-itms-scope: national
+      parameters:
+        - name: serviceCode
+          in: query
+          schema: { $ref: '#/components/schemas/ServiceCode' }
+      responses:
+        '200':
+          description: Workflows
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkflowDefinitionCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+
+  /v1/workflow-definitions/{code}:
+    get:
+      tags: [Workflow definitions]
+      operationId: getWorkflow
+      summary: A workflow, latest or a given version
+      x-itms-permission: workflow.definition.read
+      x-itms-scope: national
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/Code' }
+        - name: version
+          in: query
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: Workflow
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkflowDefinition' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/work-items:
+    post:
+      tags: [Work items]
+      operationId: startWorkItem
+      summary: Start a case in the latest version of a workflow (CC-060, CC-061)
+      description: |
+        Refused when the workflow does not exist (404 `WORKFLOW_NOT_FOUND`) or belongs to another service (422
+        `WORKFLOW_SERVICE_MISMATCH`), or a case for the reference is already running in it (409 `WORK_ITEM_EXISTS`).
+      x-itms-permission: workflow.item.create
+      x-itms-scope: [region, centre]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StartRequest' }
+      responses:
+        '201':
+          description: Started
+          headers:
+            Location: { schema: { type: string } }
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkItem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [Work items]
+      operationId: workList
+      summary: Personal, team or escalated work list with filters (CC-063)
+      x-itms-permission: workflow.item.work
+      x-itms-scope: [region, centre]
+      parameters:
+        - name: list
+          in: query
+          required: true
+          schema: { type: string, enum: [PERSONAL, TEAM, ESCALATED] }
+        - name: status
+          in: query
+          style: form
+          explode: true
+          schema: { type: array, maxItems: 4, items: { $ref: '#/components/schemas/ItemStatus' } }
+        - name: serviceCode
+          in: query
+          schema: { $ref: '#/components/schemas/ServiceCode' }
+        - name: overdue
+          in: query
+          schema: { type: boolean }
+        - name: escalated
+          in: query
+          schema: { type: boolean }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200':
+          description: Work items, soonest due first
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkItemCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/work-items/bulk-assignments:
+    post:
+      tags: [Work items]
+      operationId: bulkAssignWorkItems
+      summary: Assign several work items to one queue member (CC-063); each item succeeds or fails on its own
+      x-itms-permission: workflow.item.supervise
+      x-itms-scope: [region, centre]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BulkAssignRequest' }
+      responses:
+        '200':
+          description: One result per item
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BulkResultCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/work-items/{itemId}:
+    get:
+      tags: [Work items]
+      operationId: getWorkItem
+      summary: A work item (staff of its queue, its supervisors, or the owning service); the read is audited
+      x-itms-permission: workflow.item.work
+      x-itms-scope: [region, centre]
+      parameters:
+        - $ref: '#/components/parameters/ItemId'
+      responses:
+        '200': { $ref: '#/components/responses/WorkItem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/work-items/{itemId}/history:
+    get:
+      tags: [Work items]
+      operationId: getWorkItemHistory
+      summary: Timeline of a case (CC-121); the read is audited
+      x-itms-permission: workflow.item.work
+      x-itms-scope: [region, centre]
+      parameters:
+        - $ref: '#/components/parameters/ItemId'
+      responses:
+        '200':
+          description: Timeline, oldest first
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HistoryCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/work-items/{itemId}/claims:
+    post:
+      tags: [Work items]
+      operationId: claimWorkItem
+      summary: Take an unassigned item from a queue one works in (CC-061)
+      description: Refused when someone else has it (409 `WORK_ITEM_ASSIGNED`) or it is closed or returned (409).
+      x-itms-permission: workflow.item.work
+      x-itms-scope: [region, centre]
+      parameters:
+        - $ref: '#/components/parameters/ItemId'
+      responses:
+        '200': { $ref: '#/components/responses/WorkItem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/work-items/{itemId}/releases:
+    post:
+      tags: [Work items]
+      operationId: releaseWorkItem
+      summary: Put an assigned item back in its queue (the assignee or a supervisor)
+      x-itms-permission: workflow.item.work
+      x-itms-scope: [region, centre]
+      parameters:
+        - $ref: '#/components/parameters/ItemId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReasonRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/WorkItem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/work-items/{itemId}/assignments:
+    post:
+      tags: [Work items]
+      operationId: assignWorkItem
+      summary: A supervisor assigns an item to a member of its queue (CC-061)
+      description: Refused when the assignee does not work in the item's queue (422 `ASSIGNEE_NOT_IN_QUEUE`).
+      x-itms-permission: workflow.item.supervise
+      x-itms-scope: [region, centre]
+      parameters:
+        - $ref: '#/components/parameters/ItemId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AssignRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/WorkItem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/work-items/{itemId}/decisions:
+    post:
+      tags: [Work items]
+      operationId: decideWorkItem
+      summary: The assignee records the step's outcome; the item moves to the next step or ends (CC-060)
+      description: |
+        Refused when the caller is not the assignee (403 `NOT_ASSIGNEE`), the outcome is not one of the step's
+        (422 `OUTCOME_INVALID`), or the item is returned or closed (409).
+      x-itms-permission: workflow.item.work
+      x-itms-scope: [region, centre]
+      parameters:
+        - $ref: '#/components/parameters/ItemId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DecisionRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/WorkItem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/work-items/{itemId}/returns:
+    post:
+      tags: [Work items]
+      operationId: returnWorkItem
+      summary: Return the case to the customer for more information; the SLA clock pauses (CC-065)
+      x-itms-permission: workflow.item.work
+      x-itms-scope: [region, centre]
+      parameters:
+        - $ref: '#/components/parameters/ItemId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReturnRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/WorkItem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/work-items/{itemId}/customer-responses:
+    post:
+      tags: [Work items]
+      operationId: respondToWorkItem
+      summary: The customer's answer to a returned case; the SLA clock resumes (CC-065)
+      description: By the case's customer, or by staff with `workflow.item.respond` for them (staff-assisted).
+      x-itms-permission: workflow.item.respond
+      x-itms-scope: [own, region, centre]
+      parameters:
+        - $ref: '#/components/parameters/ItemId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NoteRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/WorkItem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/work-items/{itemId}/cancellations:
+    post:
+      tags: [Work items]
+      operationId: cancelWorkItem
+      summary: The owning service cancels a running case (for example the transaction was cancelled)
+      x-itms-permission: workflow.item.create
+      x-itms-scope: [region, centre]
+      parameters:
+        - $ref: '#/components/parameters/ItemId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RequiredReasonRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/WorkItem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/work-items/{itemId}/notes:
+    post:
+      tags: [Work items]
+      operationId: addWorkItemNote
+      summary: Add an internal note with optional attachments (CC-064); never shown to the customer
+      x-itms-permission: workflow.item.work
+      x-itms-scope: [region, centre]
+      parameters:
+        - $ref: '#/components/parameters/ItemId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NoteRequest' }
+      responses:
+        '201':
+          description: Added
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Note' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [Work items]
+      operationId: listWorkItemNotes
+      summary: Internal notes of a case (CC-064); the read is audited
+      x-itms-permission: workflow.item.work
+      x-itms-scope: [region, centre]
+      parameters:
+        - $ref: '#/components/parameters/ItemId'
+      responses:
+        '200':
+          description: Notes, oldest first
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NoteCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/queue-memberships/me:
+    post:
+      tags: [Queues]
+      operationId: setQueueAvailability
+      summary: Join or leave automatic assignment in the queues of one's roles (CC-061)
+      x-itms-permission: workflow.item.work
+      x-itms-scope: [own]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AvailabilityRequest' }
+      responses:
+        '200':
+          description: The caller's memberships
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MembershipCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [Queues]
+      operationId: getQueueMemberships
+      summary: The caller's queue memberships
+      x-itms-permission: workflow.item.work
+      x-itms-scope: [own]
+      responses:
+        '200':
+          description: Memberships
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MembershipCollection' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    ItemId:
+      name: itemId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Chosen by the client, new for every intended action, and sent again unchanged on a retry (API_SPECIFICATION
+        §2, ADR-032). A retry with the same key and request gets the stored response, marked `Idempotent-Replayed`.
+      schema: { type: string, pattern: '^[A-Za-z0-9._:-]{8,128}$' }
+
+  headers:
+    IdempotentReplayed:
+      description: '`true` when the response is the stored response of an earlier request with the same Idempotency-Key'
+      schema: { type: string, enum: ['true'] }
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid bearer token
+    Problem:
+      description: Problem details (RFC 9457, API_SPECIFICATION §3)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    WorkItem:
+      description: Work item
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/WorkItem' }
+
+  schemas:
+    Code:
+      type: string
+      pattern: '^[A-Z][A-Z0-9_]{1,39}$'
+    RoleCode:
+      type: string
+      pattern: '^[A-Z][A-Z0-9_]{1,59}$'
+    ServiceCode:
+      type: string
+      pattern: '^[A-Z][A-Z0-9_]{1,19}$'
+    ScopeCode:
+      type: string
+      pattern: '^[A-Z0-9_]{1,40}$'
+    NullableString:
+      oneOf: [ { type: string }, { type: 'null' } ]
+    NullableTime:
+      oneOf: [ { type: string, format: date-time }, { type: 'null' } ]
+    ItemStatus:
+      type: string
+      enum: [OPEN, RETURNED, COMPLETED, CANCELLED]
+    Step:
+      type: object
+      additionalProperties: false
+      required: [code, kind, nameNl, nameEn, role, assignment, sla, escalationRole, outcomes]
+      properties:
+        code: { $ref: '#/components/schemas/Code' }
+        kind: { type: string, enum: [APPROVAL, REVIEW, INSPECTION, TASK] }
+        nameNl: { type: string, maxLength: 200 }
+        nameEn: { type: string, maxLength: 200 }
+        role: { $ref: '#/components/schemas/RoleCode' }
+        assignment: { type: string, enum: [MANUAL, ROUND_ROBIN, LEAST_LOADED] }
+        sla: { type: string, description: 'ISO-8601 duration, for example PT48H', pattern: '^P[0-9DTHMS.]+$' }
+        escalationRole: { $ref: '#/components/schemas/RoleCode' }
+        outcomes:
+          type: object
+          minProperties: 1
+          maxProperties: 10
+          propertyNames: { pattern: '^[A-Z][A-Z0-9_]{1,39}$' }
+          additionalProperties: { type: string, pattern: '^[A-Z][A-Z0-9_]{1,39}$' }
+    PublishRequest:
+      type: object
+      additionalProperties: false
+      required: [code, serviceCode, nameNl, nameEn, firstStep, steps, reason]
+      properties:
+        code: { $ref: '#/components/schemas/Code' }
+        serviceCode: { $ref: '#/components/schemas/ServiceCode' }
+        nameNl: { type: string, maxLength: 200 }
+        nameEn: { type: string, maxLength: 200 }
+        firstStep: { $ref: '#/components/schemas/Code' }
+        steps: { type: array, minItems: 1, maxItems: 30, items: { $ref: '#/components/schemas/Step' } }
+        reason: { type: string, minLength: 3, maxLength: 500 }
+    WorkflowDefinition:
+      type: object
+      additionalProperties: false
+      required: [code, versionNo, serviceCode, nameNl, nameEn, firstStep, steps, publishedBy, publishedAt, reason]
+      properties:
+        code: { type: string }
+        versionNo: { type: integer, minimum: 1 }
+        serviceCode: { type: string }
+        nameNl: { type: string }
+        nameEn: { type: string }
+        firstStep: { type: string }
+        steps: { type: array, items: { $ref: '#/components/schemas/Step' } }
+        publishedBy: { type: string }
+        publishedAt: { type: string, format: date-time }
+        reason: { type: string }
+    WorkflowDefinitionCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/WorkflowDefinition' } }
+    StartRequest:
+      type: object
+      additionalProperties: false
+      required: [workflowCode, reference, serviceCode, region]
+      properties:
+        workflowCode: { $ref: '#/components/schemas/Code' }
+        reference: { type: string, pattern: '^[A-Z0-9][A-Z0-9-]{0,59}$' }
+        serviceCode: { $ref: '#/components/schemas/ServiceCode' }
+        region: { $ref: '#/components/schemas/ScopeCode' }
+        centre: { oneOf: [ { $ref: '#/components/schemas/ScopeCode' }, { type: 'null' } ] }
+        customerId: { oneOf: [ { type: string, maxLength: 100 }, { type: 'null' } ] }
+    WorkItem:
+      type: object
+      additionalProperties: false
+      required: [id, reference, serviceCode, workflowCode, workflowVersion, region, stepCode, queueRole,
+                 escalationRole, status, createdAt, stepStartedAt, dueAt, overdue]
+      properties:
+        id: { type: string, format: uuid }
+        reference: { type: string }
+        serviceCode: { type: string }
+        workflowCode: { type: string }
+        workflowVersion: { type: integer }
+        region: { type: string }
+        centre: { $ref: '#/components/schemas/NullableString' }
+        customerId: { $ref: '#/components/schemas/NullableString' }
+        stepCode: { type: string }
+        queueRole: { type: string }
+        escalationRole: { type: string }
+        status: { $ref: '#/components/schemas/ItemStatus' }
+        outcome: { $ref: '#/components/schemas/NullableString' }
+        assignee: { $ref: '#/components/schemas/NullableString' }
+        createdAt: { type: string, format: date-time }
+        stepStartedAt: { type: string, format: date-time }
+        dueAt: { type: string, format: date-time }
+        pausedAt: { $ref: '#/components/schemas/NullableTime' }
+        escalatedAt: { $ref: '#/components/schemas/NullableTime' }
+        closedAt: { $ref: '#/components/schemas/NullableTime' }
+        overdue: { type: boolean }
+    WorkItemCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/WorkItem' } }
+    ReasonRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        reason: { oneOf: [ { type: string, minLength: 3, maxLength: 500 }, { type: 'null' } ] }
+    RequiredReasonRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 3, maxLength: 500 }
+    AssignRequest:
+      type: object
+      additionalProperties: false
+      required: [assignee]
+      properties:
+        assignee: { type: string, maxLength: 100 }
+        reason: { oneOf: [ { type: string, minLength: 3, maxLength: 500 }, { type: 'null' } ] }
+    BulkAssignRequest:
+      type: object
+      additionalProperties: false
+      required: [itemIds, assignee]
+      properties:
+        itemIds: { type: array, minItems: 1, maxItems: 100, uniqueItems: true, items: { type: string, format: uuid } }
+        assignee: { type: string, maxLength: 100 }
+        reason: { oneOf: [ { type: string, minLength: 3, maxLength: 500 }, { type: 'null' } ] }
+    BulkResultCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [itemId, done]
+            properties:
+              itemId: { type: string, format: uuid }
+              done: { type: boolean }
+              problem: { $ref: '#/components/schemas/NullableString' }
+    DecisionRequest:
+      type: object
+      additionalProperties: false
+      required: [outcome]
+      properties:
+        outcome: { $ref: '#/components/schemas/Code' }
+        reason: { oneOf: [ { type: string, minLength: 3, maxLength: 500 }, { type: 'null' } ] }
+    ReturnRequest:
+      type: object
+      additionalProperties: false
+      required: [requestedInformation]
+      properties:
+        requestedInformation: { type: string, minLength: 3, maxLength: 500 }
+    NoteRequest:
+      type: object
+      additionalProperties: false
+      required: [text]
+      properties:
+        text: { type: string, minLength: 1, maxLength: 4000 }
+        attachmentIds:
+          oneOf:
+            - { type: array, maxItems: 20, items: { type: string, pattern: '^[A-Za-z0-9-]{1,64}$' } }
+            - { type: 'null' }
+    Note:
+      type: object
+      additionalProperties: false
+      required: [id, text, attachmentIds, authorId, at]
+      properties:
+        id: { type: string, format: uuid }
+        text: { type: string }
+        attachmentIds: { type: array, items: { type: string } }
+        authorId: { type: string }
+        authorUsername: { $ref: '#/components/schemas/NullableString' }
+        at: { type: string, format: date-time }
+    NoteCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Note' } }
+    HistoryCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [action, stepCode, actorId, at, detail]
+            properties:
+              action: { type: string }
+              stepCode: { type: string }
+              actorId: { type: string }
+              at: { type: string, format: date-time }
+              detail: { type: object }
+    AvailabilityRequest:
+      type: object
+      additionalProperties: false
+      required: [available]
+      properties:
+        available: { type: boolean }
+    MembershipCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [role, regions, centres, available, openItems]
+            properties:
+              role: { type: string }
+              regions: { type: array, items: { type: string } }
+              centres: { type: array, items: { type: string } }
+              available: { type: boolean }
+              lastAssignedAt: { $ref: '#/components/schemas/NullableTime' }
+              openItems: { type: integer }
+    Problem:
+      type: object
+      required: [status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        code: { type: string }
+        detail: { type: string }
+        instance: { type: string }
+        correlationId: { type: string }
+        requirementRefs: { type: array, items: { type: string } }
+        errors: { type: array, items: { type: object } }

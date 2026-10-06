@@ -54,6 +54,10 @@ upstreams:
     type: roundrobin
     nodes:
       "appointment-service:8080": 1
+  - id: audit-service
+    type: roundrobin
+    nodes:
+      "audit-service:8080": 1
 
 plugin_configs:
   - id: protected-api
@@ -239,4 +243,12 @@ routes:
       - /v1/slots
       - /v1/bookings
       - /v1/bookings/*
+  - id: audit-service
+    name: audit-service
+    upstream_id: audit-service
+    plugin_config_id: protected-api
+    uris:
+      - /v1/timelines/*
+      - /v1/audit-records
+      - /v1/audit-integrity
 #END

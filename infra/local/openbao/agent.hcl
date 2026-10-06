@@ -143,3 +143,14 @@ template {
   destination = "/run/db-credentials/appointment-service/password"
   perms       = "0444"
 }
+
+template {
+  contents    = "{{ with secret \"database/creds/audit-service\" }}{{ .Data.username }}{{ end }}"
+  destination = "/run/db-credentials/audit-service/username"
+  perms       = "0444"
+}
+template {
+  contents    = "{{ with secret \"database/creds/audit-service\" }}{{ .Data.password }}{{ end }}"
+  destination = "/run/db-credentials/audit-service/password"
+  perms       = "0444"
+}

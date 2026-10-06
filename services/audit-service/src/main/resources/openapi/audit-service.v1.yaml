@@ -1,0 +1,173 @@
+openapi: 3.1.0
+info:
+  title: ITMS Audit Service
+  version: 1.0.0
+  description: |
+    The central audit trail (CC-120..CC-122; ADR-053).
+
+    Every service records each create, update, delete and view of a business record with the user, roles, time,
+    channel, IP address, old and new values and reason (CC-120), in its own transactional outbox; the relay sends the
+    records to the broker (topic `itms.audit.v1`) and this service appends each one once, in a SHA-256 hash chain.
+    Records are never changed and are deleted only after the retention period (BRD 18.4: 1 year online + 7 years
+    archive by default), by the retention job (CC-122).
+
+    Users with `audit.timeline.read` see the full history of any record as a timeline (CC-121); auditors with
+    `audit.read` search by entity, actor, service, action and time. Both reads are audited. `audit.integrity.verify`
+    recomputes the chain and reports the first broken link. Results are oldest first; continue with `afterSeq` =
+    `nextAfterSeq`. Only GET is used.
+servers:
+  - url: /
+security:
+  - bearerAuth: []
+tags:
+  - name: Audit
+
+paths:
+  /v1/timelines/{entityType}/{entityId}:
+    get:
+      tags: [Audit]
+      operationId: getTimeline
+      summary: The full history of one record, oldest first (CC-121)
+      x-itms-permission: audit.timeline.read
+      x-itms-scope: national
+      parameters:
+        - { name: entityType, in: path, required: true, schema: { type: string, pattern: '^[A-Za-z][A-Za-z0-9_]{0,59}$' } }
+        - { name: entityId, in: path, required: true, schema: { type: string, pattern: '^[A-Za-z0-9._:@/-]{1,200}$' } }
+        - $ref: '#/components/parameters/AfterSeq'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200': { $ref: '#/components/responses/Page' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/audit-records:
+    get:
+      tags: [Audit]
+      operationId: searchAuditRecords
+      summary: Search the audit trail (auditors, CC-120); at least an entity, actor, service or action
+      x-itms-permission: audit.read
+      x-itms-scope: national
+      parameters:
+        - { name: entityType, in: query, schema: { type: string, maxLength: 60 } }
+        - { name: entityId, in: query, schema: { type: string, maxLength: 200 } }
+        - { name: actorId, in: query, schema: { type: string, maxLength: 100 } }
+        - { name: service, in: query, schema: { type: string, maxLength: 60 } }
+        - { name: action, in: query, schema: { type: string, maxLength: 80 } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - $ref: '#/components/parameters/AfterSeq'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200': { $ref: '#/components/responses/Page' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/audit-integrity:
+    get:
+      tags: [Audit]
+      operationId: verifyAuditChain
+      summary: Recompute the hash chain and report the first broken link (CC-122)
+      x-itms-permission: audit.integrity.verify
+      x-itms-scope: national
+      parameters:
+        - { name: fromSeq, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100000, default: 10000 } }
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [checked, intact]
+                properties:
+                  checked: { type: integer }
+                  firstSeq: { oneOf: [ { type: integer }, { type: 'null' } ] }
+                  lastSeq: { oneOf: [ { type: integer }, { type: 'null' } ] }
+                  intact: { type: boolean }
+                  brokenAtSeq: { oneOf: [ { type: integer }, { type: 'null' } ] }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    AfterSeq:
+      name: afterSeq
+      in: query
+      schema: { type: integer, minimum: 0 }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid bearer token
+    Problem:
+      description: Problem details (RFC 9457, API_SPECIFICATION §3)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Page:
+      description: Records, oldest first
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [items]
+            properties:
+              items: { type: array, items: { $ref: '#/components/schemas/AuditRecord' } }
+              nextAfterSeq: { oneOf: [ { type: integer }, { type: 'null' } ] }
+
+  schemas:
+    NullableString:
+      oneOf: [ { type: string }, { type: 'null' } ]
+    AuditRecord:
+      type: object
+      additionalProperties: false
+      required: [seq, auditId, occurredAt, service, action, entityType, entityId, actorId, actorRoles, hash]
+      properties:
+        seq: { type: integer }
+        auditId: { type: string, format: uuid }
+        occurredAt: { type: string, format: date-time }
+        service: { type: string }
+        action: { type: string }
+        entityType: { type: string }
+        entityId: { type: string }
+        actorId: { type: string }
+        actorUsername: { $ref: '#/components/schemas/NullableString' }
+        actorRoles: { type: array, items: { type: string } }
+        channel: { $ref: '#/components/schemas/NullableString' }
+        ipAddress: { $ref: '#/components/schemas/NullableString' }
+        correlationId: { $ref: '#/components/schemas/NullableString' }
+        oldValue: { description: JSON text as recorded by the owning service, oneOf: [ { type: string }, { type: 'null' } ] }
+        newValue: { description: JSON text as recorded by the owning service, oneOf: [ { type: string }, { type: 'null' } ] }
+        reason: { $ref: '#/components/schemas/NullableString' }
+        hash: { type: string }
+    Problem:
+      type: object
+      required: [status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        code: { type: string }
+        detail: { type: string }
+        instance: { type: string }
+        correlationId: { type: string }
+        requirementRefs: { type: array, items: { type: string } }
+        errors: { type: array, items: { type: object } }

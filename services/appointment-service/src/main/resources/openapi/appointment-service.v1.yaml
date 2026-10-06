@@ -1,0 +1,579 @@
+openapi: 3.1.0
+info:
+  title: ITMS Appointment Service
+  version: 1.0.0
+  description: |
+    Appointments (CC-090..CC-093; ADR-052).
+
+    Calendars (CC-090, CC-092): each service centre has a time zone, working hours per weekday (one or more periods)
+    and closures (HOLIDAY or BLACKOUT date ranges, for the whole centre or one resource). Resources (EXAMINER,
+    INSPECTION_LANE, COMMITTEE, COUNTER) serve listed services with a capacity per slot. Each bookable service has
+    settings: slot length, booking horizon, lead time for changes and cancellations, maximum changes (BRD example: 2),
+    and the no-show penalty. Administrators need `appointment.calendar.manage` in the centre's region.
+
+    Slots are computed from these and the existing bookings (`GET /v1/slots`, 1-31 days). Customers book, change and
+    cancel their own appointments (customer id = their login subject) before the lead time and within the change
+    limit (CC-091); staff with `appointment.book` do it for customers. Staff record attendance; repeated no-shows block
+    online booking for the penalty period and emit `itms.appointment.no-show` with the penalty fee code (CC-093). A job
+    emits `itms.appointment.reminder-due` before each appointment for notification-service.
+
+    The channel is the `X-Channel` header. Only GET/POST are used (INT-003).
+servers:
+  - url: /
+security:
+  - bearerAuth: []
+tags:
+  - name: Calendars
+  - name: Bookings
+
+paths:
+  /v1/appointment-centres:
+    post:
+      tags: [Calendars]
+      operationId: saveAppointmentCentre
+      summary: Create or update a centre's calendar (CC-092)
+      x-itms-permission: appointment.calendar.manage
+      x-itms-scope: [region]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Centre' }
+      responses:
+        '200': { $ref: '#/components/responses/Centre' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/appointment-centres/{code}:
+    get:
+      tags: [Calendars]
+      operationId: getAppointmentCentre
+      summary: A centre's calendar
+      x-itms-permission: authenticated
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/CentreCode'
+      responses:
+        '200': { $ref: '#/components/responses/Centre' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/appointment-centres/{code}/closures:
+    post:
+      tags: [Calendars]
+      operationId: addClosure
+      summary: Close a centre or one resource on a date range (holiday or blackout, CC-092)
+      x-itms-permission: appointment.calendar.manage
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/CentreCode'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ClosureRequest' }
+      responses:
+        '201':
+          description: Added
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Closure' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [Calendars]
+      operationId: listClosures
+      summary: Closures touching a date range
+      x-itms-permission: authenticated
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/CentreCode'
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: Closures
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Closure' } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/appointment-resources:
+    post:
+      tags: [Calendars]
+      operationId: saveAppointmentResource
+      summary: Create or update a resource with its services and capacity (CC-090)
+      x-itms-permission: appointment.calendar.manage
+      x-itms-scope: [region]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Resource' }
+      responses:
+        '200':
+          description: Saved
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Resource' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [Calendars]
+      operationId: listAppointmentResources
+      summary: Resources of a centre
+      x-itms-permission: authenticated
+      x-itms-scope: national
+      parameters:
+        - { name: centreCode, in: query, required: true, schema: { $ref: '#/components/schemas/Code' } }
+      responses:
+        '200':
+          description: Resources
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Resource' } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/appointment-service-settings:
+    post:
+      tags: [Calendars]
+      operationId: saveServiceSettings
+      summary: Booking settings of a service (CC-091, CC-093)
+      x-itms-permission: appointment.calendar.manage
+      x-itms-scope: national
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Settings' }
+      responses:
+        '200':
+          description: Saved
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Settings' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/appointment-service-settings/{serviceCode}:
+    get:
+      tags: [Calendars]
+      operationId: getServiceSettings
+      summary: Booking settings of a service
+      x-itms-permission: authenticated
+      x-itms-scope: national
+      parameters:
+        - { name: serviceCode, in: path, required: true, schema: { $ref: '#/components/schemas/Code' } }
+      responses:
+        '200':
+          description: Settings
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Settings' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/slots:
+    get:
+      tags: [Bookings]
+      operationId: listSlots
+      summary: Free slots of a service at a centre, 1-31 days (CC-090, CC-092)
+      x-itms-permission: authenticated
+      x-itms-scope: national
+      parameters:
+        - { name: centreCode, in: query, required: true, schema: { $ref: '#/components/schemas/Code' } }
+        - { name: serviceCode, in: query, required: true, schema: { $ref: '#/components/schemas/Code' } }
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: Slots, earliest first
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [resourceCode, start, end, free]
+                      properties:
+                        resourceCode: { type: string }
+                        start: { type: string, format: date-time }
+                        end: { type: string, format: date-time }
+                        free: { type: integer, minimum: 1 }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/bookings:
+    post:
+      tags: [Bookings]
+      operationId: book
+      summary: Book a free slot, for oneself or (staff) for a customer (CC-091)
+      description: |
+        Refused when the time is not a free slot (409 `SLOT_NOT_AVAILABLE`), the customer already has an appointment
+        for the service (409 `BOOKING_EXISTS`) or is blocked after repeated no-shows (409 `BOOKING_PENALTY`).
+      x-itms-permission: appointment.book
+      x-itms-scope: [own, region]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BookRequest' }
+      responses:
+        '201':
+          description: Booked
+          headers:
+            Location: { schema: { type: string } }
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Booking' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [Bookings]
+      operationId: listBookings
+      summary: The caller's (or a customer's) appointments, or a centre's day (staff); staff reads are audited
+      x-itms-permission: appointment.read
+      x-itms-scope: [own, region]
+      parameters:
+        - { name: customerId, in: query, schema: { type: string, maxLength: 100 } }
+        - { name: centreCode, in: query, schema: { $ref: '#/components/schemas/Code' } }
+        - { name: day, in: query, schema: { type: string, format: date } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+      responses:
+        '200': { $ref: '#/components/responses/BookingCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/bookings/{bookingId}:
+    get:
+      tags: [Bookings]
+      operationId: getBooking
+      summary: An appointment
+      x-itms-permission: appointment.read
+      x-itms-scope: [own, region]
+      parameters:
+        - $ref: '#/components/parameters/BookingId'
+      responses:
+        '200': { $ref: '#/components/responses/Booking' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/bookings/{bookingId}/changes:
+    post:
+      tags: [Bookings]
+      operationId: changeBooking
+      summary: Move an appointment, within the change limit and before the lead time (CC-091)
+      description: Refused after the maximum changes (409 `CHANGE_LIMIT_REACHED`) or too late (409 `TOO_LATE_TO_CHANGE`).
+      x-itms-permission: appointment.book
+      x-itms-scope: [own, region]
+      parameters:
+        - $ref: '#/components/parameters/BookingId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChangeRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/Booking' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/bookings/{bookingId}/cancellations:
+    post:
+      tags: [Bookings]
+      operationId: cancelBooking
+      summary: Cancel an appointment (customers before the lead time; staff until the start)
+      x-itms-permission: appointment.book
+      x-itms-scope: [own, region]
+      parameters:
+        - $ref: '#/components/parameters/BookingId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CancelRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/Booking' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/bookings/{bookingId}/attendances:
+    post:
+      tags: [Bookings]
+      operationId: recordAttendance
+      summary: Record whether the customer came (CC-093)
+      x-itms-permission: appointment.attendance
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/BookingId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AttendanceRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/Booking' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    CentreCode:
+      name: code
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/Code' }
+    BookingId:
+      name: bookingId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Chosen by the client, new for every intended action, and sent again unchanged on a retry (API_SPECIFICATION
+        §2, ADR-032). A retry with the same key and request gets the stored response, marked `Idempotent-Replayed`.
+      schema: { type: string, pattern: '^[A-Za-z0-9._:-]{8,128}$' }
+
+  headers:
+    IdempotentReplayed:
+      description: '`true` when the response is the stored response of an earlier request with the same Idempotency-Key'
+      schema: { type: string, enum: ['true'] }
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid bearer token
+    Problem:
+      description: Problem details (RFC 9457, API_SPECIFICATION §3)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Centre:
+      description: Centre calendar
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Centre' }
+    Booking:
+      description: Appointment
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Booking' }
+    BookingCollection:
+      description: Appointments
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [items]
+            properties:
+              items: { type: array, items: { $ref: '#/components/schemas/Booking' } }
+
+  schemas:
+    Code:
+      type: string
+      pattern: '^[A-Z0-9][A-Z0-9_]{1,39}$'
+    NullableCode:
+      oneOf: [ { $ref: '#/components/schemas/Code' }, { type: 'null' } ]
+    Time:
+      type: string
+      pattern: '^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$'
+    Period:
+      type: object
+      additionalProperties: false
+      required: [opens, closes]
+      properties:
+        opens: { $ref: '#/components/schemas/Time' }
+        closes: { $ref: '#/components/schemas/Time' }
+    Centre:
+      type: object
+      additionalProperties: false
+      required: [code, region, zone, weeklyHours, active]
+      properties:
+        code: { $ref: '#/components/schemas/Code' }
+        region: { $ref: '#/components/schemas/Code' }
+        zone: { type: string, pattern: '^[A-Za-z_]+(/[A-Za-z0-9_+-]+){0,2}$', maxLength: 60 }
+        weeklyHours:
+          type: object
+          maxProperties: 7
+          propertyNames: { pattern: '^(MONDAY|TUESDAY|WEDNESDAY|THURSDAY|FRIDAY|SATURDAY|SUNDAY)$' }
+          additionalProperties: { type: array, maxItems: 6, items: { $ref: '#/components/schemas/Period' } }
+        active: { type: boolean }
+    ClosureRequest:
+      type: object
+      additionalProperties: false
+      required: [from, to, kind, reason]
+      properties:
+        resourceCode: { $ref: '#/components/schemas/NullableCode' }
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        kind: { type: string, enum: [HOLIDAY, BLACKOUT] }
+        reason: { type: string, maxLength: 200 }
+    Closure:
+      type: object
+      additionalProperties: false
+      required: [id, centreCode, from, to, kind, reason]
+      properties:
+        id: { type: integer }
+        centreCode: { type: string }
+        resourceCode: { oneOf: [ { type: string }, { type: 'null' } ] }
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        kind: { type: string, enum: [HOLIDAY, BLACKOUT] }
+        reason: { type: string }
+    Resource:
+      type: object
+      additionalProperties: false
+      required: [code, centreCode, type, name, services, capacity, active]
+      properties:
+        code: { $ref: '#/components/schemas/Code' }
+        centreCode: { $ref: '#/components/schemas/Code' }
+        type: { type: string, enum: [EXAMINER, INSPECTION_LANE, COMMITTEE, COUNTER] }
+        name: { type: string, maxLength: 200 }
+        services: { type: array, minItems: 1, maxItems: 50, uniqueItems: true, items: { $ref: '#/components/schemas/Code' } }
+        capacity: { type: integer, minimum: 1, maximum: 100 }
+        active: { type: boolean }
+    Settings:
+      type: object
+      additionalProperties: false
+      required: [serviceCode, slotMinutes, horizonDays, minLeadMinutes, maxChanges, noShowLimit, noShowWindowDays,
+                 penaltyDays]
+      properties:
+        serviceCode: { $ref: '#/components/schemas/Code' }
+        slotMinutes: { type: integer, minimum: 5, maximum: 480 }
+        horizonDays: { type: integer, minimum: 1, maximum: 365 }
+        minLeadMinutes: { type: integer, minimum: 0, maximum: 43200 }
+        maxChanges: { type: integer, minimum: 0, maximum: 20 }
+        noShowLimit: { type: integer, minimum: 0, maximum: 20 }
+        noShowWindowDays: { type: integer, minimum: 1, maximum: 730 }
+        penaltyDays: { type: integer, minimum: 0, maximum: 365 }
+        penaltyFeeCode: { $ref: '#/components/schemas/NullableCode' }
+    BookRequest:
+      type: object
+      additionalProperties: false
+      required: [serviceCode, centreCode, start, customerId]
+      properties:
+        serviceCode: { $ref: '#/components/schemas/Code' }
+        centreCode: { $ref: '#/components/schemas/Code' }
+        resourceCode: { $ref: '#/components/schemas/NullableCode' }
+        start: { type: string, format: date-time }
+        customerId: { type: string, pattern: '^[A-Za-z0-9._:-]{1,100}$' }
+        transactionReference: { oneOf: [ { type: string, pattern: '^[A-Z0-9][A-Z0-9-]{0,59}$' }, { type: 'null' } ] }
+    ChangeRequest:
+      type: object
+      additionalProperties: false
+      required: [start]
+      properties:
+        resourceCode: { $ref: '#/components/schemas/NullableCode' }
+        start: { type: string, format: date-time }
+    CancelRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        reason: { oneOf: [ { type: string, minLength: 3, maxLength: 500 }, { type: 'null' } ] }
+    AttendanceRequest:
+      type: object
+      additionalProperties: false
+      required: [attended]
+      properties:
+        attended: { type: boolean }
+    Booking:
+      type: object
+      additionalProperties: false
+      required: [id, serviceCode, centreCode, resourceCode, customerId, start, end, status, changes, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        serviceCode: { type: string }
+        centreCode: { type: string }
+        resourceCode: { type: string }
+        customerId: { type: string }
+        transactionReference: { oneOf: [ { type: string }, { type: 'null' } ] }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+        status: { type: string, enum: [BOOKED, CANCELLED, ATTENDED, NO_SHOW] }
+        changes: { type: integer, minimum: 0 }
+        createdAt: { type: string, format: date-time }
+        closedAt: { oneOf: [ { type: string, format: date-time }, { type: 'null' } ] }
+    Problem:
+      type: object
+      required: [status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        code: { type: string }
+        detail: { type: string }
+        instance: { type: string }
+        correlationId: { type: string }
+        requirementRefs: { type: array, items: { type: string } }
+        errors: { type: array, items: { type: object } }

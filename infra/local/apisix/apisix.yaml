@@ -50,6 +50,10 @@ upstreams:
     type: roundrobin
     nodes:
       "document-service:8080": 1
+  - id: appointment-service
+    type: roundrobin
+    nodes:
+      "appointment-service:8080": 1
 
 plugin_configs:
   - id: protected-api
@@ -222,4 +226,17 @@ routes:
     methods: [GET]
     uris:
       - /v1/certificate-verifications/*
+  - id: appointment-service
+    name: appointment-service
+    upstream_id: appointment-service
+    plugin_config_id: protected-api
+    uris:
+      - /v1/appointment-centres
+      - /v1/appointment-centres/*
+      - /v1/appointment-resources
+      - /v1/appointment-service-settings
+      - /v1/appointment-service-settings/*
+      - /v1/slots
+      - /v1/bookings
+      - /v1/bookings/*
 #END

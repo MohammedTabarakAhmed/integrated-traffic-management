@@ -29,6 +29,7 @@ configure rules-service rules-postgres rules "$RULES_DB_USER" "$RULES_DB_PASSWOR
 configure workflow-service workflow-postgres workflow "$WORKFLOW_DB_USER" "$WORKFLOW_DB_PASSWORD"
 configure notification-service notification-postgres notification "$NOTIF_DB_USER" "$NOTIF_DB_PASSWORD"
 configure document-service document-postgres document "$DOC_DB_USER" "$DOC_DB_PASSWORD"
+configure appointment-service appointment-postgres appointment "$APPT_DB_USER" "$APPT_DB_PASSWORD"
 
 # The agent may only read database logins.
 printf 'path "database/creds/*" {\n  capabilities = ["read"]\n}\n' | bao policy write itms-db-agent - >/dev/null

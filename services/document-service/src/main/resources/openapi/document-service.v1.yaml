@@ -1,0 +1,604 @@
+openapi: 3.1.0
+info:
+  title: ITMS Document Service
+  version: 1.0.0
+  description: |
+    Documents, media and certificates (CC-080..CC-085; ADR-051).
+
+    Documents (CC-080): declared first (`POST /v1/documents`: type, owner, title, classification, expiry date), then
+    their content is uploaded once as `application/octet-stream` by the person who declared them. Each document type
+    has configured allowed file types, recognised from the bytes, and a maximum size (CC-081); every upload is scanned
+    for malware before it is stored, and infected content is discarded (the document becomes QUARANTINED, 422
+    `MALWARE_FOUND`). Content is kept in the on-premises object store (ADR-005) with its SHA-256; large media such as
+    accident video are streamed, never held in memory (CC-085), and link to any number of business records.
+
+    Access: staff need `document.read`, and `document.read.confidential` for confidential or secret documents; a
+    customer reaches documents whose owner type is CUSTOMER and owner id is their login subject. Every read is audited.
+
+    Certificates (CC-082, CC-083): bilingual templates with `{{placeholder}}` fields; issuing gives a unique number
+    with a check digit and a random verification code, and stores a printable bilingual document whose QR code opens
+    the public verification page. `GET /v1/certificate-verifications/{number}?code=` needs no token and answers VALID,
+    EXPIRED or REVOKED with the holder's initials only; a wrong code answers like an unknown number.
+
+    The channel is the `X-Channel` header. Only GET/POST are used (INT-003).
+servers:
+  - url: /
+security:
+  - bearerAuth: []
+tags:
+  - name: Documents
+  - name: Certificates
+  - name: Verification
+
+paths:
+  /v1/document-types:
+    get:
+      tags: [Documents]
+      operationId: listDocumentTypes
+      summary: Accepted document types with their allowed file types and maximum size (CC-081)
+      x-itms-permission: authenticated
+      x-itms-scope: national
+      responses:
+        '200':
+          description: Types
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TypeCollection' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/documents:
+    post:
+      tags: [Documents]
+      operationId: createDocument
+      summary: Declare a document before uploading its content (CC-080)
+      description: |
+        Staff and services need `document.create`; a customer may declare documents they own (owner type CUSTOMER).
+        Refused when the type is not configured (422 `DOCUMENT_TYPE_UNKNOWN`).
+      x-itms-permission: document.create
+      x-itms-scope: [own]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateRequest' }
+      responses:
+        '201':
+          description: Declared, waiting for content
+          headers:
+            Location: { schema: { type: string } }
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Document' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [Documents]
+      operationId: listDocuments
+      summary: Documents of an owner, or linked to a business record (CC-085); the read is audited
+      x-itms-permission: document.read
+      x-itms-scope: [own]
+      parameters:
+        - { name: ownerType, in: query, schema: { $ref: '#/components/schemas/Code' } }
+        - { name: ownerId, in: query, schema: { $ref: '#/components/schemas/Id' } }
+        - { name: recordType, in: query, schema: { $ref: '#/components/schemas/Code' } }
+        - { name: recordId, in: query, schema: { $ref: '#/components/schemas/Id' } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: Documents, newest first
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DocumentCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/documents/{documentId}:
+    get:
+      tags: [Documents]
+      operationId: getDocument
+      summary: A document's metadata; the read is audited
+      x-itms-permission: document.read
+      x-itms-scope: [own]
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+      responses:
+        '200':
+          description: Document
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Document' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/documents/{documentId}/content:
+    post:
+      tags: [Documents]
+      operationId: uploadDocumentContent
+      summary: Upload a document's content once; type, size and malware checked (CC-081)
+      description: |
+        Refused when: the caller did not declare the document (403); it already has content (409
+        `CONTENT_ALREADY_UPLOADED`); the file is empty, too large or of a type not allowed for the document type (422
+        `FILE_EMPTY`, `FILE_TOO_LARGE`, `FILE_TYPE_NOT_ALLOWED`); malware was found (422 `MALWARE_FOUND`, the
+        document is QUARANTINED); the scanner or store did not answer (503, nothing stored).
+      x-itms-permission: document.create
+      x-itms-scope: [own]
+      x-itms-binary-upload: true
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        '200':
+          description: Stored and available
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Document' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '415': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [Documents]
+      operationId: downloadDocumentContent
+      summary: A document's content with its SHA-256 (Repr-Digest); the read is audited
+      x-itms-permission: document.read
+      x-itms-scope: [own]
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+      responses:
+        '200':
+          description: Content
+          headers:
+            Repr-Digest: { schema: { type: string } }
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/documents/{documentId}/links:
+    post:
+      tags: [Documents]
+      operationId: linkDocument
+      summary: Link a document to a business record (CC-085)
+      x-itms-permission: document.create
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LinkRequest' }
+      responses:
+        '201':
+          description: Linked
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Link' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [Documents]
+      operationId: listDocumentLinks
+      summary: Records a document is linked to
+      x-itms-permission: document.read
+      x-itms-scope: [own]
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+      responses:
+        '200':
+          description: Links
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LinkCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/certificate-templates:
+    post:
+      tags: [Certificates]
+      operationId: publishCertificateTemplate
+      summary: Publish a new version of a bilingual certificate or letter template (CC-082)
+      x-itms-permission: certificate.template.manage
+      x-itms-scope: national
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TemplateRequest' }
+      responses:
+        '201':
+          description: Published
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Template' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [Certificates]
+      operationId: listCertificateTemplates
+      summary: The latest version of every certificate template
+      x-itms-permission: certificate.issue
+      x-itms-scope: national
+      responses:
+        '200':
+          description: Templates
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TemplateCollection' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+
+  /v1/certificates:
+    post:
+      tags: [Certificates]
+      operationId: issueCertificate
+      summary: Issue a certificate with a unique number and QR code (CC-082, CC-083)
+      description: Refused when the template does not exist (404) or a placeholder has no value (422 `CERTIFICATE_DATA_MISSING`).
+      x-itms-permission: certificate.issue
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IssueRequest' }
+      responses:
+        '201':
+          description: Issued; the rendered document is `documentId`
+          headers:
+            Location: { schema: { type: string } }
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Certificate' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/certificates/{number}:
+    get:
+      tags: [Certificates]
+      operationId: getCertificate
+      summary: A certificate (staff); the read is audited
+      x-itms-permission: certificate.read
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/Number'
+      responses:
+        '200':
+          description: Certificate
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Certificate' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/certificates/{number}/revocations:
+    post:
+      tags: [Certificates]
+      operationId: revokeCertificate
+      summary: Revoke a certificate; the public page then answers REVOKED (CC-083)
+      x-itms-permission: certificate.revoke
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/Number'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RevokeRequest' }
+      responses:
+        '200':
+          description: Revoked
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Certificate' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/certificate-verifications/{number}:
+    get:
+      tags: [Verification]
+      operationId: verifyCertificate
+      summary: Public verification of a certificate by its number and code (CC-083); no token
+      x-itms-permission: public
+      x-itms-scope: national
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/Number'
+        - name: code
+          in: query
+          required: true
+          schema: { type: string, pattern: '^[A-Za-z0-9]{10}$' }
+      responses:
+        '200':
+          description: Verification result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Verification' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    DocumentId:
+      name: documentId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Number:
+      name: number
+      in: path
+      required: true
+      schema: { type: string, pattern: '^[A-Z]{2,6}-[0-9]{4}-[0-9]{8}-[0-9]$' }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Chosen by the client, new for every intended action, and sent again unchanged on a retry (API_SPECIFICATION
+        §2, ADR-032). A retry with the same key and request gets the stored response, marked `Idempotent-Replayed`.
+      schema: { type: string, pattern: '^[A-Za-z0-9._:-]{8,128}$' }
+
+  headers:
+    IdempotentReplayed:
+      description: '`true` when the response is the stored response of an earlier request with the same Idempotency-Key'
+      schema: { type: string, enum: ['true'] }
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid bearer token
+    Problem:
+      description: Problem details (RFC 9457, API_SPECIFICATION §3)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+
+  schemas:
+    Code:
+      type: string
+      pattern: '^[A-Z][A-Z0-9_]{1,39}$'
+    Id:
+      type: string
+      pattern: '^[A-Za-z0-9._:-]{1,100}$'
+    Classification:
+      type: string
+      enum: [PUBLIC, INTERNAL, CONFIDENTIAL, SECRET]
+    NullableString:
+      oneOf: [ { type: string }, { type: 'null' } ]
+    NullableTime:
+      oneOf: [ { type: string, format: date-time }, { type: 'null' } ]
+    NullableDate:
+      oneOf: [ { type: string, format: date }, { type: 'null' } ]
+    TypeCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [code, mediaTypes, maxBytes, classification]
+            properties:
+              code: { type: string }
+              mediaTypes: { type: array, items: { type: string } }
+              maxBytes: { type: integer }
+              classification: { $ref: '#/components/schemas/Classification' }
+    CreateRequest:
+      type: object
+      additionalProperties: false
+      required: [type, ownerType, ownerId]
+      properties:
+        type: { $ref: '#/components/schemas/Code' }
+        ownerType: { $ref: '#/components/schemas/Code' }
+        ownerId: { $ref: '#/components/schemas/Id' }
+        title: { oneOf: [ { type: string, maxLength: 200 }, { type: 'null' } ] }
+        classification: { oneOf: [ { $ref: '#/components/schemas/Classification' }, { type: 'null' } ] }
+        expiryDate: { $ref: '#/components/schemas/NullableDate' }
+    Document:
+      type: object
+      additionalProperties: false
+      required: [id, type, ownerType, ownerId, classification, status, createdBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string }
+        ownerType: { type: string }
+        ownerId: { type: string }
+        title: { $ref: '#/components/schemas/NullableString' }
+        classification: { $ref: '#/components/schemas/Classification' }
+        expiryDate: { $ref: '#/components/schemas/NullableDate' }
+        status: { type: string, enum: [PENDING_UPLOAD, AVAILABLE, QUARANTINED] }
+        mediaType: { $ref: '#/components/schemas/NullableString' }
+        size: { oneOf: [ { type: integer }, { type: 'null' } ] }
+        sha256: { $ref: '#/components/schemas/NullableString' }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        availableAt: { $ref: '#/components/schemas/NullableTime' }
+    DocumentCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Document' } }
+    LinkRequest:
+      type: object
+      additionalProperties: false
+      required: [recordType, recordId]
+      properties:
+        recordType: { $ref: '#/components/schemas/Code' }
+        recordId: { $ref: '#/components/schemas/Id' }
+    Link:
+      type: object
+      additionalProperties: false
+      required: [recordType, recordId, linkedBy, linkedAt]
+      properties:
+        recordType: { type: string }
+        recordId: { type: string }
+        linkedBy: { type: string }
+        linkedAt: { type: string, format: date-time }
+    LinkCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Link' } }
+    TemplateRequest:
+      type: object
+      additionalProperties: false
+      required: [code, titleNl, titleEn, bodyNl, bodyEn, reason]
+      properties:
+        code: { $ref: '#/components/schemas/Code' }
+        titleNl: { type: string, maxLength: 200 }
+        titleEn: { type: string, maxLength: 200 }
+        bodyNl: { type: string, maxLength: 20000 }
+        bodyEn: { type: string, maxLength: 20000 }
+        validityDays: { oneOf: [ { type: integer, minimum: 1, maximum: 3650 }, { type: 'null' } ] }
+        reason: { type: string, minLength: 3, maxLength: 500 }
+    Template:
+      type: object
+      additionalProperties: false
+      required: [code, versionNo, titleNl, titleEn, bodyNl, bodyEn, publishedBy, publishedAt]
+      properties:
+        code: { type: string }
+        versionNo: { type: integer }
+        titleNl: { type: string }
+        titleEn: { type: string }
+        bodyNl: { type: string }
+        bodyEn: { type: string }
+        validityDays: { oneOf: [ { type: integer }, { type: 'null' } ] }
+        publishedBy: { type: string }
+        publishedAt: { type: string, format: date-time }
+    TemplateCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Template' } }
+    IssueRequest:
+      type: object
+      additionalProperties: false
+      required: [templateCode, holderNameNl, holderNameEn, subjectType, subjectId]
+      properties:
+        templateCode: { $ref: '#/components/schemas/Code' }
+        holderNameNl: { type: string, maxLength: 200 }
+        holderNameEn: { type: string, maxLength: 200 }
+        subjectType: { $ref: '#/components/schemas/Code' }
+        subjectId: { $ref: '#/components/schemas/Id' }
+        data:
+          oneOf:
+            - type: object
+              maxProperties: 50
+              propertyNames: { pattern: '^[a-zA-Z][a-zA-Z0-9]{0,39}$' }
+              additionalProperties: { type: string, maxLength: 500 }
+            - type: 'null'
+        reference: { oneOf: [ { type: string, maxLength: 60 }, { type: 'null' } ] }
+    Certificate:
+      type: object
+      additionalProperties: false
+      required: [number, verificationCode, templateCode, templateVersion, holderNameNl, holderNameEn, subjectType,
+                 subjectId, issuedOn, status, documentId, issuedBy, issuedAt]
+      properties:
+        number: { type: string }
+        verificationCode: { type: string }
+        templateCode: { type: string }
+        templateVersion: { type: integer }
+        holderNameNl: { type: string }
+        holderNameEn: { type: string }
+        subjectType: { type: string }
+        subjectId: { type: string }
+        reference: { $ref: '#/components/schemas/NullableString' }
+        issuedOn: { type: string, format: date }
+        validUntil: { $ref: '#/components/schemas/NullableDate' }
+        status: { type: string, enum: [ISSUED, REVOKED] }
+        revokedAt: { $ref: '#/components/schemas/NullableTime' }
+        revocationReason: { $ref: '#/components/schemas/NullableString' }
+        documentId: { type: string, format: uuid }
+        issuedBy: { type: string }
+        issuedAt: { type: string, format: date-time }
+    RevokeRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 3, maxLength: 500 }
+    Verification:
+      type: object
+      additionalProperties: false
+      required: [number, titleNl, titleEn, holder, validity, issuedOn]
+      properties:
+        number: { type: string }
+        titleNl: { type: string }
+        titleEn: { type: string }
+        holder: { type: string, description: initials only }
+        validity: { type: string, enum: [VALID, EXPIRED, REVOKED] }
+        issuedOn: { type: string, format: date }
+        validUntil: { $ref: '#/components/schemas/NullableDate' }
+    Problem:
+      type: object
+      required: [status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        code: { type: string }
+        detail: { type: string }
+        instance: { type: string }
+        correlationId: { type: string }
+        requirementRefs: { type: array, items: { type: string } }
+        errors: { type: array, items: { type: object } }

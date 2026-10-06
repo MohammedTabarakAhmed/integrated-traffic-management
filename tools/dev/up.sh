@@ -38,6 +38,10 @@ wanted = {
     "WORKFLOW_DB_PASSWORD": lambda: secrets.token_urlsafe(24),
     "NOTIF_DB_USER": lambda: "notification",
     "NOTIF_DB_PASSWORD": lambda: secrets.token_urlsafe(24),
+    "DOC_DB_USER": lambda: "document",
+    "DOC_DB_PASSWORD": lambda: secrets.token_urlsafe(24),
+    "DEV_MINIO_ACCESS_KEY": lambda: "itms-dev-" + secrets.token_hex(4),
+    "DEV_MINIO_SECRET_KEY": lambda: secrets.token_urlsafe(24),
     "KC_ADMIN_USER": lambda: "kc-admin",
     "KC_ADMIN_PASSWORD": lambda: secrets.token_urlsafe(24),
     "DEV_IAM_ADMIN_PASSWORD": lambda: secrets.token_urlsafe(16),
@@ -69,15 +73,15 @@ if [[ "${1:-}" == "down" ]]; then
 fi
 
 echo "== Building service jars"
-mvn -B -ntp -q package -DskipTests -pl services/iam-service,services/reference-data-service,services/transaction-service,services/hold-eligibility-service,services/traffic-file-service,services/fees-service,services/rules-service,services/workflow-service,services/notification-service -am
+mvn -B -ntp -q package -DskipTests -pl services/iam-service,services/reference-data-service,services/transaction-service,services/hold-eligibility-service,services/traffic-file-service,services/fees-service,services/rules-service,services/workflow-service,services/notification-service,services/document-service -am
 
 echo "== Starting the databases and OpenBao"
-"${COMPOSE[@]}" up -d --wait postgres iam-postgres transaction-postgres hold-postgres traffic-file-postgres fees-postgres rules-postgres workflow-postgres notification-postgres openbao
+"${COMPOSE[@]}" up -d --wait postgres iam-postgres transaction-postgres hold-postgres traffic-file-postgres fees-postgres rules-postgres workflow-postgres notification-postgres document-postgres openbao
 
 echo "== Database owner role itms_owner (ADR-039)"
 for db in "postgres refdata $REFDATA_DB_USER" "iam-postgres iam $IAM_DB_USER" \
           "transaction-postgres transaction $TXN_DB_USER" "hold-postgres hold $HOLD_DB_USER" \
-          "traffic-file-postgres trafficfile $TF_DB_USER" "fees-postgres fees $FEES_DB_USER" "rules-postgres rules $RULES_DB_USER" "workflow-postgres workflow $WORKFLOW_DB_USER" "notification-postgres notification $NOTIF_DB_USER"; do
+          "traffic-file-postgres trafficfile $TF_DB_USER" "fees-postgres fees $FEES_DB_USER" "rules-postgres rules $RULES_DB_USER" "workflow-postgres workflow $WORKFLOW_DB_USER" "notification-postgres notification $NOTIF_DB_USER" "document-postgres document $DOC_DB_USER"; do
   set -- $db
   "${COMPOSE[@]}" exec -T "$1" psql -q -v ON_ERROR_STOP=1 -U "$3" -d "$2" < infra/local/db/itms-owner.sql
   echo "   $2: itms_owner owns the schema"
@@ -95,6 +99,7 @@ BAO_AGENT_TOKEN=$({ printf "export BAO_TOKEN='%s' ITMS_DB_LOGIN_TTL='%s' ITMS_DB
     printf "export RULES_DB_USER='%s' RULES_DB_PASSWORD='%s'\n" "$RULES_DB_USER" "$RULES_DB_PASSWORD"
     printf "export WORKFLOW_DB_USER='%s' WORKFLOW_DB_PASSWORD='%s'\n" "$WORKFLOW_DB_USER" "$WORKFLOW_DB_PASSWORD"
     printf "export NOTIF_DB_USER='%s' NOTIF_DB_PASSWORD='%s'\n" "$NOTIF_DB_USER" "$NOTIF_DB_PASSWORD"
+    printf "export DOC_DB_USER='%s' DOC_DB_PASSWORD='%s'\n" "$DOC_DB_USER" "$DOC_DB_PASSWORD"
     cat infra/local/openbao/configure.sh
   } | "${COMPOSE[@]}" exec -T openbao sh -s | tail -n 1)
 export BAO_AGENT_TOKEN
@@ -169,6 +174,11 @@ grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker WORKFLOW_STARTER
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker NOTIFICATION_ADMIN
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker NOTIFICATION_SENDER
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker NOTIFICATION_SUPPORT
+# Documents and certificates (CC-080..CC-085; ADR-051): dev.maker receives documents and issues certificates; dev.checker administers certificates and reads sensitive documents.
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker DOCUMENT_OFFICER
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker CERTIFICATE_ISSUER
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker CERTIFICATE_ADMIN
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker DOCUMENT_SENSITIVE_READER
 # dev.checker is also the development access reviewer ("manager", SEC-007, ADR-026); dev.iam-admin, the IT
 # administrator, opens and closes reviews.
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker ACCESS_REVIEWER
@@ -190,6 +200,7 @@ ITMS local stack is up:
   rules-service           http://localhost:8087                     (bearer token required)
   workflow-service        http://localhost:8088                     (bearer token required)
   notification-service    http://localhost:8089                     (bearer token required)
+  document-service        http://localhost:8091                     (bearer token required)
   Keycloak                http://localhost:8180   (realm: itms; users dev.iam-admin / dev.maker / dev.checker;
                                                    passwords in $ENV_FILE; clients itms-directory-feed and
                                                    itms-transaction-service use DEV_DIRECTORY_FEED_SECRET and

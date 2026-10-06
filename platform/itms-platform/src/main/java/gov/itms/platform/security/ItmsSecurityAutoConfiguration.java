@@ -45,15 +45,22 @@ public class ItmsSecurityAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean(SecurityFilterChain.class)
     SecurityFilterChain itmsApiSecurity(HttpSecurity http, JwtAuthenticationConverter converter,
-                                        AuthorisationResolver resolver, MessageSource messages, ObjectMapper json)
+                                        AuthorisationResolver resolver, MessageSource messages, ObjectMapper json,
+                                        ItmsSecurityProperties properties)
             throws Exception {
         http
                 .csrf(csrf -> csrf.disable()) // stateless bearer-token API; no cookies are used
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authorizeHttpRequests(a -> a
-                        .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
-                        .requestMatchers(new ManagementRequests()).permitAll()
-                        .anyRequest().authenticated())
+                .authorizeHttpRequests(a -> {
+                    a.requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
+                            .requestMatchers(new ManagementRequests()).permitAll();
+                    if (!properties.publicPaths().isEmpty()) {
+                        // deliberately public pages only (CC-083); GET, no token, no grants
+                        a.requestMatchers(org.springframework.http.HttpMethod.GET,
+                                properties.publicPaths().toArray(String[]::new)).permitAll();
+                    }
+                    a.anyRequest().authenticated();
+                })
                 .oauth2ResourceServer(o -> o.jwt(j -> j.jwtAuthenticationConverter(converter)))
                 .addFilterAfter(new AuthorisationFilter(resolver, messages, json), BearerTokenAuthenticationFilter.class);
         return http.build();

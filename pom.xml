@@ -32,6 +32,7 @@
     <module>services/rules-service</module>
     <module>services/workflow-service</module>
     <module>services/notification-service</module>
+    <module>services/document-service</module>
   </modules>
 
   <properties>
@@ -42,6 +43,7 @@
     <archunit.version>1.5.1</archunit.version>
     <jacoco.version>0.8.15</jacoco.version>
     <openapi-validator.version>3.0.0</openapi-validator.version>
+    <zxing.version>3.5.3</zxing.version>
     <coverage.minimum>0.80</coverage.minimum>
   </properties>
 
@@ -64,6 +66,12 @@
         <artifactId>openapi-request-validator-core</artifactId>
         <version>${openapi-validator.version}</version>
         <scope>test</scope>
+      </dependency>
+      <!-- QR codes on certificates (CC-083; ADR-051). Pure Java, Apache-2.0. -->
+      <dependency>
+        <groupId>com.google.zxing</groupId>
+        <artifactId>core</artifactId>
+        <version>${zxing.version}</version>
       </dependency>
       <dependency>
         <groupId>com.tngtech.archunit</groupId>

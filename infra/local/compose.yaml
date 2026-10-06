@@ -161,6 +161,22 @@ services:
       timeout: 3s
       retries: 20
 
+  document-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: document
+      POSTGRES_USER: ${DOC_DB_USER:?run tools/dev/up.sh}
+      POSTGRES_PASSWORD_FILE: /run/secrets/document_db_password
+    secrets:
+      - document_db_password
+    volumes:
+      - document-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d document"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   keycloak:
     image: quay.io/keycloak/keycloak:26.8.0
     command: ["start-dev", "--import-realm"]
@@ -553,6 +569,98 @@ services:
       timeout: 3s
       retries: 30
 
+  document-service:
+    build: ../../services/document-service
+    environment:
+      <<: [*itms-observability, *itms-events]
+      DOC_DB_URL: jdbc:postgresql://document-postgres:5432/document
+      # Object store (ADR-005: MinIO locally) and malware scanner (CC-081: ClamAV); keys are secret files below.
+      ITMS_DOCUMENTS_STORE_ENDPOINT: http://minio:9000
+      ITMS_DOCUMENTS_STORE_BUCKET: itms-documents
+      ITMS_DOCUMENTS_SCANNER_HOST: clamav
+      ITMS_DOCUMENTS_VERIFICATION_URL: http://localhost:9080/v1/certificate-verifications
+      # Short-lived login from OpenBao (ADR-039), files under /run/secrets/spring/datasource; owner role on connect.
+      SPRING_DATASOURCE_HIKARI_CONNECTIONINITSQL: SET ROLE itms_owner
+      ITMS_OIDC_ISSUER: http://localhost:8180/realms/itms
+      ITMS_OIDC_JWKS_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/certs
+      ITMS_AUTHORISATION_SOURCE: iam
+      ITMS_IAM_URL: http://iam-service:8080
+    secrets:
+      - source: minio_access_key
+        target: itms.documents.store.access-key
+      - source: minio_secret_key
+        target: itms.documents.store.secret-key
+    volumes:
+      - type: volume
+        source: db-credentials
+        target: /run/secrets/spring/datasource
+        read_only: true
+        volume:
+          subpath: document-service
+    ports:
+      - "127.0.0.1:8091:8080"
+    depends_on:
+      bao-agent:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+      kafka:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      clamav:
+        condition: service_healthy
+      document-postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      iam-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8090/actuator/health/readiness | grep -q UP"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  # ---- Object store (ADR-005; MinIO stands in for Ceph RGW) and malware scanner (CC-081). Local development only.
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER_FILE: /run/secrets/minio_access_key
+      MINIO_ROOT_PASSWORD_FILE: /run/secrets/minio_secret_key
+    secrets:
+      - minio_access_key
+      - minio_secret_key
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    entrypoint: ["sh", "-c", "mc alias set local http://minio:9000 \"$$(cat /run/secrets/minio_access_key)\" \"$$(cat /run/secrets/minio_secret_key)\" && mc mb --ignore-existing local/itms-documents"]
+    secrets:
+      - minio_access_key
+      - minio_secret_key
+    depends_on:
+      minio:
+        condition: service_healthy
+
+  clamav:
+    image: clamav/clamav:1.4.3
+    volumes:
+      - clamav-db:/var/lib/clamav
+    healthcheck:
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 15s
+      timeout: 10s
+      retries: 40
+      start_period: 120s
+
   # ---- Partner mocks (Gate C). Built from the ICDs; never used outside local development and tests.
   identity-register-mock:
     image: wiremock/wiremock:3.13.1
@@ -628,6 +736,8 @@ services:
         condition: service_healthy
       notification-service:
         condition: service_healthy
+      document-service:
+        condition: service_healthy
     healthcheck:
       # Ready once routes are loaded and the token check answers: an unauthenticated call gets 401.
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9080 && printf 'GET /v1/roles HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && head -1 <&3 | grep -q ' 401 '"]
@@ -674,7 +784,7 @@ services:
       openbao:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "for s in iam-service reference-data-service transaction-service hold-eligibility-service traffic-file-service fees-service rules-service workflow-service notification-service; do test -s /run/db-credentials/$$s/username && test -s /run/db-credentials/$$s/password || exit 1; done"]
+      test: ["CMD-SHELL", "for s in iam-service reference-data-service transaction-service hold-eligibility-service traffic-file-service fees-service rules-service workflow-service notification-service document-service; do test -s /run/db-credentials/$$s/username && test -s /run/db-credentials/$$s/password || exit 1; done"]
       interval: 2s
       timeout: 3s
       retries: 30
@@ -745,6 +855,12 @@ services:
 # /run/secrets/ in the containers, never set as container environment variables. In real environments the secret
 # store delivers the same files (Kubernetes secrets through the external-secrets operator, ADR-014).
 secrets:
+  minio_access_key:
+    environment: DEV_MINIO_ACCESS_KEY
+  minio_secret_key:
+    environment: DEV_MINIO_SECRET_KEY
+  document_db_password:
+    environment: DOC_DB_PASSWORD
   notification_db_password:
     environment: NOTIF_DB_PASSWORD
   workflow_db_password:
@@ -784,5 +900,8 @@ volumes:
   rules-db:
   workflow-db:
   notification-db:
+  document-db:
+  minio-data:
+  clamav-db:
   db-credentials:
   kafka-data:

@@ -1,0 +1,148 @@
+# document-service configuration. All environment-specific values come from environment variables
+# (NFR-042, SEC-004); nothing secret is stored here.
+spring:
+  application:
+    name: document-service
+  # Secrets arrive as files, one per property, named after it (SEC-004, ADR-038): mounted by the platform
+  # (Kubernetes secrets from the secret store; compose secrets locally), never as environment variables.
+  config:
+    import: "optional:configtree:${ITMS_SECRETS_DIR:/run/secrets/}"
+  datasource:
+    url: ${DOC_DB_URL}
+    username: ${DOC_DB_USER:}
+    password: ${DOC_DB_PASSWORD:}
+  flyway:
+    locations: classpath:db/platform,classpath:db/migration
+    # Platform migrations (db/platform, V0_x) can be added after the service's own; apply them out of order
+    # (ADR-040). Each is additive and touches only platform tables.
+    out-of-order: true
+  # Message broker (INT-005, ADR-002). Producer defaults are kept: acks=all and idempotence on.
+  kafka:
+    bootstrap-servers: ${ITMS_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+  messages:
+    basename: messages
+    fallback-to-system-locale: false
+  threads:
+    virtual:
+      enabled: true
+
+itms:
+  # Domain events and audit records leave through the transactional outbox (INT-005, CC-120, ADR-040). Off by default
+  # so the service runs without a broker; rows wait in the outbox until the relay is switched on.
+  events:
+    enabled: ${ITMS_EVENTS_ENABLED:false}
+    audit-topic: ${ITMS_EVENTS_AUDIT_TOPIC:itms.audit.v1}
+    domain-topic: ${ITMS_EVENTS_DOMAIN_TOPIC:}
+    batch-size: ${ITMS_EVENTS_BATCH_SIZE:100}
+    send-timeout: ${ITMS_EVENTS_SEND_TIMEOUT:10s}
+    relay-interval: ${ITMS_EVENTS_RELAY_INTERVAL:1s}
+  security:
+    issuer: ${ITMS_OIDC_ISSUER}
+    jwk-set-uri: ${ITMS_OIDC_JWKS_URI}
+    audience: itms-api
+    # Certificate verification is a deliberately public page (CC-083); everything else needs a token.
+    public-paths:
+      - /v1/certificate-verifications/*
+    # Grants come from iam-service (ADR-022). token-claims is the interim ADR-018 mode, for tests only.
+    authorisation-source: ${ITMS_AUTHORISATION_SOURCE:iam}
+    iam:
+      base-url: ${ITMS_IAM_URL:}
+      cache-ttl: ${ITMS_IAM_CACHE_TTL:60s}
+  # Documents (CC-080..CC-085; ADR-051). Object store keys arrive as secret files itms.documents.store.access-key and
+  # itms.documents.store.secret-key (SEC-004). Document types are configuration (CC-081): add or change one without a
+  # release.
+  documents:
+    store:
+      endpoint: ${ITMS_DOCUMENTS_STORE_ENDPOINT:http://localhost:9000}
+      bucket: ${ITMS_DOCUMENTS_STORE_BUCKET:itms-documents}
+      region: ${ITMS_DOCUMENTS_STORE_REGION:local}
+      timeout: ${ITMS_DOCUMENTS_STORE_TIMEOUT:30s}
+    scanner:
+      host: ${ITMS_DOCUMENTS_SCANNER_HOST:localhost}
+      port: ${ITMS_DOCUMENTS_SCANNER_PORT:3310}
+      timeout: ${ITMS_DOCUMENTS_SCANNER_TIMEOUT:120s}
+    certificates:
+      number-prefix: ${ITMS_DOCUMENTS_CERTIFICATE_PREFIX:CRT}
+      verification-base-url: ${ITMS_DOCUMENTS_VERIFICATION_URL:http://localhost:9080/v1/certificate-verifications}
+    types:
+      - code: IDENTITY_DOCUMENT
+        media-types: [application/pdf, image/jpeg, image/png]
+        max-size: 10MB
+        classification: CONFIDENTIAL
+      - code: PERSONAL_PHOTO
+        media-types: [image/jpeg, image/png]
+        max-size: 5MB
+        classification: CONFIDENTIAL
+      - code: MEDICAL_REPORT
+        media-types: [application/pdf, image/jpeg, image/png]
+        max-size: 10MB
+        classification: SECRET
+      - code: SUPPORTING_DOCUMENT
+        media-types: [application/pdf, image/jpeg, image/png, image/tiff]
+        max-size: 20MB
+        classification: INTERNAL
+      - code: ACCIDENT_PHOTO
+        media-types: [image/jpeg, image/png, image/heic, image/webp]
+        max-size: 25MB
+        classification: CONFIDENTIAL
+      - code: ACCIDENT_VIDEO
+        media-types: [video/mp4, video/quicktime]
+        max-size: 2GB
+        classification: CONFIDENTIAL
+      - code: RADAR_IMAGE
+        media-types: [image/jpeg, image/png, image/tiff]
+        max-size: 25MB
+        classification: CONFIDENTIAL
+  # API_SPECIFICATION §2, ADR-032: declaring documents, issuing and revoking certificates need an Idempotency-Key.
+  idempotency:
+    enabled: true
+    paths:
+      - /v1/documents
+      - /v1/certificates
+      - /v1/certificates/*/revocations
+    retention: ${ITMS_IDEMPOTENCY_RETENTION:24h}
+    lock-timeout: ${ITMS_IDEMPOTENCY_LOCK_TIMEOUT:30s}
+    cleanup-interval: ${ITMS_IDEMPOTENCY_CLEANUP_INTERVAL:15m}
+    cleanup-batch-size: ${ITMS_IDEMPOTENCY_CLEANUP_BATCH_SIZE:500}
+
+# Observability (NFR-040, ADR-037). Probes and the Prometheus scrape are served on a separate management port, reached
+# only from the operations network; on that port they need no token (ManagementRequests). Traces and logs go to an
+# OpenTelemetry collector only when its endpoints are set, for example
+# MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT=http://otel-collector:4318/v1/traces and
+# MANAGEMENT_OPENTELEMETRY_LOGGING_EXPORT_OTLP_ENDPOINT=http://otel-collector:4318/v1/logs.
+management:
+  server:
+    port: ${ITMS_MANAGEMENT_PORT:8090}
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+        http.client.requests: true
+  tracing:
+    sampling:
+      probability: ${ITMS_TRACING_SAMPLING_PROBABILITY:0.1}
+
+server:
+  error:
+    include-stacktrace: never
+    include-message: never
+
+# Log levels are set per service (NFR-040): ITMS_LOG_LEVEL for ITMS code, ITMS_LOG_LEVEL_ROOT for everything else.
+logging:
+  level:
+    root: ${ITMS_LOG_LEVEL_ROOT:INFO}
+    gov.itms: ${ITMS_LOG_LEVEL:INFO}
+  pattern:
+    level: "%5p [${spring.application.name},%X{correlationId:-}]"
+    correlation: "[%X{traceId:-},%X{spanId:-}] "

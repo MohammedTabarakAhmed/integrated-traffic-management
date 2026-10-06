@@ -46,6 +46,10 @@ upstreams:
     type: roundrobin
     nodes:
       "notification-service:8080": 1
+  - id: document-service
+    type: roundrobin
+    nodes:
+      "document-service:8080": 1
 
 plugin_configs:
   - id: protected-api
@@ -64,6 +68,20 @@ plugin_configs:
         set_access_token_header: false
       limit-count:
         count: 600
+        time_window: 60
+        key_type: var
+        key: remote_addr
+        policy: local
+        rejected_code: 429
+        show_limit_quota_header: true
+      prometheus:
+        prefer_name: true
+  # Deliberately public pages (CC-083 certificate verification): no token, a tight per-address limit against
+  # enumeration (the verification code is also required by the service).
+  - id: public-api
+    plugins:
+      limit-count:
+        count: 30
         time_window: 60
         key_type: var
         key: remote_addr
@@ -186,4 +204,22 @@ routes:
       - /v1/event-subscriptions
       - /v1/expiry-watches
       - /v1/delivery-receipts
+  - id: document-service
+    name: document-service
+    upstream_id: document-service
+    plugin_config_id: protected-api
+    uris:
+      - /v1/document-types
+      - /v1/documents
+      - /v1/documents/*
+      - /v1/certificate-templates
+      - /v1/certificates
+      - /v1/certificates/*
+  - id: certificate-verification
+    name: certificate-verification
+    upstream_id: document-service
+    plugin_config_id: public-api
+    methods: [GET]
+    uris:
+      - /v1/certificate-verifications/*
 #END

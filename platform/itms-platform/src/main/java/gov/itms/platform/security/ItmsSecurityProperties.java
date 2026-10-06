@@ -1,6 +1,7 @@
 package gov.itms.platform.security;
 
 import java.time.Duration;
+import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
@@ -16,6 +17,8 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param permissionsClaim    flat claim holding ITMS permission strings ({@code token-claims} mode only)
  * @param rolesClaim          flat claim holding role names ({@code token-claims} mode only)
  * @param iam                 iam-service client settings ({@code iam} mode)
+ * @param publicPaths         GET paths (Ant patterns) open without a token, for deliberately public pages such as
+ *                            certificate verification (CC-083); empty by default, every other request needs a token
  */
 @ConfigurationProperties("itms.security")
 public record ItmsSecurityProperties(
@@ -25,9 +28,19 @@ public record ItmsSecurityProperties(
         @DefaultValue("iam") AuthorisationSource authorisationSource,
         @DefaultValue("permissions") String permissionsClaim,
         @DefaultValue("roles") String rolesClaim,
-        @DefaultValue Iam iam) {
+        @DefaultValue Iam iam,
+        List<String> publicPaths) {
 
     public enum AuthorisationSource { IAM, TOKEN_CLAIMS }
+
+    public ItmsSecurityProperties {
+        publicPaths = publicPaths == null ? List.of() : List.copyOf(publicPaths);
+        for (String p : publicPaths) {
+            if (p == null || !p.startsWith("/v1/") || p.contains("..")) {
+                throw new IllegalArgumentException("itms.security.public-paths must be /v1/ paths (SEC-001)");
+            }
+        }
+    }
 
     /**
      * @param baseUrl         iam-service base URL, e.g. {@code http://iam-service:8080}

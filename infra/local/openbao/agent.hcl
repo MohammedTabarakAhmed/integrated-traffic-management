@@ -121,3 +121,14 @@ template {
   destination = "/run/db-credentials/notification-service/password"
   perms       = "0444"
 }
+
+template {
+  contents    = "{{ with secret \"database/creds/document-service\" }}{{ .Data.username }}{{ end }}"
+  destination = "/run/db-credentials/document-service/username"
+  perms       = "0444"
+}
+template {
+  contents    = "{{ with secret \"database/creds/document-service\" }}{{ .Data.password }}{{ end }}"
+  destination = "/run/db-credentials/document-service/password"
+  perms       = "0444"
+}

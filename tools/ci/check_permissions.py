@@ -4,7 +4,8 @@
 Roles in iam-service may only contain catalogue permissions, and every service enforces the permissions declared in
 its OpenAPI. This check keeps the three in step:
   1. every hasAuthority('<perm>') in a service's Java code is declared as x-itms-permission in that service's OpenAPI;
-  2. every x-itms-permission (except the pseudo-value "authenticated") is in the iam-service catalogue migrations,
+  2. every x-itms-permission (except the pseudo-values "authenticated" and "public", the latter only on
+     operations with `security: []`) is in the iam-service catalogue migrations,
      registered under the declaring service's name.
 
 Exit code 0 = OK, 1 = violations found. Standard library only.
@@ -18,7 +19,7 @@ from pathlib import Path
 OPENAPI_PERMISSION = re.compile(r"^\s*x-itms-permission:\s*([A-Za-z0-9.\-]+)\s*$", re.MULTILINE)
 HAS_AUTHORITY = re.compile(r"hasAuthority\('([^']+)'\)")
 CATALOGUE_ROW = re.compile(r"\(\s*'([a-z][a-z0-9.\-]*)'\s*,\s*'([a-z0-9\-]+)'")
-PSEUDO = {"authenticated"}
+PSEUDO = {"authenticated", "public"}
 CATALOGUE_DIR = Path("services/iam-service/src/main/resources/db/migration")
 
 

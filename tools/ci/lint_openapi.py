@@ -11,8 +11,10 @@ Every `services/<service>/src/main/resources/openapi/*.yaml` must follow the con
   L06 each operation declares x-itms-scope: `national`, or a list of distinct dimensions from own, region, centre,
       module (ADR-036);
   L07 a secured operation documents 401, and 403 unless its permission is `authenticated` (any signed-in subject);
+      permission `public` is only for operations with `security: []` (deliberately public pages, CC-083);
   L08 error responses (4xx/5xx) with a body use application/problem+json only (CH-053, §3);
-  L09 request bodies are application/json; request objects are closed (`additionalProperties: false`, or a map
+  L09 request bodies are application/json (or, only on an operation marked `x-itms-binary-upload: true`, a single
+      application/octet-stream body of type string/binary: uploads to document-service, ADR-051); request objects are closed (`additionalProperties: false`, or a map
       whose keys have a pattern and whose values have a schema) and request strings are bounded (maxLength, pattern,
       enum, format or const) (SEC-022);
   L10 every internal $ref resolves;
@@ -205,6 +207,8 @@ def lint(spec: dict, name: str, idempotent: list[str]) -> list[str]:
             secured = op.get("security", global_security) not in (None, [])
             if secured and "401" not in responses:
                 add("L07", f"{where}: a secured operation documents 401")
+            if permission == "public" and secured:
+                add("L07", f"{where}: a public operation sets security: [] (no token)")
             if secured and permission != "authenticated" and "403" not in responses:
                 add("L07", f"{where}: an operation behind a permission documents 403")
             for status, response in responses.items():
@@ -217,7 +221,14 @@ def lint(spec: dict, name: str, idempotent: list[str]) -> list[str]:
             body = deref(spec, op.get("requestBody"))
             if body:
                 content = body.get("content") or {}
-                if set(content) != {"application/json"}:
+                binary = op.get("x-itms-binary-upload") is True
+                if binary:
+                    schema = deref(spec, (content.get("application/octet-stream") or {}).get("schema")) or {}
+                    if set(content) != {"application/octet-stream"} or schema.get("type") != "string"                             or schema.get("format") != "binary":
+                        add("L09", f"{where}: a binary upload has one application/octet-stream body of type "
+                                   f"string, format binary")
+                    content = {}
+                elif set(content) != {"application/json"}:
                     add("L09", f"{where}: request bodies are application/json only, not {sorted(content)}")
                 for media in content.values():
                     for problem in request_schema_problems(spec, media.get("schema"), op_id or where):

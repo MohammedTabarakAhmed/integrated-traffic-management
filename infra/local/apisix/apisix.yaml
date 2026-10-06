@@ -62,6 +62,10 @@ upstreams:
     type: roundrobin
     nodes:
       "payment-service:8080": 1
+  - id: vehicle-service
+    type: roundrobin
+    nodes:
+      "vehicle-service:8080": 1
 
 plugin_configs:
   - id: protected-api
@@ -267,4 +271,12 @@ routes:
       - /v1/payments/*
       - /v1/receipts
       - /v1/receipts/*
+  - id: vehicle-service
+    name: vehicle-service
+    upstream_id: vehicle-service
+    plugin_config_id: protected-api
+    uris:
+      - /v1/vehicles
+      - /v1/vehicles/*
+      - /v1/plate-series
 #END

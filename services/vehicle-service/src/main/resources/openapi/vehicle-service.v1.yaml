@@ -1,0 +1,393 @@
+openapi: 3.1.0
+info:
+  title: ITMS Vehicle Service
+  version: 1.0.0
+  description: |
+    Vehicles, registration and plates — the Increment 1 core (ADR-055).
+
+    Vehicle records (VL-001, VL-003, VL-004, VL-005) are keyed by a checked VIN (17 characters, check digit for the
+    configured manufacturer regions); one active record per VIN. Every change is in the vehicle's history.
+
+    Inspection centres send results (VL-025, VL-040). Inspection is needed from an age set per category (VL-041).
+
+    First registration (VL-010) and renewal (VL-011) check everything **before** a fee is asked: the renewal window
+    (default 30 days before expiry), a valid insurance policy checked in real time with the insurer (VL-024; UAT-3:
+    409 `INSURANCE_EXPIRED` with "Your vehicle insurance has expired. Renew it with your insurer, then try again.";
+    insurer down: 503, fail closed), and a recent passed inspection when needed. Then the fee is quoted by fees-service
+    and registered as a payable at payment-service; the answer carries the payable to pay. When payment-service
+    confirms the payment, the registration completes: the reserved plate is assigned (first registration, VL-031,
+    VL-032) and the new expiry, set by category and age (VL-023), takes effect.
+
+    Plate series per region, plate category, colour code and design (VL-030); the next free standard number, skipping
+    the series' premium numbers, is reserved for a first registration.
+
+    The channel is the `X-Channel` header. Only GET/POST are used (INT-003).
+servers:
+  - url: /
+security:
+  - bearerAuth: []
+tags:
+  - name: Vehicles
+  - name: Registration
+  - name: Plates
+
+paths:
+  /v1/vehicles:
+    post:
+      tags: [Vehicles]
+      operationId: createVehicle
+      summary: Add a vehicle to the register (VL-001, VL-003)
+      description: Refused when the VIN is malformed (422 `VIN_INVALID`, `VIN_CHECK_DIGIT`) or already active (409 `VIN_ACTIVE`).
+      x-itms-permission: vehicle.create
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateRequest' }
+      responses:
+        '201':
+          description: Added
+          headers:
+            Location: { schema: { type: string } }
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Vehicle' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/vehicles/{vin}:
+    get:
+      tags: [Vehicles]
+      operationId: getVehicle
+      summary: A vehicle; the read is audited
+      x-itms-permission: vehicle.read
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/Vin'
+      responses:
+        '200':
+          description: Vehicle
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Vehicle' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/vehicles/{vin}/history:
+    get:
+      tags: [Vehicles]
+      operationId: getVehicleHistory
+      summary: The vehicle file's history (VL-005); the read is audited
+      x-itms-permission: vehicle.read
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/Vin'
+      responses:
+        '200':
+          description: History, oldest first
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [event, actorId, detail, at]
+                      properties:
+                        event: { type: string }
+                        actorId: { type: string }
+                        detail: { type: object }
+                        at: { type: string, format: date-time }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/vehicles/{vin}/inspection-results:
+    post:
+      tags: [Vehicles]
+      operationId: recordInspection
+      summary: An inspection centre records a result (VL-025, VL-040)
+      x-itms-permission: vehicle.inspection.record
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/Vin'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InspectionRequest' }
+      responses:
+        '201':
+          description: Recorded
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Inspection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/vehicles/{vin}/registrations:
+    post:
+      tags: [Registration]
+      operationId: startFirstRegistration
+      summary: Check, reserve a plate and prepare the fee of a first registration (VL-010)
+      x-itms-permission: vehicle.register
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/Vin'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegistrationRequest' }
+      responses:
+        '201': { $ref: '#/components/responses/Request' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/vehicles/{vin}/renewals:
+    post:
+      tags: [Registration]
+      operationId: startRenewal
+      summary: Check and prepare the fee of a renewal (VL-011, VL-024, UAT-3)
+      description: |
+        409 `RENEWAL_NOT_OPEN` before the window; 409 `INSURANCE_EXPIRED` (UAT-3) without a valid policy today; 409
+        `INSPECTION_REQUIRED` or `INSPECTION_FAILED`; 503 `INSURANCE_UNAVAILABLE` when the insurer does not answer.
+      x-itms-permission: vehicle.register
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/Vin'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegistrationRequest' }
+      responses:
+        '201': { $ref: '#/components/responses/Request' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/plate-series:
+    post:
+      tags: [Plates]
+      operationId: savePlateSeries
+      summary: Create or extend a plate number series (VL-030)
+      x-itms-permission: vehicle.plate.manage
+      x-itms-scope: [region]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Series' }
+      responses:
+        '200':
+          description: Saved
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Series' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    Vin:
+      name: vin
+      in: path
+      required: true
+      schema: { type: string, pattern: '^[A-HJ-NPR-Za-hj-npr-z0-9]{17}$' }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Chosen by the client, new for every intended action, and sent again unchanged on a retry (API_SPECIFICATION
+        §2, ADR-032). A retry with the same key and request gets the stored response, marked `Idempotent-Replayed`.
+      schema: { type: string, pattern: '^[A-Za-z0-9._:-]{8,128}$' }
+
+  headers:
+    IdempotentReplayed:
+      description: '`true` when the response is the stored response of an earlier request with the same Idempotency-Key'
+      schema: { type: string, enum: ['true'] }
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid bearer token
+    Problem:
+      description: Problem details (RFC 9457, API_SPECIFICATION §3)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Request:
+      description: Checks passed; pay the payable to complete
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [id, kind, status, amountMinor, newExpiry, createdAt]
+            properties:
+              id: { type: string, format: uuid }
+              kind: { type: string, enum: [FIRST, RENEWAL] }
+              status: { type: string, enum: [AWAITING_PAYMENT, COMPLETED, CANCELLED] }
+              payableId: { oneOf: [ { type: string, format: uuid }, { type: 'null' } ] }
+              amountMinor: { type: integer }
+              currency: { oneOf: [ { type: string }, { type: 'null' } ] }
+              newExpiry: { type: string, format: date }
+              createdAt: { type: string, format: date-time }
+
+  schemas:
+    Code:
+      type: string
+      pattern: '^[A-Z0-9][A-Z0-9_]{0,39}$'
+    Ref:
+      type: string
+      pattern: '^[A-Z0-9][A-Z0-9-]{0,59}$'
+    Spec:
+      type: object
+      additionalProperties: false
+      required: [engineNo, make, model, modelYear, bodyType, colours, fuelType, steering, seats, emptyWeightKg,
+                 grossWeightKg, axles, cylinders, category]
+      properties:
+        engineNo: { type: string, pattern: '^[A-Z0-9-]{1,40}$' }
+        make: { $ref: '#/components/schemas/Code' }
+        model: { $ref: '#/components/schemas/Code' }
+        modelYear: { type: integer, minimum: 1886, maximum: 2100 }
+        bodyType: { $ref: '#/components/schemas/Code' }
+        colours: { type: array, minItems: 1, maxItems: 3, items: { $ref: '#/components/schemas/Code' } }
+        fuelType: { $ref: '#/components/schemas/Code' }
+        steering: { type: string, enum: [LEFT, RIGHT] }
+        seats: { type: integer, minimum: 0, maximum: 200 }
+        emptyWeightKg: { type: integer, minimum: 1 }
+        grossWeightKg: { type: integer, minimum: 1, maximum: 200000 }
+        axles: { type: integer, minimum: 1, maximum: 20 }
+        cylinders: { type: integer, minimum: 0, maximum: 32 }
+        category: { $ref: '#/components/schemas/Code' }
+    CreateRequest:
+      type: object
+      additionalProperties: false
+      required: [vin, spec, ownerFileNumber, region]
+      properties:
+        vin: { type: string, pattern: '^[A-HJ-NPR-Za-hj-npr-z0-9]{17}$' }
+        spec: { $ref: '#/components/schemas/Spec' }
+        ownerFileNumber: { $ref: '#/components/schemas/Ref' }
+        region: { $ref: '#/components/schemas/Code' }
+    Vehicle:
+      type: object
+      additionalProperties: false
+      required: [vin, spec, ownerFileNumber, region, status, registrationValid, createdAt]
+      properties:
+        vin: { type: string }
+        spec: { $ref: '#/components/schemas/Spec' }
+        ownerFileNumber: { type: string }
+        region: { type: string }
+        status: { type: string, enum: [UNREGISTERED, REGISTERED, DEREGISTERED] }
+        registrationValid: { type: boolean }
+        registrationExpiry: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
+        plateNumber: { oneOf: [ { type: string }, { type: 'null' } ] }
+        createdAt: { type: string, format: date-time }
+    InspectionRequest:
+      type: object
+      additionalProperties: false
+      required: [centreCode, inspectedOn, odometerKm, passed]
+      properties:
+        centreCode: { $ref: '#/components/schemas/Code' }
+        inspectedOn: { type: string, format: date }
+        odometerKm: { type: integer, minimum: 0, maximum: 10000000 }
+        results:
+          oneOf:
+            - type: object
+              maxProperties: 50
+              propertyNames: { pattern: '^[A-Z0-9][A-Z0-9_]{0,39}$' }
+              additionalProperties: { type: string, enum: [PASS, FAIL, ADVISORY] }
+            - type: 'null'
+        passed: { type: boolean }
+        photoDocumentIds:
+          oneOf:
+            - { type: array, maxItems: 30, items: { type: string, pattern: '^[A-Za-z0-9-]{1,64}$' } }
+            - { type: 'null' }
+    Inspection:
+      type: object
+      additionalProperties: false
+      required: [id, centreCode, inspectedOn, odometerKm, results, passed, photoDocumentIds, recordedAt]
+      properties:
+        id: { type: string, format: uuid }
+        centreCode: { type: string }
+        inspectedOn: { type: string, format: date }
+        odometerKm: { type: integer }
+        results: { type: object, additionalProperties: { type: string } }
+        passed: { type: boolean }
+        photoDocumentIds: { type: array, items: { type: string } }
+        recordedAt: { type: string, format: date-time }
+    RegistrationRequest:
+      type: object
+      additionalProperties: false
+      required: [customerCategory]
+      properties:
+        customerCategory: { $ref: '#/components/schemas/Code' }
+    Series:
+      type: object
+      additionalProperties: false
+      required: [code, region, plateCategory, colourCode, design, prefix, firstNumber, lastNumber, active]
+      properties:
+        code: { $ref: '#/components/schemas/Code' }
+        region: { $ref: '#/components/schemas/Code' }
+        plateCategory: { $ref: '#/components/schemas/Code' }
+        colourCode: { $ref: '#/components/schemas/Code' }
+        design: { $ref: '#/components/schemas/Code' }
+        prefix: { type: string, pattern: '^[A-Z0-9]{0,5}$' }
+        firstNumber: { type: integer, minimum: 1 }
+        lastNumber: { type: integer, maximum: 99999999 }
+        premiumPattern: { oneOf: [ { type: string, maxLength: 200 }, { type: 'null' } ] }
+        active: { type: boolean }
+    Problem:
+      type: object
+      required: [status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        code: { type: string }
+        detail: { type: string }
+        instance: { type: string }
+        correlationId: { type: string }
+        requirementRefs: { type: array, items: { type: string } }
+        errors: { type: array, items: { type: object } }

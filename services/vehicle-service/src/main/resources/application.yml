@@ -1,0 +1,138 @@
+# vehicle-service configuration. All environment-specific values come from environment variables
+# (NFR-042, SEC-004); nothing secret is stored here.
+spring:
+  application:
+    name: vehicle-service
+  # Secrets arrive as files, one per property, named after it (SEC-004, ADR-038): mounted by the platform
+  # (Kubernetes secrets from the secret store; compose secrets locally), never as environment variables.
+  config:
+    import: "optional:configtree:${ITMS_SECRETS_DIR:/run/secrets/}"
+  datasource:
+    url: ${VEH_DB_URL}
+    username: ${VEH_DB_USER:}
+    password: ${VEH_DB_PASSWORD:}
+  flyway:
+    locations: classpath:db/platform,classpath:db/migration
+    # Platform migrations (db/platform, V0_x) can be added after the service's own; apply them out of order
+    # (ADR-040). Each is additive and touches only platform tables.
+    out-of-order: true
+  # Message broker (INT-005, ADR-002). Producer defaults are kept: acks=all and idempotence on.
+  kafka:
+    bootstrap-servers: ${ITMS_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+  messages:
+    basename: messages
+    fallback-to-system-locale: false
+  threads:
+    virtual:
+      enabled: true
+
+itms:
+  # Domain events and audit records leave through the transactional outbox (INT-005, CC-120, ADR-040). Off by default
+  # so the service runs without a broker; rows wait in the outbox until the relay is switched on.
+  events:
+    enabled: ${ITMS_EVENTS_ENABLED:false}
+    audit-topic: ${ITMS_EVENTS_AUDIT_TOPIC:itms.audit.v1}
+    domain-topic: ${ITMS_EVENTS_DOMAIN_TOPIC:}
+    batch-size: ${ITMS_EVENTS_BATCH_SIZE:100}
+    send-timeout: ${ITMS_EVENTS_SEND_TIMEOUT:10s}
+    relay-interval: ${ITMS_EVENTS_RELAY_INTERVAL:1s}
+  security:
+    issuer: ${ITMS_OIDC_ISSUER}
+    jwk-set-uri: ${ITMS_OIDC_JWKS_URI}
+    audience: itms-api
+    # Grants come from iam-service (ADR-022). token-claims is the interim ADR-018 mode, for tests only.
+    authorisation-source: ${ITMS_AUTHORISATION_SOURCE:iam}
+    iam:
+      base-url: ${ITMS_IAM_URL:}
+      cache-ttl: ${ITMS_IAM_CACHE_TTL:60s}
+  # Vehicles (VL-*; ADR-055). Categories and their rules are configuration (VL-004, VL-023, VL-041) until they move to
+  # rules-service (Q-071). Code-keyed settings are lists of objects.
+  vehicles:
+    default-validity-months: ${ITMS_VEHICLES_DEFAULT_VALIDITY_MONTHS:12}
+    renewal-window-days: ${ITMS_VEHICLES_RENEWAL_WINDOW_DAYS:30}
+    inspection-validity-days: ${ITMS_VEHICLES_INSPECTION_VALIDITY_DAYS:30}
+    default-inspection-exempt-years: ${ITMS_VEHICLES_DEFAULT_INSPECTION_EXEMPT_YEARS:0}
+    first-registration-fee: ${ITMS_VEHICLES_FIRST_REGISTRATION_FEE:VEH_FIRST_REG}
+    renewal-fee: ${ITMS_VEHICLES_RENEWAL_FEE:VEH_RENEWAL}
+    check-digit-regions: ${ITMS_VEHICLES_CHECK_DIGIT_REGIONS:1,2,3,4,5}
+    consumer-enabled: ${ITMS_VEHICLES_CONSUMER_ENABLED:false}
+    payment-topic: ${ITMS_VEHICLES_PAYMENT_TOPIC:itms.payment-service.events.v1}
+    insurance:
+      base-url: ${ITMS_INSURANCE_HUB_URL:http://localhost:8097}
+      timeout: ${ITMS_INSURANCE_HUB_TIMEOUT:3s}
+    categories:
+      - { code: PRIVATE, validity-months: 12, inspection-exempt-years: 3, plate-category: PRIVATE }
+      - { code: COMMERCIAL, validity-months: 12, inspection-exempt-years: 0, plate-category: COMMERCIAL }
+      - { code: PUBLIC_TRANSPORT, validity-months: 12, inspection-exempt-years: 0, plate-category: PUBLIC }
+      - { code: RENTAL, validity-months: 12, inspection-exempt-years: 1, plate-category: RENTAL }
+      - { code: GOVERNMENT, validity-months: 12, inspection-exempt-years: 3, plate-category: GOVERNMENT }
+      - { code: DIPLOMATIC, validity-months: 12, inspection-exempt-years: 3, plate-category: DIPLOMATIC }
+      - { code: CLASSIC, validity-months: 12, inspection-exempt-years: 0, plate-category: CLASSIC }
+      - { code: HEAVY_EQUIPMENT, validity-months: 12, inspection-exempt-years: 0, plate-category: HEAVY }
+  # Calls to other services with this service's own client-credentials account (ADR-034).
+  clients:
+    fees:
+      base-url: ${ITMS_FEES_URL:http://localhost:8086}
+      token-uri: ${ITMS_OIDC_TOKEN_URI:http://localhost:8180/realms/itms/protocol/openid-connect/token}
+      client-id: ${ITMS_SERVICE_CLIENT_ID:itms-vehicle-service}
+      client-secret: ${ITMS_SERVICE_CLIENT_SECRET:}
+      timeout: ${ITMS_FEES_TIMEOUT:3s}
+    payments:
+      base-url: ${ITMS_PAYMENTS_URL:http://localhost:8094}
+      token-uri: ${ITMS_OIDC_TOKEN_URI:http://localhost:8180/realms/itms/protocol/openid-connect/token}
+      client-id: ${ITMS_SERVICE_CLIENT_ID:itms-vehicle-service}
+      client-secret: ${ITMS_SERVICE_CLIENT_SECRET:}
+      timeout: ${ITMS_PAYMENTS_TIMEOUT:3s}
+  # API_SPECIFICATION §2, ADR-032: creating vehicles and starting registrations need an Idempotency-Key.
+  idempotency:
+    enabled: true
+    paths:
+      - /v1/vehicles
+      - /v1/vehicles/*/registrations
+      - /v1/vehicles/*/renewals
+    retention: ${ITMS_IDEMPOTENCY_RETENTION:24h}
+    lock-timeout: ${ITMS_IDEMPOTENCY_LOCK_TIMEOUT:30s}
+    cleanup-interval: ${ITMS_IDEMPOTENCY_CLEANUP_INTERVAL:15m}
+    cleanup-batch-size: ${ITMS_IDEMPOTENCY_CLEANUP_BATCH_SIZE:500}
+
+# Observability (NFR-040, ADR-037). Probes and the Prometheus scrape are served on a separate management port, reached
+# only from the operations network; on that port they need no token (ManagementRequests). Traces and logs go to an
+# OpenTelemetry collector only when its endpoints are set, for example
+# MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT=http://otel-collector:4318/v1/traces and
+# MANAGEMENT_OPENTELEMETRY_LOGGING_EXPORT_OTLP_ENDPOINT=http://otel-collector:4318/v1/logs.
+management:
+  server:
+    port: ${ITMS_MANAGEMENT_PORT:8090}
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+        http.client.requests: true
+  tracing:
+    sampling:
+      probability: ${ITMS_TRACING_SAMPLING_PROBABILITY:0.1}
+
+server:
+  error:
+    include-stacktrace: never
+    include-message: never
+
+# Log levels are set per service (NFR-040): ITMS_LOG_LEVEL for ITMS code, ITMS_LOG_LEVEL_ROOT for everything else.
+logging:
+  level:
+    root: ${ITMS_LOG_LEVEL_ROOT:INFO}
+    gov.itms: ${ITMS_LOG_LEVEL:INFO}
+  pattern:
+    level: "%5p [${spring.application.name},%X{correlationId:-}]"
+    correlation: "[%X{traceId:-},%X{spanId:-}] "

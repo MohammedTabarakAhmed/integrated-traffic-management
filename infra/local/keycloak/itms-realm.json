@@ -85,6 +85,31 @@
           }
         }
       ]
+    },
+    {
+      "id": "7d0c1a3e-5b2f-4c1d-9e8a-100000000003",
+      "clientId": "itms-vehicle-service",
+      "name": "vehicle-service's own account for service-to-service calls to fees-service and payment-service (VL-010, VL-011, ADR-034). LOCAL DEVELOPMENT ONLY: the secret is set by tools/dev/up.sh",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "fullScopeAllowed": false,
+      "protocolMappers": [
+        {
+          "name": "itms-api audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "itms-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
     }
   ],
   "users": [
@@ -126,6 +151,12 @@
       "username": "service-account-itms-transaction-service",
       "enabled": true,
       "serviceAccountClientId": "itms-transaction-service"
+    },
+    {
+      "id": "7d0c1a3e-5b2f-4c1d-9e8a-000000000012",
+      "username": "service-account-itms-vehicle-service",
+      "enabled": true,
+      "serviceAccountClientId": "itms-vehicle-service"
     }
   ]
 }

@@ -1,0 +1,58 @@
+{
+  "mappings": [
+    {
+      "priority": 1,
+      "request": {
+        "method": "GET",
+        "urlPath": "/v1/policies",
+        "queryParameters": {
+          "vin": {
+            "matches": ".*99999$"
+          }
+        }
+      },
+      "response": {
+        "status": 503
+      }
+    },
+    {
+      "priority": 2,
+      "request": {
+        "method": "GET",
+        "urlPath": "/v1/policies",
+        "queryParameters": {
+          "vin": {
+            "matches": ".*00000$"
+          }
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{\"items\":[{\"policyNo\":\"POL-EXP-1\",\"insurerCode\":\"INS01\",\"vin\":\"{{request.query.vin}}\",\"coverType\":\"THIRD_PARTY\",\"validFrom\":\"2020-01-01\",\"validTo\":\"2020-12-31\",\"status\":\"EXPIRED\"}]}",
+        "transformers": [
+          "response-template"
+        ]
+      }
+    },
+    {
+      "priority": 5,
+      "request": {
+        "method": "GET",
+        "urlPath": "/v1/policies"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{\"items\":[{\"policyNo\":\"POL-OK-1\",\"insurerCode\":\"INS01\",\"vin\":\"{{request.query.vin}}\",\"coverType\":\"COMPREHENSIVE\",\"validFrom\":\"2020-01-01\",\"validTo\":\"2099-12-31\",\"status\":\"ACTIVE\"}]}",
+        "transformers": [
+          "response-template"
+        ]
+      }
+    }
+  ]
+}

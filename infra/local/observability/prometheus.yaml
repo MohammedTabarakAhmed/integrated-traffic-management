@@ -15,6 +15,7 @@ scrape_configs:
           - hold-eligibility-service:8090
           - traffic-file-service:8090
           - fees-service:8090
+          - rules-service:8090
   # API gateway usage analytics (INT-001, ADR-040): requests, latency and status per route and consumer.
   - job_name: apisix
     metrics_path: /apisix/prometheus/metrics

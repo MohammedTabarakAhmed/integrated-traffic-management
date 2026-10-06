@@ -34,6 +34,10 @@ upstreams:
     type: roundrobin
     nodes:
       "fees-service:8080": 1
+  - id: rules-service
+    type: roundrobin
+    nodes:
+      "rules-service:8080": 1
 
 plugin_configs:
   - id: protected-api
@@ -139,4 +143,14 @@ routes:
       - /v1/quotes/*
       - /v1/fee-adjustments
       - /v1/fee-adjustments/*
+  - id: rules-service
+    name: rules-service
+    upstream_id: rules-service
+    plugin_config_id: protected-api
+    uris:
+      - /v1/rule-versions
+      - /v1/rule-versions/*
+      - /v1/rule-sets/*
+      - /v1/rule-decisions
+      - /v1/rule-decisions/*
 #END

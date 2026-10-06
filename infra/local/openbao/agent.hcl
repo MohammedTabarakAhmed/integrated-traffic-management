@@ -88,3 +88,14 @@ template {
   destination = "/run/db-credentials/fees-service/password"
   perms       = "0444"
 }
+
+template {
+  contents    = "{{ with secret \"database/creds/rules-service\" }}{{ .Data.username }}{{ end }}"
+  destination = "/run/db-credentials/rules-service/username"
+  perms       = "0444"
+}
+template {
+  contents    = "{{ with secret \"database/creds/rules-service\" }}{{ .Data.password }}{{ end }}"
+  destination = "/run/db-credentials/rules-service/password"
+  perms       = "0444"
+}

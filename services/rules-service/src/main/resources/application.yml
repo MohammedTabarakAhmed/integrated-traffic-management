@@ -1,0 +1,101 @@
+# rules-service configuration. All environment-specific values come from environment variables
+# (NFR-042, SEC-004); nothing secret is stored here.
+spring:
+  application:
+    name: rules-service
+  # Secrets arrive as files, one per property, named after it (SEC-004, ADR-038): mounted by the platform
+  # (Kubernetes secrets from the secret store; compose secrets locally), never as environment variables.
+  config:
+    import: "optional:configtree:${ITMS_SECRETS_DIR:/run/secrets/}"
+  datasource:
+    url: ${RULES_DB_URL}
+    username: ${RULES_DB_USER:}
+    password: ${RULES_DB_PASSWORD:}
+  flyway:
+    locations: classpath:db/platform,classpath:db/migration
+    # Platform migrations (db/platform, V0_x) can be added after the service's own; apply them out of order
+    # (ADR-040). Each is additive and touches only platform tables.
+    out-of-order: true
+  # Message broker (INT-005, ADR-002). Producer defaults are kept: acks=all and idempotence on.
+  kafka:
+    bootstrap-servers: ${ITMS_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+  messages:
+    basename: messages
+    fallback-to-system-locale: false
+  threads:
+    virtual:
+      enabled: true
+
+itms:
+  # Domain events and audit records leave through the transactional outbox (INT-005, CC-120, ADR-040). Off by default
+  # so the service runs without a broker; rows wait in the outbox until the relay is switched on.
+  events:
+    enabled: ${ITMS_EVENTS_ENABLED:false}
+    audit-topic: ${ITMS_EVENTS_AUDIT_TOPIC:itms.audit.v1}
+    domain-topic: ${ITMS_EVENTS_DOMAIN_TOPIC:}
+    batch-size: ${ITMS_EVENTS_BATCH_SIZE:100}
+    send-timeout: ${ITMS_EVENTS_SEND_TIMEOUT:10s}
+    relay-interval: ${ITMS_EVENTS_RELAY_INTERVAL:1s}
+  security:
+    issuer: ${ITMS_OIDC_ISSUER}
+    jwk-set-uri: ${ITMS_OIDC_JWKS_URI}
+    audience: itms-api
+    # Grants come from iam-service (ADR-022). token-claims is the interim ADR-018 mode, for tests only.
+    authorisation-source: ${ITMS_AUTHORISATION_SOURCE:iam}
+    iam:
+      base-url: ${ITMS_IAM_URL:}
+      cache-ttl: ${ITMS_IAM_CACHE_TTL:60s}
+  # API_SPECIFICATION §2, ADR-032: submitting and deciding rule versions need an Idempotency-Key; a retry with the
+  # same key and request replays the stored response. Evaluations are not idempotent by key: each logs a decision.
+  idempotency:
+    enabled: true
+    paths:
+      - /v1/rule-versions
+      - /v1/rule-versions/*/approvals
+      - /v1/rule-versions/*/rejections
+    retention: ${ITMS_IDEMPOTENCY_RETENTION:24h}
+    lock-timeout: ${ITMS_IDEMPOTENCY_LOCK_TIMEOUT:30s}
+    cleanup-interval: ${ITMS_IDEMPOTENCY_CLEANUP_INTERVAL:15m}
+    cleanup-batch-size: ${ITMS_IDEMPOTENCY_CLEANUP_BATCH_SIZE:500}
+
+# Observability (NFR-040, ADR-037). Probes and the Prometheus scrape are served on a separate management port, reached
+# only from the operations network; on that port they need no token (ManagementRequests). Traces and logs go to an
+# OpenTelemetry collector only when its endpoints are set, for example
+# MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT=http://otel-collector:4318/v1/traces and
+# MANAGEMENT_OPENTELEMETRY_LOGGING_EXPORT_OTLP_ENDPOINT=http://otel-collector:4318/v1/logs.
+management:
+  server:
+    port: ${ITMS_MANAGEMENT_PORT:8090}
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+        http.client.requests: true
+  tracing:
+    sampling:
+      probability: ${ITMS_TRACING_SAMPLING_PROBABILITY:0.1}
+
+server:
+  error:
+    include-stacktrace: never
+    include-message: never
+
+# Log levels are set per service (NFR-040): ITMS_LOG_LEVEL for ITMS code, ITMS_LOG_LEVEL_ROOT for everything else.
+logging:
+  level:
+    root: ${ITMS_LOG_LEVEL_ROOT:INFO}
+    gov.itms: ${ITMS_LOG_LEVEL:INFO}
+  pattern:
+    level: "%5p [${spring.application.name},%X{correlationId:-}]"
+    correlation: "[%X{traceId:-},%X{spanId:-}] "

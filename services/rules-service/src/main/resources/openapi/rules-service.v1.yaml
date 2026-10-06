@@ -1,0 +1,531 @@
+openapi: 3.1.0
+info:
+  title: ITMS Rules Service
+  version: 1.0.0
+  description: |
+    Business rules (CC-050..CC-053; ADR-048). A rule set (for example `LICENCE_AGE_MINIMUM`) is a decision table:
+    typed inputs and outputs, rules made of one structured condition per input (operators ANY, EQ, NE, LT, LE, GT, GE,
+    BETWEEN, IN, NOT_IN) and one value per output, and a hit policy (FIRST, UNIQUE, COLLECT). Conditions are never
+    expressions, so evaluating a rule never runs code (CC-050: business users maintain rules without a code release).
+
+    Versions (CC-051): a version is national, or for one region (a regional variant), with inclusive effective dates.
+    It is submitted PENDING (`rules.version.submit`) and approved or rejected once by someone else
+    (`rules.version.approve`); the maker may withdraw their own pending version. A version never starts in the past.
+    Approving a version ends the previous approved version of the same rule set and region the day before; an approved
+    version that starts on or after the new start date is an overlap (409). Versions never change otherwise and are
+    never deleted.
+
+    Test runs (CC-052): any version, also a pending one, can be run against up to 100 sample cases, each with an
+    optional expected output (compared with the first output row). Test runs are audited, not logged as decisions.
+
+    Evaluations (CC-050, CC-053): services ask `POST /v1/rule-sets/{ruleSetCode}/evaluations` with a region, a date
+    (today when absent) and the inputs; the regional variant in force wins over the national version. Every evaluation
+    is logged with the exact version, inputs, matched rules (1-based) and outputs, the caller, the channel and the
+    business reference, and can be read back for any later explanation or dispute.
+
+    Rules are national configuration, so every operation is `national` in scope.
+    The channel is the `X-Channel` header. Submitting and deciding need an `Idempotency-Key` (ADR-032).
+    Only GET/POST are used (INT-003). Request input (SEC-022) is hardened once in itms-platform.
+servers:
+  - url: /
+security:
+  - bearerAuth: []
+tags:
+  - name: Rule versions
+  - name: Evaluations
+
+paths:
+  /v1/rule-versions:
+    post:
+      tags: [Rule versions]
+      operationId: submitRuleVersion
+      summary: Submit a rule version for approval (CC-050, CC-051)
+      description: |
+        Refused when: no known `X-Channel` (422 `CHANNEL_REQUIRED`); a field is malformed (422 `FIELD_INVALID`); the
+        table is inconsistent (422 `RULE_TABLE_INVALID`: unknown or repeated columns, a value of the wrong type, the
+        wrong number of values for an operator); the end date is before the start (422 `RULE_DATES_INVALID`) or the
+        start is in the past (422 `RULE_START_IN_PAST`).
+      x-itms-permission: rules.version.submit
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SubmitVersionRequest' }
+      responses:
+        '201':
+          description: Submitted (or, on a retry with the same Idempotency-Key, the stored response)
+          headers:
+            Location: { schema: { type: string } }
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RuleVersion' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [Rule versions]
+      operationId: listRuleVersions
+      summary: Versions of a rule set, oldest first, optionally of one status
+      x-itms-permission: rules.version.read
+      x-itms-scope: national
+      parameters:
+        - name: ruleSetCode
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/RuleSetCode' }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/VersionStatus' }
+      responses:
+        '200':
+          description: Versions
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RuleVersionCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/rule-versions/{versionId}:
+    get:
+      tags: [Rule versions]
+      operationId: getRuleVersion
+      summary: A rule version with its full decision table
+      x-itms-permission: rules.version.read
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/VersionId'
+      responses:
+        '200':
+          description: Rule version
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RuleVersion' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/rule-versions/{versionId}/approvals:
+    post:
+      tags: [Rule versions]
+      operationId: approveRuleVersion
+      summary: Approve a pending rule version (CC-051)
+      description: |
+        Refused when the approver submitted it (403 `SAME_MAKER_CHECKER`), it is already decided (409
+        `RULE_VERSION_DECIDED`), it would overlap a later-starting approved version of the same region (409
+        `RULE_VERSION_OVERLAP`) or its start date has passed (422 `RULE_START_IN_PAST`).
+      x-itms-permission: rules.version.approve
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/VersionId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DecisionRequest' }
+      responses:
+        '200':
+          description: Approved
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RuleVersion' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/rule-versions/{versionId}/rejections:
+    post:
+      tags: [Rule versions]
+      operationId: rejectRuleVersion
+      summary: Reject a pending rule version, or withdraw one's own (CC-051)
+      x-itms-permission: rules.version.approve
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/VersionId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RejectRequest' }
+      responses:
+        '200':
+          description: Rejected or withdrawn
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RuleVersion' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/rule-versions/{versionId}/test-runs:
+    post:
+      tags: [Rule versions]
+      operationId: testRuleVersion
+      summary: Run sample cases against a rule version before it goes live (CC-052)
+      description: |
+        Each case gives its matched rules and outputs, or the problem code of an invalid input; with an expected output
+        the case passes when every expected value equals the first output row. Not logged as a decision; audited.
+      x-itms-permission: rules.version.test
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/VersionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TestRunRequest' }
+      responses:
+        '200':
+          description: Results per case
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TestRun' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/rule-sets/{ruleSetCode}/evaluations:
+    post:
+      tags: [Evaluations]
+      operationId: evaluateRuleSet
+      summary: Evaluate a rule set and log the decision (CC-050, CC-051, CC-053)
+      description: |
+        Refused when no version is in force for the date (404 `RULE_NOT_IN_FORCE`), an input is unknown (422
+        `RULE_INPUT_UNKNOWN`) or of the wrong type (422 `RULE_INPUT_INVALID`), or a UNIQUE table matches more than
+        one rule (409 `RULE_NOT_UNIQUE`).
+      x-itms-permission: rules.evaluate
+      x-itms-scope: national
+      parameters:
+        - name: ruleSetCode
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/RuleSetCode' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EvaluationRequest' }
+      responses:
+        '201':
+          description: The logged decision
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RuleDecision' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/rule-decisions:
+    get:
+      tags: [Evaluations]
+      operationId: listRuleDecisions
+      summary: Logged decisions of a rule set, newest first (CC-053)
+      x-itms-permission: rules.decision.read
+      x-itms-scope: national
+      parameters:
+        - name: ruleSetCode
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/RuleSetCode' }
+        - name: since
+          in: query
+          schema: { type: string, format: date-time }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 500, default: 50 }
+      responses:
+        '200':
+          description: Decisions
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RuleDecisionCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/rule-decisions/{decisionId}:
+    get:
+      tags: [Evaluations]
+      operationId: getRuleDecision
+      summary: One logged decision (CC-053); the read is audited
+      x-itms-permission: rules.decision.read
+      x-itms-scope: national
+      parameters:
+        - name: decisionId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Decision
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RuleDecision' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    VersionId:
+      name: versionId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Chosen by the client, new for every intended action, and sent again unchanged on a retry (API_SPECIFICATION
+        §2, ADR-032). A retry with the same key and request gets the stored response, marked `Idempotent-Replayed`.
+      schema: { type: string, pattern: '^[A-Za-z0-9._:-]{8,128}$' }
+
+  headers:
+    IdempotentReplayed:
+      description: '`true` when the response is the stored response of an earlier request with the same Idempotency-Key'
+      schema: { type: string, enum: ['true'] }
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid bearer token
+    Problem:
+      description: Problem details (RFC 9457, API_SPECIFICATION §3)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+
+  schemas:
+    RuleSetCode:
+      type: string
+      pattern: '^[A-Z][A-Z0-9_]{1,59}$'
+    Region:
+      oneOf: [ { type: string, pattern: '^[A-Z0-9_]{1,40}$' }, { type: 'null' } ]
+    Channel:
+      type: string
+      enum: [PORTAL, APP, BACKOFFICE, PARTNER, KIOSK, CALLCENTRE, FIELD, ASSISTANT, AGENT]
+    VersionStatus:
+      type: string
+      enum: [PENDING, APPROVED, REJECTED]
+    Scalar:
+      description: A NUMBER, TEXT (at most 200 characters), BOOLEAN or DATE (YYYY-MM-DD as text) value, or null
+      oneOf:
+        - { type: number }
+        - { type: string, maxLength: 200 }
+        - { type: boolean }
+        - { type: 'null' }
+    Values:
+      type: object
+      maxProperties: 30
+      propertyNames: { pattern: '^[a-z][A-Za-z0-9]{0,39}$' }
+      additionalProperties: { $ref: '#/components/schemas/Scalar' }
+    Column:
+      type: object
+      additionalProperties: false
+      required: [name, type]
+      properties:
+        name: { type: string, pattern: '^[a-z][A-Za-z0-9]{0,39}$' }
+        type: { type: string, enum: [NUMBER, TEXT, BOOLEAN, DATE] }
+    Condition:
+      type: object
+      additionalProperties: false
+      required: [op]
+      properties:
+        op: { type: string, enum: [ANY, EQ, NE, LT, LE, GT, GE, BETWEEN, IN, NOT_IN] }
+        values:
+          type: array
+          maxItems: 100
+          description: none for ANY, two for BETWEEN (inclusive), 1-100 for IN and NOT_IN, otherwise one
+          items: { $ref: '#/components/schemas/Scalar' }
+    Rule:
+      type: object
+      additionalProperties: false
+      properties:
+        when:
+          type: object
+          maxProperties: 30
+          propertyNames: { pattern: '^[a-z][A-Za-z0-9]{0,39}$' }
+          description: One condition per input name; an input left out matches anything
+          additionalProperties: { $ref: '#/components/schemas/Condition' }
+        then: { $ref: '#/components/schemas/Values' }
+        description: { oneOf: [ { type: string, maxLength: 200 }, { type: 'null' } ] }
+    DecisionTable:
+      type: object
+      additionalProperties: false
+      required: [hitPolicy, inputs, outputs, rules]
+      properties:
+        hitPolicy: { type: string, enum: [FIRST, UNIQUE, COLLECT] }
+        inputs: { type: array, minItems: 1, maxItems: 30, items: { $ref: '#/components/schemas/Column' } }
+        outputs: { type: array, minItems: 1, maxItems: 30, items: { $ref: '#/components/schemas/Column' } }
+        rules: { type: array, minItems: 1, maxItems: 500, items: { $ref: '#/components/schemas/Rule' } }
+        defaults: { $ref: '#/components/schemas/Values' }
+    SubmitVersionRequest:
+      type: object
+      additionalProperties: false
+      required: [ruleSetCode, nameNl, nameEn, table, effectiveFrom, reason]
+      properties:
+        ruleSetCode: { $ref: '#/components/schemas/RuleSetCode' }
+        nameNl: { type: string, maxLength: 200 }
+        nameEn: { type: string, maxLength: 200 }
+        region: { $ref: '#/components/schemas/Region' }
+        table: { $ref: '#/components/schemas/DecisionTable' }
+        effectiveFrom: { type: string, format: date }
+        effectiveTo: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
+        reason: { type: string, minLength: 3, maxLength: 500 }
+    DecisionRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        reason: { oneOf: [ { type: string, minLength: 3, maxLength: 500 }, { type: 'null' } ] }
+    RejectRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 3, maxLength: 500 }
+    Decision:
+      type: object
+      additionalProperties: false
+      required: [actorId, channel, at]
+      properties:
+        actorId: { type: string }
+        actorUsername: { oneOf: [ { type: string }, { type: 'null' } ] }
+        channel: { $ref: '#/components/schemas/Channel' }
+        at: { type: string, format: date-time }
+        reason: { oneOf: [ { type: string }, { type: 'null' } ] }
+    RuleVersion:
+      type: object
+      additionalProperties: false
+      required: [id, ruleSetCode, versionNo, nameNl, nameEn, table, effectiveFrom, status, submitted]
+      properties:
+        id: { type: string, format: uuid }
+        ruleSetCode: { type: string }
+        versionNo: { type: integer, minimum: 1 }
+        nameNl: { type: string }
+        nameEn: { type: string }
+        region: { $ref: '#/components/schemas/Region' }
+        table: { $ref: '#/components/schemas/DecisionTable' }
+        effectiveFrom: { type: string, format: date }
+        effectiveTo: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
+        status: { $ref: '#/components/schemas/VersionStatus' }
+        submitted: { $ref: '#/components/schemas/Decision' }
+        decided: { oneOf: [ { $ref: '#/components/schemas/Decision' }, { type: 'null' } ] }
+    RuleVersionCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/RuleVersion' } }
+    TestCase:
+      type: object
+      additionalProperties: false
+      properties:
+        inputs: { $ref: '#/components/schemas/Values' }
+        expected: { oneOf: [ { $ref: '#/components/schemas/Values' }, { type: 'null' } ] }
+    TestRunRequest:
+      type: object
+      additionalProperties: false
+      required: [cases]
+      properties:
+        cases: { type: array, minItems: 1, maxItems: 100, items: { $ref: '#/components/schemas/TestCase' } }
+    TestResult:
+      type: object
+      additionalProperties: false
+      required: [caseNo, matchedRules, outputs]
+      properties:
+        caseNo: { type: integer, minimum: 1 }
+        matchedRules: { type: array, items: { type: integer, minimum: 1 } }
+        outputs: { type: array, items: { $ref: '#/components/schemas/Values' } }
+        passed: { oneOf: [ { type: boolean }, { type: 'null' } ] }
+        error: { oneOf: [ { type: string }, { type: 'null' } ] }
+    TestRun:
+      type: object
+      additionalProperties: false
+      required: [cases, passed, failed, results]
+      properties:
+        cases: { type: integer }
+        passed: { type: integer }
+        failed: { type: integer }
+        results: { type: array, items: { $ref: '#/components/schemas/TestResult' } }
+    EvaluationRequest:
+      type: object
+      additionalProperties: false
+      required: [inputs]
+      properties:
+        region: { $ref: '#/components/schemas/Region' }
+        date: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
+        inputs: { $ref: '#/components/schemas/Values' }
+        reference: { oneOf: [ { type: string, maxLength: 100 }, { type: 'null' } ] }
+    RuleDecision:
+      type: object
+      additionalProperties: false
+      required: [id, ruleSetCode, versionId, versionNo, date, inputs, matchedRules, outputs, actorId, channel, at]
+      properties:
+        id: { type: string, format: uuid }
+        ruleSetCode: { type: string }
+        versionId: { type: string, format: uuid }
+        versionNo: { type: integer, minimum: 1 }
+        region: { $ref: '#/components/schemas/Region' }
+        date: { type: string, format: date }
+        inputs: { $ref: '#/components/schemas/Values' }
+        matchedRules: { type: array, items: { type: integer, minimum: 1 } }
+        outputs: { type: array, items: { $ref: '#/components/schemas/Values' } }
+        reference: { oneOf: [ { type: string }, { type: 'null' } ] }
+        actorId: { type: string }
+        channel: { $ref: '#/components/schemas/Channel' }
+        correlationId: { oneOf: [ { type: string }, { type: 'null' } ] }
+        at: { type: string, format: date-time }
+    RuleDecisionCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/RuleDecision' } }
+    Problem:
+      type: object
+      required: [status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        code: { type: string }
+        detail: { type: string }
+        instance: { type: string }
+        correlationId: { type: string }
+        requirementRefs: { type: array, items: { type: string } }
+        errors: { type: array, items: { type: object } }

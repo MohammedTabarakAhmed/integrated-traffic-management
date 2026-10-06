@@ -29,6 +29,7 @@
     <module>services/hold-eligibility-service</module>
     <module>services/traffic-file-service</module>
     <module>services/fees-service</module>
+    <module>services/rules-service</module>
   </modules>
 
   <properties>

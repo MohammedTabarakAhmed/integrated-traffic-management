@@ -35,6 +35,7 @@
     <module>services/document-service</module>
     <module>services/appointment-service</module>
     <module>services/audit-service</module>
+    <module>services/payment-service</module>
   </modules>
 
   <properties>

@@ -58,6 +58,10 @@ upstreams:
     type: roundrobin
     nodes:
       "audit-service:8080": 1
+  - id: payment-service
+    type: roundrobin
+    nodes:
+      "payment-service:8080": 1
 
 plugin_configs:
   - id: protected-api
@@ -251,4 +255,16 @@ routes:
       - /v1/timelines/*
       - /v1/audit-records
       - /v1/audit-integrity
+  - id: payment-service
+    name: payment-service
+    upstream_id: payment-service
+    plugin_config_id: protected-api
+    uris:
+      - /v1/payables
+      - /v1/payables/*
+      - /v1/baskets
+      - /v1/baskets/*
+      - /v1/payments/*
+      - /v1/receipts
+      - /v1/receipts/*
 #END

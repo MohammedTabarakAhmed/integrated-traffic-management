@@ -1,0 +1,561 @@
+openapi: 3.1.0
+info:
+  title: ITMS Payment Service
+  version: 1.0.0
+  description: |
+    Payments (FN-001..FN-005, FN-010, FN-011, FN-014, FN-022; ADR-054).
+
+    Payables (FN-002): the owning services register what is owed (a transaction's fees, a violation's fine, general
+    income), itemised by financial item and beneficiary, in minor units. Payment-service never prices anything.
+
+    Baskets and payments (FN-001, FN-002): open payables of one or more traffic files go into a basket, paid in one
+    payment. Online methods open a session on the gateway's hosted pages (ITMS never sees card data, ICD-03) and wait
+    for the callback; counter methods (cash, card terminal, cheque if accepted) are recorded by a cashier with
+    `payment.collect` and confirmed at once. Accepted methods are configuration.
+
+    Callbacks (FN-004, UAT-4): `POST /v1/payments/{paymentId}/callbacks` from the gateway adapter, with an HMAC
+    signature. The first valid SUCCESS confirms the payment, marks the items paid and issues exactly one receipt
+    (event `itms.payment.confirmed`); every repeat is logged as a duplicate and answered 200 with the same receipt. An
+    amount or currency mismatch sends the payment to EXCEPTION. A job asks the gateway about PENDING payments after 5
+    minutes and moves unresolved ones to EXCEPTION after 30 (configurable, FN-005).
+
+    Receipts (FN-003, FN-010, FN-011, FN-014, FN-022): itemised by financial item, typed (service, violation, general,
+    deposit), numbered `R-<region>-<channel>-<year>-<8 digits>` from a gapless sequence, searchable by staff, and
+    cancellable only on their business day by a supervisor with a reason (the items become payable again).
+
+    The channel is the `X-Channel` header. Only GET/POST are used (INT-003).
+servers:
+  - url: /
+security:
+  - bearerAuth: []
+tags:
+  - name: Payables
+  - name: Payments
+  - name: Receipts
+
+paths:
+  /v1/payables:
+    post:
+      tags: [Payables]
+      operationId: registerPayable
+      summary: Register an item to be paid (owning services, FN-002)
+      description: Refused when the item is already payable (409 `PAYABLE_EXISTS`) or the amount is not positive (422).
+      x-itms-permission: payment.payable.register
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+      responses:
+        '201':
+          description: Registered
+          headers:
+            Location: { schema: { type: string } }
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Payable' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/payables/{payableId}:
+    get:
+      tags: [Payables]
+      operationId: getPayable
+      summary: A payable item and its status
+      x-itms-permission: authenticated
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/PayableId'
+      responses:
+        '200':
+          description: Payable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Payable' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/payables/{payableId}/cancellations:
+    post:
+      tags: [Payables]
+      operationId: cancelPayable
+      summary: The owner withdraws an open payable
+      x-itms-permission: payment.payable.register
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/PayableId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReasonRequest' }
+      responses:
+        '200':
+          description: Cancelled
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Payable' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/baskets:
+    post:
+      tags: [Payments]
+      operationId: createBasket
+      summary: Put open payables of one currency in a basket (FN-002)
+      x-itms-permission: authenticated
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BasketRequest' }
+      responses:
+        '201':
+          description: Created
+          headers:
+            Location: { schema: { type: string } }
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Basket' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/baskets/{basketId}:
+    get:
+      tags: [Payments]
+      operationId: getBasket
+      summary: A basket (its creator, or payment staff)
+      x-itms-permission: payment.receipt.read
+      x-itms-scope: [own]
+      parameters:
+        - $ref: '#/components/parameters/BasketId'
+      responses:
+        '200':
+          description: Basket
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Basket' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/baskets/{basketId}/payments:
+    post:
+      tags: [Payments]
+      operationId: payBasket
+      summary: Pay a basket online (gateway session) or at a counter (FN-001)
+      description: |
+        Online: 201 with `redirectUrl` to the gateway's page; the payment stays PENDING until the callback. Counter
+        (`payment.collect` in the basket's region): 201 with the receipt. Refused when the method is not accepted (422
+        `METHOD_NOT_ACCEPTED`), a payment is already in progress (409 `PAYMENT_IN_PROGRESS`), the basket or an item is
+        already paid (409), or the gateway is down (503 `GATEWAY_UNAVAILABLE`).
+      x-itms-permission: payment.collect
+      x-itms-scope: [own, region]
+      parameters:
+        - $ref: '#/components/parameters/BasketId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PayRequest' }
+      responses:
+        '201':
+          description: Started (online) or paid (counter)
+          headers:
+            Location: { schema: { type: string } }
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Started' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/payments/{paymentId}:
+    get:
+      tags: [Payments]
+      operationId: getPayment
+      summary: A payment's status (its payer, or payment staff)
+      x-itms-permission: payment.receipt.read
+      x-itms-scope: [own]
+      parameters:
+        - $ref: '#/components/parameters/PaymentId'
+      responses:
+        '200':
+          description: Payment
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Payment' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/payments/{paymentId}/callbacks:
+    post:
+      tags: [Payments]
+      operationId: paymentCallback
+      summary: Gateway confirmation, processed idempotently (FN-004, UAT-4, ICD-03)
+      description: |
+        401 `SIGNATURE_INVALID` (audited, no state change); 404 unknown payment. A repeat answers 200 with
+        `duplicate: true` and the same receipt; it creates no second receipt and no second event.
+      x-itms-permission: payment.gateway.callback
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/PaymentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CallbackRequest' }
+      responses:
+        '200':
+          description: Processed (first time or duplicate)
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [paymentId, status, duplicate]
+                properties:
+                  paymentId: { type: string, format: uuid }
+                  status: { $ref: '#/components/schemas/PaymentStatus' }
+                  receiptNumber: { oneOf: [ { type: string }, { type: 'null' } ] }
+                  duplicate: { type: boolean }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/receipts:
+    get:
+      tags: [Receipts]
+      operationId: searchReceipts
+      summary: Enquire receipts by customer, file, date, amount, channel, item or region (FN-014); audited
+      x-itms-permission: payment.receipt.read
+      x-itms-scope: national
+      parameters:
+        - { name: trafficFileNumber, in: query, schema: { type: string, maxLength: 60 } }
+        - { name: payerId, in: query, schema: { type: string, maxLength: 100 } }
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+        - { name: amountMinor, in: query, schema: { type: integer, minimum: 0 } }
+        - { name: channel, in: query, schema: { type: string, maxLength: 20 } }
+        - { name: financialItem, in: query, schema: { type: string, maxLength: 40 } }
+        - { name: region, in: query, schema: { type: string, maxLength: 40 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 50 } }
+      responses:
+        '200':
+          description: Receipts, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Receipt' } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/receipts/{number}:
+    get:
+      tags: [Receipts]
+      operationId: getReceipt
+      summary: A receipt (its payer, or staff; staff reads audited)
+      x-itms-permission: payment.receipt.read
+      x-itms-scope: [own]
+      parameters:
+        - $ref: '#/components/parameters/ReceiptNumber'
+      responses:
+        '200': { $ref: '#/components/responses/Receipt' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/receipts/{number}/cancellations:
+    post:
+      tags: [Receipts]
+      operationId: cancelReceipt
+      summary: Cancel a receipt on its business day, by a supervisor, with a reason (FN-011)
+      description: After the business day 409 `RECEIPT_NOT_SAME_DAY` (use a refund).
+      x-itms-permission: payment.receipt.cancel
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/ReceiptNumber'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReasonRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/Receipt' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    PayableId:
+      name: payableId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    BasketId:
+      name: basketId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    PaymentId:
+      name: paymentId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ReceiptNumber:
+      name: number
+      in: path
+      required: true
+      schema: { type: string, pattern: '^R-[A-Z0-9_]{1,40}-[A-Z]{2,20}-[0-9]{4}-[0-9]{8}$' }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Chosen by the client, new for every intended action, and sent again unchanged on a retry (API_SPECIFICATION
+        §2, ADR-032). A retry with the same key and request gets the stored response, marked `Idempotent-Replayed`.
+      schema: { type: string, pattern: '^[A-Za-z0-9._:-]{8,128}$' }
+
+  headers:
+    IdempotentReplayed:
+      description: '`true` when the response is the stored response of an earlier request with the same Idempotency-Key'
+      schema: { type: string, enum: ['true'] }
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid bearer token
+    Problem:
+      description: Problem details (RFC 9457, API_SPECIFICATION §3)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Receipt:
+      description: Receipt
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Receipt' }
+
+  schemas:
+    Code:
+      type: string
+      pattern: '^[A-Z0-9][A-Z0-9_]{1,39}$'
+    Ref:
+      type: string
+      pattern: '^[A-Z0-9][A-Z0-9-]{0,59}$'
+    Currency:
+      type: string
+      pattern: '^[A-Z]{3}$'
+    NullableString:
+      oneOf: [ { type: string }, { type: 'null' } ]
+    NullableTime:
+      oneOf: [ { type: string, format: date-time }, { type: 'null' } ]
+    ItemType:
+      type: string
+      enum: [TRANSACTION, VIOLATION, GENERAL, DEPOSIT]
+    Method:
+      type: string
+      enum: [GATEWAY_CARD, E_PAYMENT, MOBILE_WALLET, BANK_TRANSFER, DIRECT_DEBIT, CASH, CARD_TERMINAL, CHEQUE,
+             COLLECTION_PARTNER]
+    PaymentStatus:
+      type: string
+      enum: [PENDING, CONFIRMED, FAILED, EXCEPTION]
+    Line:
+      type: object
+      additionalProperties: false
+      required: [financialItem, beneficiary, amountMinor]
+      properties:
+        financialItem: { $ref: '#/components/schemas/Code' }
+        beneficiary: { $ref: '#/components/schemas/Code' }
+        description: { oneOf: [ { type: string, maxLength: 200 }, { type: 'null' } ] }
+        amountMinor: { type: integer, minimum: 0, maximum: 1000000000000 }
+    RegisterRequest:
+      type: object
+      additionalProperties: false
+      required: [itemType, itemRef, region, currency, lines]
+      properties:
+        itemType: { $ref: '#/components/schemas/ItemType' }
+        itemRef: { $ref: '#/components/schemas/Ref' }
+        trafficFileNumber: { oneOf: [ { $ref: '#/components/schemas/Ref' }, { type: 'null' } ] }
+        region: { $ref: '#/components/schemas/Code' }
+        currency: { $ref: '#/components/schemas/Currency' }
+        lines: { type: array, minItems: 1, maxItems: 50, items: { $ref: '#/components/schemas/Line' } }
+    Payable:
+      type: object
+      additionalProperties: false
+      required: [id, itemType, itemRef, region, currency, lines, total, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        itemType: { $ref: '#/components/schemas/ItemType' }
+        itemRef: { type: string }
+        trafficFileNumber: { $ref: '#/components/schemas/NullableString' }
+        region: { type: string }
+        currency: { type: string }
+        lines: { type: array, items: { $ref: '#/components/schemas/Line' } }
+        total: { type: integer }
+        status: { type: string, enum: [OPEN, PAID, CANCELLED] }
+        createdAt: { type: string, format: date-time }
+    ReasonRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 3, maxLength: 500 }
+    BasketRequest:
+      type: object
+      additionalProperties: false
+      required: [payableIds]
+      properties:
+        payableIds: { type: array, minItems: 1, maxItems: 100, uniqueItems: true, items: { type: string, format: uuid } }
+        region: { oneOf: [ { $ref: '#/components/schemas/Code' }, { type: 'null' } ] }
+    Basket:
+      type: object
+      additionalProperties: false
+      required: [id, payableIds, region, currency, totalMinor, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        payableIds: { type: array, items: { type: string, format: uuid } }
+        region: { type: string }
+        currency: { type: string }
+        totalMinor: { type: integer }
+        status: { type: string, enum: [OPEN, PAID] }
+        createdAt: { type: string, format: date-time }
+    PayRequest:
+      type: object
+      additionalProperties: false
+      required: [method]
+      properties:
+        method: { $ref: '#/components/schemas/Method' }
+        returnUrl: { oneOf: [ { type: string, format: uri, maxLength: 500 }, { type: 'null' } ] }
+        counterReference: { oneOf: [ { type: string, pattern: '^[A-Za-z0-9-]{1,60}$' }, { type: 'null' } ] }
+    Payment:
+      type: object
+      additionalProperties: false
+      required: [id, basketId, method, amountMinor, currency, channel, region, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        basketId: { type: string, format: uuid }
+        method: { $ref: '#/components/schemas/Method' }
+        amountMinor: { type: integer }
+        currency: { type: string }
+        channel: { type: string }
+        region: { type: string }
+        status: { $ref: '#/components/schemas/PaymentStatus' }
+        gatewayTxnId: { $ref: '#/components/schemas/NullableString' }
+        createdAt: { type: string, format: date-time }
+        confirmedAt: { $ref: '#/components/schemas/NullableTime' }
+        exceptionReason: { $ref: '#/components/schemas/NullableString' }
+    Started:
+      type: object
+      additionalProperties: false
+      required: [payment]
+      properties:
+        payment: { $ref: '#/components/schemas/Payment' }
+        redirectUrl: { $ref: '#/components/schemas/NullableString' }
+        receipt: { oneOf: [ { $ref: '#/components/schemas/Receipt' }, { type: 'null' } ] }
+    CallbackRequest:
+      type: object
+      additionalProperties: false
+      required: [gatewayTxnId, merchantRef, status, amountMinor, currency, signature]
+      properties:
+        gatewayTxnId: { type: string, maxLength: 200 }
+        merchantRef: { type: string, format: uuid }
+        status: { type: string, enum: [SUCCESS, FAILED] }
+        amountMinor: { type: integer, minimum: 0 }
+        currency: { $ref: '#/components/schemas/Currency' }
+        paidAt: { oneOf: [ { type: string, maxLength: 40 }, { type: 'null' } ] }
+        signature: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
+    Receipt:
+      type: object
+      additionalProperties: false
+      required: [number, paymentId, type, region, channel, method, currency, totalMinor, lines, issuedAt, businessDay,
+                 status]
+      properties:
+        number: { type: string }
+        paymentId: { type: string, format: uuid }
+        type: { type: string, enum: [SERVICE, VIOLATION, GENERAL, DEPOSIT] }
+        region: { type: string }
+        channel: { type: string }
+        method: { $ref: '#/components/schemas/Method' }
+        currency: { type: string }
+        totalMinor: { type: integer }
+        lines:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [payableId, itemType, itemRef, financialItem, beneficiary, amountMinor]
+            properties:
+              payableId: { type: string, format: uuid }
+              itemType: { $ref: '#/components/schemas/ItemType' }
+              itemRef: { type: string }
+              trafficFileNumber: { $ref: '#/components/schemas/NullableString' }
+              financialItem: { type: string }
+              beneficiary: { type: string }
+              description: { $ref: '#/components/schemas/NullableString' }
+              amountMinor: { type: integer }
+        issuedAt: { type: string, format: date-time }
+        businessDay: { type: string, format: date }
+        status: { type: string, enum: [ISSUED, CANCELLED] }
+        cancelledAt: { $ref: '#/components/schemas/NullableTime' }
+        cancellationReason: { $ref: '#/components/schemas/NullableString' }
+    Problem:
+      type: object
+      required: [status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        code: { type: string }
+        detail: { type: string }
+        instance: { type: string }
+        correlationId: { type: string }
+        requirementRefs: { type: array, items: { type: string } }
+        errors: { type: array, items: { type: object } }

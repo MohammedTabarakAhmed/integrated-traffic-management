@@ -154,3 +154,14 @@ template {
   destination = "/run/db-credentials/audit-service/password"
   perms       = "0444"
 }
+
+template {
+  contents    = "{{ with secret \"database/creds/payment-service\" }}{{ .Data.username }}{{ end }}"
+  destination = "/run/db-credentials/payment-service/username"
+  perms       = "0444"
+}
+template {
+  contents    = "{{ with secret \"database/creds/payment-service\" }}{{ .Data.password }}{{ end }}"
+  destination = "/run/db-credentials/payment-service/password"
+  perms       = "0444"
+}

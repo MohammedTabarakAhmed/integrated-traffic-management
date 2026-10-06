@@ -46,6 +46,9 @@ wanted = {
     "APPT_DB_PASSWORD": lambda: secrets.token_urlsafe(24),
     "AUDIT_DB_USER": lambda: "audit",
     "AUDIT_DB_PASSWORD": lambda: secrets.token_urlsafe(24),
+    "PAY_DB_USER": lambda: "payment",
+    "PAY_DB_PASSWORD": lambda: secrets.token_urlsafe(24),
+    "DEV_PAYMENT_CALLBACK_KEY": lambda: secrets.token_hex(32),
     "KC_ADMIN_USER": lambda: "kc-admin",
     "KC_ADMIN_PASSWORD": lambda: secrets.token_urlsafe(24),
     "DEV_IAM_ADMIN_PASSWORD": lambda: secrets.token_urlsafe(16),
@@ -77,15 +80,15 @@ if [[ "${1:-}" == "down" ]]; then
 fi
 
 echo "== Building service jars"
-mvn -B -ntp -q package -DskipTests -pl services/iam-service,services/reference-data-service,services/transaction-service,services/hold-eligibility-service,services/traffic-file-service,services/fees-service,services/rules-service,services/workflow-service,services/notification-service,services/document-service,services/appointment-service,services/audit-service -am
+mvn -B -ntp -q package -DskipTests -pl services/iam-service,services/reference-data-service,services/transaction-service,services/hold-eligibility-service,services/traffic-file-service,services/fees-service,services/rules-service,services/workflow-service,services/notification-service,services/document-service,services/appointment-service,services/audit-service,services/payment-service -am
 
 echo "== Starting the databases and OpenBao"
-"${COMPOSE[@]}" up -d --wait postgres iam-postgres transaction-postgres hold-postgres traffic-file-postgres fees-postgres rules-postgres workflow-postgres notification-postgres document-postgres appointment-postgres audit-postgres openbao
+"${COMPOSE[@]}" up -d --wait postgres iam-postgres transaction-postgres hold-postgres traffic-file-postgres fees-postgres rules-postgres workflow-postgres notification-postgres document-postgres appointment-postgres audit-postgres payment-postgres openbao
 
 echo "== Database owner role itms_owner (ADR-039)"
 for db in "postgres refdata $REFDATA_DB_USER" "iam-postgres iam $IAM_DB_USER" \
           "transaction-postgres transaction $TXN_DB_USER" "hold-postgres hold $HOLD_DB_USER" \
-          "traffic-file-postgres trafficfile $TF_DB_USER" "fees-postgres fees $FEES_DB_USER" "rules-postgres rules $RULES_DB_USER" "workflow-postgres workflow $WORKFLOW_DB_USER" "notification-postgres notification $NOTIF_DB_USER" "document-postgres document $DOC_DB_USER" "appointment-postgres appointment $APPT_DB_USER" "audit-postgres audit $AUDIT_DB_USER"; do
+          "traffic-file-postgres trafficfile $TF_DB_USER" "fees-postgres fees $FEES_DB_USER" "rules-postgres rules $RULES_DB_USER" "workflow-postgres workflow $WORKFLOW_DB_USER" "notification-postgres notification $NOTIF_DB_USER" "document-postgres document $DOC_DB_USER" "appointment-postgres appointment $APPT_DB_USER" "audit-postgres audit $AUDIT_DB_USER" "payment-postgres payment $PAY_DB_USER"; do
   set -- $db
   "${COMPOSE[@]}" exec -T "$1" psql -q -v ON_ERROR_STOP=1 -U "$3" -d "$2" < infra/local/db/itms-owner.sql
   echo "   $2: itms_owner owns the schema"
@@ -106,6 +109,7 @@ BAO_AGENT_TOKEN=$({ printf "export BAO_TOKEN='%s' ITMS_DB_LOGIN_TTL='%s' ITMS_DB
     printf "export DOC_DB_USER='%s' DOC_DB_PASSWORD='%s'\n" "$DOC_DB_USER" "$DOC_DB_PASSWORD"
     printf "export APPT_DB_USER='%s' APPT_DB_PASSWORD='%s'\n" "$APPT_DB_USER" "$APPT_DB_PASSWORD"
     printf "export AUDIT_DB_USER='%s' AUDIT_DB_PASSWORD='%s'\n" "$AUDIT_DB_USER" "$AUDIT_DB_PASSWORD"
+    printf "export PAY_DB_USER='%s' PAY_DB_PASSWORD='%s'\n" "$PAY_DB_USER" "$PAY_DB_PASSWORD"
     cat infra/local/openbao/configure.sh
   } | "${COMPOSE[@]}" exec -T openbao sh -s | tail -n 1)
 export BAO_AGENT_TOKEN
@@ -190,6 +194,11 @@ grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker APPOINTMENT_ADMIN
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker APPOINTMENT_AGENT
 # Central audit trail (CC-120..CC-122; ADR-053): dev.checker is the auditor.
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker AUDITOR
+# Payments (FN-001..FN-005; ADR-054): dev.maker registers payables, is a cashier and relays gateway callbacks locally; dev.checker supervises cashiers.
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker PAYABLE_REGISTRAR
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker CASHIER
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker PAYMENT_GATEWAY_ADAPTER
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker CASHIER_SUPERVISOR
 # dev.checker is also the development access reviewer ("manager", SEC-007, ADR-026); dev.iam-admin, the IT
 # administrator, opens and closes reviews.
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker ACCESS_REVIEWER
@@ -214,6 +223,7 @@ ITMS local stack is up:
   document-service        http://localhost:8091                     (bearer token required)
   appointment-service     http://localhost:8092                     (bearer token required)
   audit-service           http://localhost:8093                     (bearer token required)
+  payment-service         http://localhost:8094                     (bearer token required)
   Keycloak                http://localhost:8180   (realm: itms; users dev.iam-admin / dev.maker / dev.checker;
                                                    passwords in $ENV_FILE; clients itms-directory-feed and
                                                    itms-transaction-service use DEV_DIRECTORY_FEED_SECRET and

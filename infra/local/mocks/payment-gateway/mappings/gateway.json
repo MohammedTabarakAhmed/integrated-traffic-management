@@ -1,0 +1,24 @@
+{
+  "mappings": [
+    {
+      "request": { "method": "POST", "url": "/v1/payment-sessions" },
+      "response": {
+        "status": 201,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": {
+          "sessionId": "{{randomValue type='UUID'}}",
+          "redirectUrl": "http://localhost:8098/pay/{{jsonPath request.body '$.merchantRef'}}"
+        },
+        "transformers": ["response-template"]
+      }
+    },
+    {
+      "request": { "method": "GET", "urlPathPattern": "/v1/payments/[0-9a-f-]+/status" },
+      "response": {
+        "status": 200,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": { "status": "PENDING" }
+      }
+    }
+  ]
+}

@@ -3,6 +3,7 @@ package gov.itms.fees.infrastructure;
 import gov.itms.fees.application.FeeRepository;
 import gov.itms.fees.domain.Actor;
 import gov.itms.fees.domain.Channel;
+import gov.itms.fees.domain.FeeAdjustment;
 import gov.itms.fees.domain.FeeVersion;
 import gov.itms.fees.domain.Quote;
 import java.math.BigDecimal;
@@ -144,11 +145,117 @@ class JdbcFeeRepository implements FeeRepository {
                 .param("to", Date.valueOf(v.effectiveTo())).param("id", v.id()).update();
     }
 
+    private static final String ADJ_SELECT = """
+            select id, code, kind, service_code, name_nl, name_en, fee_codes, customer_category, campaign_code, percent,
+                amount, financial_item, beneficiary, effective_from, effective_to, status, submitted_at, submitted_by,
+                submitted_by_username, submitted_channel, submit_reason, decided_at, decided_by, decided_by_username,
+                decided_channel, decision_reason
+            from fee_adjustment""";
+
+    @Override
+    public void insertAdjustment(FeeAdjustment a) {
+        FeeAdjustment.Spec s = a.spec();
+        jdbc.sql("""
+                        insert into fee_adjustment (id, code, kind, service_code, name_nl, name_en, fee_codes,
+                            customer_category, campaign_code, percent, amount, financial_item, beneficiary,
+                            effective_from, effective_to, status, submitted_at, submitted_by, submitted_by_username,
+                            submitted_channel, submit_reason)
+                        values (:id, :code, :kind, :service, :nameNl, :nameEn, string_to_array(:fees, ','), :customer,
+                            :campaign, :percent, :amount, :item, :beneficiary, :from, :to, 'PENDING', :at, :by,
+                            :byName, :channel, :reason)""")
+                .param("id", a.id())
+                .param("code", s.code())
+                .param("kind", s.kind().name())
+                .param("service", s.serviceCode())
+                .param("nameNl", s.nameNl())
+                .param("nameEn", s.nameEn())
+                .param("fees", String.join(",", s.feeCodes()))
+                .param("customer", s.customerCategory())
+                .param("campaign", s.campaignCode())
+                .param("percent", s.percent())
+                .param("amount", s.amount())
+                .param("item", s.financialItem())
+                .param("beneficiary", s.beneficiary())
+                .param("from", Date.valueOf(s.effectiveFrom()))
+                .param("to", s.effectiveTo() == null ? null : Date.valueOf(s.effectiveTo()))
+                .param("at", Timestamp.from(a.submitted().at()))
+                .param("by", a.submitted().actor().id())
+                .param("byName", a.submitted().actor().username())
+                .param("channel", a.submitted().channel().name())
+                .param("reason", a.submitted().reason())
+                .update();
+    }
+
+    @Override
+    public Optional<FeeAdjustment> findAdjustment(UUID id) {
+        return jdbc.sql(ADJ_SELECT + " where id = :id").param("id", id).query(JdbcFeeRepository::mapAdjustment)
+                .optional();
+    }
+
+    @Override
+    public Optional<FeeAdjustment> findAdjustmentForUpdate(UUID id) {
+        return jdbc.sql(ADJ_SELECT + " where id = :id for update").param("id", id)
+                .query(JdbcFeeRepository::mapAdjustment).optional();
+    }
+
+    @Override
+    public List<FeeAdjustment> adjustments(String serviceCode, FeeVersion.Status status) {
+        return jdbc.sql(ADJ_SELECT + " where service_code = :s and (cast(:status as varchar) is null or status = :status)"
+                        + " order by submitted_at desc")
+                .param("s", serviceCode).param("status", status == null ? null : status.name())
+                .query(JdbcFeeRepository::mapAdjustment).list();
+    }
+
+    @Override
+    public void saveAdjustmentDecision(FeeAdjustment a) {
+        FeeVersion.Decision d = a.decided();
+        int updated = jdbc.sql("""
+                        update fee_adjustment set status = :status, decided_at = :at, decided_by = :by,
+                            decided_by_username = :byName, decided_channel = :channel, decision_reason = :reason
+                        where id = :id and status = 'PENDING'""")
+                .param("status", a.status().name())
+                .param("at", Timestamp.from(d.at()))
+                .param("by", d.actor().id())
+                .param("byName", d.actor().username())
+                .param("channel", d.channel().name())
+                .param("reason", d.reason())
+                .param("id", a.id())
+                .update();
+        if (updated != 1) {
+            throw new OptimisticLockingFailureException("fee adjustment " + a.id() + " was decided concurrently");
+        }
+    }
+
+    private static FeeAdjustment mapAdjustment(ResultSet rs, int row) throws SQLException {
+        Date to = rs.getDate("effective_to");
+        long amount = rs.getLong("amount");
+        Long boxedAmount = rs.wasNull() ? null : amount;
+        java.sql.Array fees = rs.getArray("fee_codes");
+        FeeAdjustment.Spec spec = new FeeAdjustment.Spec(rs.getString("code"),
+                FeeAdjustment.Kind.valueOf(rs.getString("kind")), rs.getString("service_code"),
+                rs.getString("name_nl"), rs.getString("name_en"),
+                fees == null ? List.of() : java.util.Arrays.asList((String[]) fees.getArray()),
+                rs.getString("customer_category"), rs.getString("campaign_code"), rs.getBigDecimal("percent"),
+                boxedAmount, rs.getString("financial_item"), rs.getString("beneficiary"),
+                rs.getDate("effective_from").toLocalDate(), to == null ? null : to.toLocalDate());
+        FeeVersion.Decision submitted = new FeeVersion.Decision(
+                new Actor(rs.getString("submitted_by"), rs.getString("submitted_by_username")),
+                Channel.valueOf(rs.getString("submitted_channel")), rs.getTimestamp("submitted_at").toInstant(),
+                rs.getString("submit_reason"));
+        FeeVersion.Decision decided = rs.getTimestamp("decided_at") == null ? null : new FeeVersion.Decision(
+                new Actor(rs.getString("decided_by"), rs.getString("decided_by_username")),
+                Channel.valueOf(rs.getString("decided_channel")), rs.getTimestamp("decided_at").toInstant(),
+                rs.getString("decision_reason"));
+        return FeeAdjustment.restore(rs.getObject("id", UUID.class), spec, submitted,
+                FeeVersion.Status.valueOf(rs.getString("status")), decided);
+    }
+
     @Override
     public void insertQuote(Quote q) {
         ArrayNode lines = json.createArrayNode();
         for (Quote.Line l : q.lines()) {
             ObjectNode n = lines.addObject();
+            n.put("kind", l.kind().name());
             n.put("feeCode", l.feeCode());
             n.put("feeVersionId", l.feeVersionId().toString());
             n.put("versionNo", l.versionNo());
@@ -156,15 +263,19 @@ class JdbcFeeRepository implements FeeRepository {
             n.put("nameEn", l.nameEn());
             n.put("financialItem", l.financialItem());
             n.put("beneficiary", l.beneficiary());
+            n.put("gross", l.gross());
+            n.put("discount", l.discount());
+            n.put("adjustmentCode", l.adjustmentCode());
             n.put("amount", l.amount());
         }
         ObjectNode quantities = json.createObjectNode();
         q.request().quantities().forEach((k, v) -> quantities.put(k, v.toPlainString()));
         jdbc.sql("""
                         insert into fee_quote (id, service_code, region, customer_category, subject_category,
-                            quantities, quote_date, lines, total, currency, created_at, expires_at, created_by)
+                            quantities, quote_date, lines, total, currency, created_at, expires_at, created_by,
+                            campaign_code, expiry_date)
                         values (:id, :service, :region, :customer, :subject, cast(:quantities as jsonb), :date,
-                            cast(:lines as jsonb), :total, :currency, :at, :expires, :by)""")
+                            cast(:lines as jsonb), :total, :currency, :at, :expires, :by, :campaign, :expiry)""")
                 .param("id", q.id())
                 .param("service", q.request().serviceCode())
                 .param("region", q.request().region())
@@ -178,6 +289,8 @@ class JdbcFeeRepository implements FeeRepository {
                 .param("at", Timestamp.from(q.createdAt()))
                 .param("expires", Timestamp.from(q.expiresAt()))
                 .param("by", q.createdBy())
+                .param("campaign", q.request().campaignCode())
+                .param("expiry", q.request().expiryDate() == null ? null : Date.valueOf(q.request().expiryDate()))
                 .update();
     }
 
@@ -185,7 +298,8 @@ class JdbcFeeRepository implements FeeRepository {
     public Optional<Quote> findQuote(UUID id) {
         return jdbc.sql("""
                         select id, service_code, region, customer_category, subject_category, quantities::text as q,
-                            quote_date, lines::text as lines, total, currency, created_at, expires_at, created_by
+                            quote_date, lines::text as lines, total, currency, created_at, expires_at, created_by,
+                            campaign_code, expiry_date
                         from fee_quote where id = :id""")
                 .param("id", id)
                 .query((rs, n) -> {
@@ -194,15 +308,23 @@ class JdbcFeeRepository implements FeeRepository {
                             .forEach(e -> quantities.put(e.getKey(), new BigDecimal(e.getValue().asString())));
                     List<Quote.Line> lines = new ArrayList<>();
                     for (JsonNode l : json.readTree(rs.getString("lines"))) {
-                        lines.add(new Quote.Line(l.get("feeCode").asString(),
-                                UUID.fromString(l.get("feeVersionId").asString()), l.get("versionNo").asInt(),
-                                l.get("nameNl").asString(), l.get("nameEn").asString(),
+                        long amount = l.get("amount").asLong();
+                        lines.add(new Quote.Line(
+                                l.hasNonNull("kind") ? Quote.LineKind.valueOf(l.get("kind").asString())
+                                        : Quote.LineKind.FEE,
+                                l.get("feeCode").asString(), UUID.fromString(l.get("feeVersionId").asString()),
+                                l.get("versionNo").asInt(), l.get("nameNl").asString(), l.get("nameEn").asString(),
                                 l.get("financialItem").asString(), l.get("beneficiary").asString(),
-                                l.get("amount").asLong()));
+                                l.hasNonNull("gross") ? l.get("gross").asLong() : amount,
+                                l.hasNonNull("discount") ? l.get("discount").asLong() : 0,
+                                l.hasNonNull("adjustmentCode") ? l.get("adjustmentCode").asString() : null,
+                                amount));
                     }
+                    Date expiry = rs.getDate("expiry_date");
                     Quote.Request request = new Quote.Request(rs.getString("service_code"), rs.getString("region"),
                             rs.getString("customer_category"), rs.getString("subject_category"), quantities,
-                            rs.getDate("quote_date").toLocalDate());
+                            rs.getDate("quote_date").toLocalDate(), rs.getString("campaign_code"),
+                            expiry == null ? null : expiry.toLocalDate());
                     return new Quote(rs.getObject("id", UUID.class), request, lines, rs.getLong("total"),
                             rs.getString("currency"), rs.getTimestamp("created_at").toInstant(),
                             rs.getTimestamp("expires_at").toInstant(), rs.getString("created_by"));

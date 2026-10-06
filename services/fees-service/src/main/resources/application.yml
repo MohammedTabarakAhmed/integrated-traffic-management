@@ -57,6 +57,9 @@ itms:
       - /v1/fee-versions
       - /v1/fee-versions/*/approvals
       - /v1/fee-versions/*/rejections
+      - /v1/fee-adjustments
+      - /v1/fee-adjustments/*/approvals
+      - /v1/fee-adjustments/*/rejections
     retention: ${ITMS_IDEMPOTENCY_RETENTION:24h}
     lock-timeout: ${ITMS_IDEMPOTENCY_LOCK_TIMEOUT:30s}
     cleanup-interval: ${ITMS_IDEMPOTENCY_CLEANUP_INTERVAL:15m}

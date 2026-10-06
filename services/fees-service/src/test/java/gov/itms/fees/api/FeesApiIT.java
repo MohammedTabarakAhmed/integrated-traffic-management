@@ -300,4 +300,55 @@ class FeesApiIT {
                 Map.of("type", "FIXED", "amount", 1), TODAY.minusDays(1), null), maker());
         assertThat(code(past)).isEqualTo("FEE_START_IN_PAST");
     }
+
+    @Test
+    @Tag("CC-043")
+    @Tag("CC-044")
+    @Tag("CC-045")
+    @DisplayName("a quote applies an approved campaign discount, a late fee from the expiry date and VAT")
+    void adjustmentsAndLateFees() throws Exception {
+        String service = newService();
+        approvedVersion(version(service, "BASE", Map.of("type", "FIXED", "amount", 10000), TODAY, null));
+        approvedVersion(version(service, "LATE", Map.of("type", "LATE", "period", "MONTH", "amount", 1000,
+                "graceDays", 0), TODAY, null));
+        Map<String, Object> discount = new HashMap<>();
+        discount.put("code", "SUMMER");
+        discount.put("kind", "DISCOUNT");
+        discount.put("serviceCode", service);
+        discount.put("nameNl", "خصم");
+        discount.put("nameEn", "Summer campaign");
+        discount.put("feeCodes", List.of("BASE_" + service));
+        discount.put("campaignCode", "SUMMER26");
+        discount.put("percent", "20");
+        discount.put("effectiveFrom", TODAY.toString());
+        discount.put("reason", "summer campaign");
+        Map<String, Object> vat = new HashMap<>(Map.of("code", "VAT", "kind", "LEVY", "serviceCode", service,
+                "nameNl", "ضريبة", "nameEn", "VAT", "percent", "5", "financialItem", "VAT_PAYABLE",
+                "beneficiary", "TAX_AUTHORITY", "effectiveFrom", TODAY.toString(), "reason", "value added tax"));
+        for (Map<String, Object> adjustment : List.of(discount, vat)) {
+            MvcResult submitted = postAs("/v1/fee-adjustments", adjustment, maker());
+            assertThat(submitted.getResponse().getStatus()).as(submitted.getResponse().getContentAsString())
+                    .isEqualTo(201);
+            String id = body(submitted).get("id").asString();
+            assertThat(postAs("/v1/fee-adjustments/" + id + "/approvals", Map.of(), checker()).getResponse()
+                    .getStatus()).isEqualTo(200);
+        }
+        assertThat(code(postAs("/v1/fee-adjustments", discount, maker()))).isEqualTo("ADJUSTMENT_CODE_TAKEN");
+
+        Map<String, Object> request = new HashMap<>(Map.of("serviceCode", service, "region", "DXB",
+                "customerCategory", "CITIZEN", "campaignCode", "SUMMER26",
+                "expiryDate", TODAY.minusMonths(2).minusDays(1).toString()));
+        JsonNode quote = body(postAs("/v1/quotes", request, customer()));
+        JsonNode lines = quote.get("lines");
+        assertThat(lines).hasSize(3);
+        assertThat(lines.get(0).get("discount").asLong()).isEqualTo(2000);
+        assertThat(lines.get(0).get("adjustmentCode").asString()).isEqualTo("SUMMER");
+        assertThat(lines.get(1).get("amount").asLong()).as("three started months late").isEqualTo(3000);
+        assertThat(lines.get(2).get("kind").asString()).isEqualTo("LEVY");
+        assertThat(lines.get(2).get("amount").asLong()).as("5% of 8000 + 3000").isEqualTo(550);
+        assertThat(quote.get("total").asLong()).isEqualTo(8000 + 3000 + 550);
+
+        request.remove("expiryDate");
+        assertThat(code(postAs("/v1/quotes", request, customer()))).isEqualTo("EXPIRY_DATE_REQUIRED");
+    }
 }

@@ -1,15 +1,19 @@
 package gov.itms.fees.api;
 
+import gov.itms.fees.api.ApiModels.AdjustmentDto;
 import gov.itms.fees.api.ApiModels.Collection;
 import gov.itms.fees.api.ApiModels.DecisionRequest;
 import gov.itms.fees.api.ApiModels.FeeVersionDto;
 import gov.itms.fees.api.ApiModels.QuoteDto;
 import gov.itms.fees.api.ApiModels.QuoteRequest;
 import gov.itms.fees.api.ApiModels.RejectRequest;
+import gov.itms.fees.api.ApiModels.SubmitAdjustmentRequest;
 import gov.itms.fees.api.ApiModels.SubmitVersionRequest;
+import gov.itms.fees.application.AdjustmentService;
 import gov.itms.fees.application.Caller;
 import gov.itms.fees.application.FeeService;
 import gov.itms.fees.application.QuoteService;
+import gov.itms.fees.domain.FeeAdjustment;
 import gov.itms.fees.domain.FeeVersion;
 import gov.itms.fees.domain.Quote;
 import jakarta.validation.Valid;
@@ -30,12 +34,47 @@ class FeeController {
 
     private final FeeService fees;
     private final QuoteService quotes;
+    private final AdjustmentService adjustments;
     private final Callers callers;
 
-    FeeController(FeeService fees, QuoteService quotes, Callers callers) {
+    FeeController(FeeService fees, QuoteService quotes, AdjustmentService adjustments, Callers callers) {
         this.fees = fees;
         this.quotes = quotes;
+        this.adjustments = adjustments;
         this.callers = callers;
+    }
+
+    @PostMapping("/v1/fee-adjustments")
+    @PreAuthorize("hasAuthority('fees.version.submit')")
+    ResponseEntity<AdjustmentDto> submitAdjustment(@Valid @RequestBody SubmitAdjustmentRequest body) {
+        FeeAdjustment a = adjustments.submit(body.toDomain(), body.reason(), callers.current());
+        return ResponseEntity.created(URI.create("/v1/fee-adjustments/" + a.id())).body(AdjustmentDto.of(a));
+    }
+
+    @GetMapping("/v1/fee-adjustments")
+    @PreAuthorize("hasAuthority('fees.version.read')")
+    Collection<AdjustmentDto> adjustments(@RequestParam String serviceCode,
+                                          @RequestParam(required = false) FeeVersion.Status status) {
+        return new Collection<>(adjustments.byService(serviceCode, status, callers.current()).stream()
+                .map(AdjustmentDto::of).toList());
+    }
+
+    @GetMapping("/v1/fee-adjustments/{id}")
+    @PreAuthorize("hasAuthority('fees.version.read')")
+    AdjustmentDto adjustment(@PathVariable UUID id) {
+        return AdjustmentDto.of(adjustments.get(id, callers.current()));
+    }
+
+    @PostMapping("/v1/fee-adjustments/{id}/approvals")
+    @PreAuthorize("hasAuthority('fees.version.approve')")
+    AdjustmentDto approveAdjustment(@PathVariable UUID id, @Valid @RequestBody DecisionRequest body) {
+        return AdjustmentDto.of(adjustments.approve(id, body.reason(), callers.current()));
+    }
+
+    @PostMapping("/v1/fee-adjustments/{id}/rejections")
+    @PreAuthorize("hasAuthority('fees.version.approve') or hasAuthority('fees.version.submit')")
+    AdjustmentDto rejectAdjustment(@PathVariable UUID id, @Valid @RequestBody RejectRequest body) {
+        return AdjustmentDto.of(adjustments.reject(id, body.reason(), callers.current()));
     }
 
     @PostMapping("/v1/fee-versions")

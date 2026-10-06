@@ -1,5 +1,6 @@
 package gov.itms.fees.infrastructure;
 
+import gov.itms.fees.application.AdjustmentService;
 import gov.itms.fees.application.FeeService;
 import gov.itms.fees.application.QuoteService;
 import gov.itms.platform.audit.AuditRecorder;
@@ -25,6 +26,12 @@ public class FeesServiceConfiguration {
     FeeService feeService(JdbcFeeRepository fees, AuditRecorder audit, DomainEventRecorder events, Clock clock,
                           FeesProperties properties) {
         return new FeeService(fees, audit, events, clock, properties.currency());
+    }
+
+    @Bean
+    AdjustmentService adjustmentService(JdbcFeeRepository fees, AuditRecorder audit, DomainEventRecorder events,
+                                        Clock clock) {
+        return new AdjustmentService(fees, audit, events, clock);
     }
 
     @Bean

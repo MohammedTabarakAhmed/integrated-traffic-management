@@ -1,5 +1,6 @@
 package gov.itms.fees.application;
 
+import gov.itms.fees.domain.FeeAdjustment;
 import gov.itms.fees.domain.FeeVersion;
 import gov.itms.fees.domain.Quote;
 import java.time.LocalDate;
@@ -36,6 +37,17 @@ public interface FeeRepository {
 
     /** Saves a shortened end date of an approved version. */
     void saveEnd(FeeVersion version);
+
+    void insertAdjustment(FeeAdjustment adjustment);
+
+    Optional<FeeAdjustment> findAdjustment(UUID id);
+
+    Optional<FeeAdjustment> findAdjustmentForUpdate(UUID id);
+
+    /** Adjustments of a service, newest first, optionally of one status. */
+    List<FeeAdjustment> adjustments(String serviceCode, FeeVersion.Status status);
+
+    void saveAdjustmentDecision(FeeAdjustment adjustment);
 
     void insertQuote(Quote quote);
 

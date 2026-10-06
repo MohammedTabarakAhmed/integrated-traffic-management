@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
@@ -21,14 +22,14 @@ class FeeCalculationTest {
     @Test
     @DisplayName("fixed and per-unit fees, with minimum, maximum and half-up rounding")
     void fixedAndPerUnit() {
-        assertThat(new FeeMethod.Fixed(15000).amount(Map.of())).isEqualTo(15000);
+        assertThat(new FeeMethod.Fixed(15000).amount(FeeMethod.Inputs.of(Map.of()))).isEqualTo(15000);
         FeeMethod.PerUnit perYear = new FeeMethod.PerUnit("YEAR", new BigDecimal("10000"), null, null);
-        assertThat(perYear.amount(q("YEAR", "2"))).isEqualTo(20000);
+        assertThat(perYear.amount(FeeMethod.Inputs.of(q("YEAR", "2")))).isEqualTo(20000);
         FeeMethod.PerUnit perTonne = new FeeMethod.PerUnit("TONNE", new BigDecimal("2500.5"), 5000L, 30000L);
-        assertThat(perTonne.amount(q("TONNE", "1"))).as("minimum").isEqualTo(5000);
-        assertThat(perTonne.amount(q("TONNE", "3"))).as("7501.5 rounds half up").isEqualTo(7502);
-        assertThat(perTonne.amount(q("TONNE", "100"))).as("maximum").isEqualTo(30000);
-        assertThatThrownBy(() -> perYear.amount(Map.of())).hasFieldOrPropertyWithValue("code", "QUANTITY_REQUIRED");
+        assertThat(perTonne.amount(FeeMethod.Inputs.of(q("TONNE", "1")))).as("minimum").isEqualTo(5000);
+        assertThat(perTonne.amount(FeeMethod.Inputs.of(q("TONNE", "3")))).as("7501.5 rounds half up").isEqualTo(7502);
+        assertThat(perTonne.amount(FeeMethod.Inputs.of(q("TONNE", "100")))).as("maximum").isEqualTo(30000);
+        assertThatThrownBy(() -> perYear.amount(FeeMethod.Inputs.of(Map.of()))).hasFieldOrPropertyWithValue("code", "QUANTITY_REQUIRED");
         assertThatThrownBy(() -> new FeeMethod.PerUnit("YEAR", BigDecimal.ONE, 10L, 5L))
                 .hasFieldOrPropertyWithValue("code", "FIELD_INVALID");
         assertThatThrownBy(() -> new FeeMethod.Fixed(-1)).hasFieldOrPropertyWithValue("code", "FIELD_INVALID");
@@ -43,11 +44,11 @@ class FeeCalculationTest {
                 new FeeMethod.Tiered.Tier(null, new BigDecimal("3000")));
         FeeMethod.Tiered graduated = new FeeMethod.Tiered("TONNE", FeeMethod.Tiered.Mode.GRADUATED, tiers);
         FeeMethod.Tiered volume = new FeeMethod.Tiered("TONNE", FeeMethod.Tiered.Mode.VOLUME, tiers);
-        assertThat(graduated.amount(q("TONNE", "3"))).isEqualTo(3000);
-        assertThat(graduated.amount(q("TONNE", "12"))).as("3.5*1000 + 6.5*2000 + 2*3000").isEqualTo(22500);
-        assertThat(volume.amount(q("TONNE", "12"))).isEqualTo(36000);
-        assertThat(volume.amount(q("TONNE", "3.5"))).as("upper bound inclusive").isEqualTo(3500);
-        assertThat(graduated.amount(q("TONNE", "0"))).isZero();
+        assertThat(graduated.amount(FeeMethod.Inputs.of(q("TONNE", "3")))).isEqualTo(3000);
+        assertThat(graduated.amount(FeeMethod.Inputs.of(q("TONNE", "12")))).as("3.5*1000 + 6.5*2000 + 2*3000").isEqualTo(22500);
+        assertThat(volume.amount(FeeMethod.Inputs.of(q("TONNE", "12")))).isEqualTo(36000);
+        assertThat(volume.amount(FeeMethod.Inputs.of(q("TONNE", "3.5")))).as("upper bound inclusive").isEqualTo(3500);
+        assertThat(graduated.amount(FeeMethod.Inputs.of(q("TONNE", "0")))).isZero();
         assertThatThrownBy(() -> new FeeMethod.Tiered("TONNE", FeeMethod.Tiered.Mode.VOLUME, List.of(
                 new FeeMethod.Tiered.Tier(new BigDecimal("5"), BigDecimal.ONE),
                 new FeeMethod.Tiered.Tier(new BigDecimal("4"), BigDecimal.ONE),
@@ -58,10 +59,32 @@ class FeeCalculationTest {
     }
 
     @Test
+    @Tag("CC-044")
+    @DisplayName("late fees count started periods after expiry plus grace, capped; nothing while not late")
+    void lateFees() {
+        LocalDate expiry = LocalDate.of(2026, 1, 31);
+        FeeMethod.Late monthly = new FeeMethod.Late(FeeMethod.Late.Period.MONTH, 5000, 30, 60000L);
+        assertThat(monthly.amount(new FeeMethod.Inputs(Map.of(), expiry, LocalDate.of(2026, 3, 2))))
+                .as("within grace").isZero();
+        assertThat(monthly.amount(new FeeMethod.Inputs(Map.of(), expiry, LocalDate.of(2026, 3, 3))))
+                .as("one day late starts the first month").isEqualTo(5000);
+        assertThat(monthly.amount(new FeeMethod.Inputs(Map.of(), expiry, LocalDate.of(2026, 5, 3))))
+                .as("two months and a day: three started months").isEqualTo(15000);
+        assertThat(monthly.amount(new FeeMethod.Inputs(Map.of(), expiry, LocalDate.of(2030, 1, 1))))
+                .as("cap").isEqualTo(60000);
+        FeeMethod.Late daily = new FeeMethod.Late(FeeMethod.Late.Period.DAY, 100, 0, null);
+        assertThat(daily.amount(new FeeMethod.Inputs(Map.of(), expiry, LocalDate.of(2026, 2, 10)))).isEqualTo(1000);
+        assertThatThrownBy(() -> daily.amount(new FeeMethod.Inputs(Map.of(), null, LocalDate.of(2026, 2, 10))))
+                .hasFieldOrPropertyWithValue("code", "EXPIRY_DATE_REQUIRED");
+        assertThatThrownBy(() -> new FeeMethod.Late(FeeMethod.Late.Period.DAY, 100, -1, null))
+                .hasFieldOrPropertyWithValue("code", "FIELD_INVALID");
+    }
+
+    @Test
     @DisplayName("formulas: arithmetic, functions, quantities in lower case, safe errors")
     void formulas() {
         FeeMethod.Formula seats = new FeeMethod.Formula("max(15000, seat * 2500) + round(year * 0.5) * 100");
-        assertThat(seats.amount(Map.of("SEAT", new BigDecimal("7"), "YEAR", new BigDecimal("3"))))
+        assertThat(seats.amount(FeeMethod.Inputs.of(Map.of("SEAT", new BigDecimal("7"), "YEAR", new BigDecimal("3")))))
                 .as("max(15000, 17500) + round(1.5)*100").isEqualTo(17700);
         assertThat(seats.units()).containsExactly("SEAT", "YEAR");
         assertThat(FeeFormula.parse("-(2 - 5) * 10").evaluate(Map.of())).isEqualByComparingTo("30");
@@ -76,9 +99,9 @@ class FeeCalculationTest {
         assertThatThrownBy(() -> FeeFormula.parse("x".repeat(501))).hasFieldOrPropertyWithValue("code", "FORMULA_INVALID");
         assertThatThrownBy(() -> FeeFormula.parse("10 / seat").evaluate(Map.of("seat", BigDecimal.ZERO)))
                 .hasFieldOrPropertyWithValue("code", "FORMULA_DIVISION_BY_ZERO");
-        assertThatThrownBy(() -> new FeeMethod.Formula("0 - seat").amount(q("SEAT", "2")))
+        assertThatThrownBy(() -> new FeeMethod.Formula("0 - seat").amount(FeeMethod.Inputs.of(q("SEAT", "2"))))
                 .hasFieldOrPropertyWithValue("code", "FORMULA_NEGATIVE");
-        assertThatThrownBy(() -> new FeeMethod.Formula("seat * 10").amount(Map.of()))
+        assertThatThrownBy(() -> new FeeMethod.Formula("seat * 10").amount(FeeMethod.Inputs.of(Map.of())))
                 .hasFieldOrPropertyWithValue("code", "QUANTITY_REQUIRED");
     }
 }

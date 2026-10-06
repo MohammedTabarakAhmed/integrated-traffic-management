@@ -20,7 +20,13 @@ info:
     specific approved version in force applies. A quote is frozen when made and kept until it expires (configuration);
     later fee changes never alter it (CC-046). Any signed-in user may ask for a quote.
 
-    Not yet in this version: exemptions and discounts (CC-043), late fees (CC-044) and levies such as VAT (CC-045).
+    Late fees (CC-044): method LATE charges `amount` per started `period` (DAY, MONTH, YEAR) that the quote date lies
+    after the quote's `expiryDate` plus `graceDays`, capped at `maximum`; a late fee that is not due is left out.
+
+    Adjustments (CC-043, CC-045; ADR-047): exemptions and discounts for a customer category or a campaign (the quote's
+    `campaignCode`), and levies such as VAT, under the same maker-checker. On each fee line the most favourable
+    exemption or discount applies (no stacking, Q-063); each levy adds its own line on the net covered fees.
+
     Codes are checked for their format only until the reference-data client exists (Q-044, Q-062).
 
     The channel is the `X-Channel` header. Submitting and deciding need an `Idempotency-Key` (ADR-032).
@@ -31,6 +37,7 @@ security:
   - bearerAuth: []
 tags:
   - name: Fee versions
+  - name: Fee adjustments
   - name: Quotes
 
 paths:
@@ -178,6 +185,144 @@ paths:
         '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
 
+  /v1/fee-adjustments:
+    post:
+      tags: [Fee adjustments]
+      operationId: submitFeeAdjustment
+      summary: Submit an exemption, discount or levy for approval (CC-043, CC-045, CC-046)
+      description: |
+        EXEMPTION waives the covered fees and DISCOUNT takes off a `percent` or an `amount`, each for a
+        `customerCategory` or a `campaignCode` (422 `ADJUSTMENT_TARGET_REQUIRED`, `DISCOUNT_VALUE_REQUIRED`). LEVY adds
+        a `percent` of the net covered fees, paid to its own `financialItem` and `beneficiary` (422 `LEVY_INVALID`).
+        `feeCodes` lists the covered fees of the service (empty = all). A code is used once per service (409
+        `ADJUSTMENT_CODE_TAKEN`). Same maker-checker as fee versions.
+      x-itms-permission: fees.version.submit
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SubmitAdjustmentRequest' }
+      responses:
+        '201':
+          description: Submitted
+          headers:
+            Location: { schema: { type: string } }
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeeAdjustment' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [Fee adjustments]
+      operationId: listFeeAdjustments
+      summary: Adjustments of a service, newest first, optionally of one status
+      x-itms-permission: fees.version.read
+      x-itms-scope: national
+      parameters:
+        - name: serviceCode
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/ServiceCode' }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/VersionStatus' }
+      responses:
+        '200':
+          description: Adjustments
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeeAdjustmentCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+
+  /v1/fee-adjustments/{adjustmentId}:
+    get:
+      tags: [Fee adjustments]
+      operationId: getFeeAdjustment
+      summary: A fee adjustment
+      x-itms-permission: fees.version.read
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/AdjustmentId'
+      responses:
+        '200':
+          description: Adjustment
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeeAdjustment' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/fee-adjustments/{adjustmentId}/approvals:
+    post:
+      tags: [Fee adjustments]
+      operationId: approveFeeAdjustment
+      summary: Approve a pending adjustment (CC-046)
+      x-itms-permission: fees.version.approve
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/AdjustmentId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DecisionRequest' }
+      responses:
+        '200':
+          description: Approved
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeeAdjustment' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/fee-adjustments/{adjustmentId}/rejections:
+    post:
+      tags: [Fee adjustments]
+      operationId: rejectFeeAdjustment
+      summary: Reject a pending adjustment, or withdraw one's own (CC-046)
+      x-itms-permission: fees.version.approve
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/AdjustmentId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RejectRequest' }
+      responses:
+        '200':
+          description: Rejected or withdrawn
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeeAdjustment' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
   /v1/quotes:
     post:
       tags: [Quotes]
@@ -185,7 +330,7 @@ paths:
       summary: An itemised, frozen fee breakdown for a request (CC-047)
       description: |
         Refused when the date has passed (422 `QUOTE_DATE_IN_PAST`), a fee needs a quantity that is not given (422
-        `QUANTITY_REQUIRED`), or a fee has equally specific versions (409 `FEE_AMBIGUOUS`, a configuration error).
+        `QUANTITY_REQUIRED`) or the expiry date (422 `EXPIRY_DATE_REQUIRED`), or a fee has equally specific versions (409 `FEE_AMBIGUOUS`, a configuration error).
         A service without applicable fees gives an empty quote with total 0.
       x-itms-permission: authenticated
       x-itms-scope: national
@@ -237,6 +382,11 @@ components:
       bearerFormat: JWT
 
   parameters:
+    AdjustmentId:
+      name: adjustmentId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
     VersionId:
       name: versionId
       in: path
@@ -300,13 +450,14 @@ components:
       type: object
       additionalProperties: false
       description: |
-        FIXED: `amount`. PER_UNIT: `unit`, `rate` (minor units per unit), optional `minimum`/`maximum`. TIERED: `unit`,
+        LATE: `amount` per started `period` after the expiry date plus `graceDays`, optional `maximum`. FIXED: `amount`.
+        PER_UNIT: `unit`, `rate` (minor units per unit), optional `minimum`/`maximum`. TIERED: `unit`,
         `mode` (GRADUATED: each band at its rate; VOLUME: the whole quantity at the rate of its band) and `tiers`
         (increasing `upTo`, inclusive; the last open-ended). FORMULA: `expression` with numbers, quantity names in lower
         case, `+ - * /`, parentheses, `min`, `max`, `round`, `ceil`, `floor`.
       required: [type]
       properties:
-        type: { type: string, enum: [FIXED, PER_UNIT, TIERED, FORMULA] }
+        type: { type: string, enum: [FIXED, PER_UNIT, TIERED, FORMULA, LATE] }
         amount: { oneOf: [ { $ref: '#/components/schemas/Amount' }, { type: 'null' } ] }
         unit: { $ref: '#/components/schemas/NullableCode' }
         rate: { oneOf: [ { $ref: '#/components/schemas/Decimal' }, { type: 'null' } ] }
@@ -320,6 +471,8 @@ components:
               items: { $ref: '#/components/schemas/Tier' }
             - type: 'null'
         expression: { oneOf: [ { type: string, maxLength: 500 }, { type: 'null' } ] }
+        period: { oneOf: [ { type: string, enum: [DAY, MONTH, YEAR] }, { type: 'null' } ] }
+        graceDays: { oneOf: [ { type: integer, minimum: 0, maximum: 3650 }, { type: 'null' } ] }
     SubmitVersionRequest:
       type: object
       additionalProperties: false
@@ -390,6 +543,61 @@ components:
       required: [items]
       properties:
         items: { type: array, items: { $ref: '#/components/schemas/FeeVersion' } }
+    SubmitAdjustmentRequest:
+      type: object
+      additionalProperties: false
+      required: [code, kind, serviceCode, nameNl, nameEn, effectiveFrom, reason]
+      properties:
+        code: { $ref: '#/components/schemas/Code' }
+        kind: { type: string, enum: [EXEMPTION, DISCOUNT, LEVY] }
+        serviceCode: { $ref: '#/components/schemas/ServiceCode' }
+        nameNl: { type: string, maxLength: 200 }
+        nameEn: { type: string, maxLength: 200 }
+        feeCodes:
+          oneOf:
+            - type: array
+              maxItems: 50
+              uniqueItems: true
+              items: { $ref: '#/components/schemas/Code' }
+            - type: 'null'
+        customerCategory: { $ref: '#/components/schemas/NullableCode' }
+        campaignCode: { $ref: '#/components/schemas/NullableCode' }
+        percent: { oneOf: [ { type: string, pattern: '^[0-9]{1,3}(\.[0-9]{1,2})?$' }, { type: 'null' } ] }
+        amount: { oneOf: [ { $ref: '#/components/schemas/Amount' }, { type: 'null' } ] }
+        financialItem: { $ref: '#/components/schemas/NullableCode' }
+        beneficiary: { $ref: '#/components/schemas/NullableCode' }
+        effectiveFrom: { type: string, format: date }
+        effectiveTo: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
+        reason: { type: string, minLength: 3, maxLength: 500 }
+    FeeAdjustment:
+      type: object
+      additionalProperties: false
+      required: [id, code, kind, serviceCode, nameNl, nameEn, feeCodes, effectiveFrom, status, submitted]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        kind: { type: string, enum: [EXEMPTION, DISCOUNT, LEVY] }
+        serviceCode: { type: string }
+        nameNl: { type: string }
+        nameEn: { type: string }
+        feeCodes: { type: array, items: { type: string } }
+        customerCategory: { oneOf: [ { type: string }, { type: 'null' } ] }
+        campaignCode: { oneOf: [ { type: string }, { type: 'null' } ] }
+        percent: { oneOf: [ { type: string }, { type: 'null' } ] }
+        amount: { oneOf: [ { type: integer }, { type: 'null' } ] }
+        financialItem: { oneOf: [ { type: string }, { type: 'null' } ] }
+        beneficiary: { oneOf: [ { type: string }, { type: 'null' } ] }
+        effectiveFrom: { type: string, format: date }
+        effectiveTo: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
+        status: { $ref: '#/components/schemas/VersionStatus' }
+        submitted: { $ref: '#/components/schemas/Decision' }
+        decided: { oneOf: [ { $ref: '#/components/schemas/Decision' }, { type: 'null' } ] }
+    FeeAdjustmentCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/FeeAdjustment' } }
     QuoteRequest:
       type: object
       additionalProperties: false
@@ -407,11 +615,18 @@ components:
               additionalProperties: { $ref: '#/components/schemas/Decimal' }
             - type: 'null'
         date: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
+        campaignCode: { $ref: '#/components/schemas/NullableCode' }
+        expiryDate: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
     QuoteLine:
       type: object
       additionalProperties: false
-      required: [feeCode, feeVersionId, versionNo, nameNl, nameEn, financialItem, beneficiary, amount]
+      required: [kind, feeCode, feeVersionId, versionNo, nameNl, nameEn, financialItem, beneficiary, gross, discount,
+                 amount]
+      description: |
+        FEE: `gross - discount = amount`, with the exemption or discount applied in `adjustmentCode`. LEVY: `feeCode`
+        and `adjustmentCode` are the levy's code, `feeVersionId` its id, and `amount` the levy due.
       properties:
+        kind: { type: string, enum: [FEE, LEVY] }
         feeCode: { type: string }
         feeVersionId: { type: string, format: uuid }
         versionNo: { type: integer }
@@ -419,6 +634,9 @@ components:
         nameEn: { type: string }
         financialItem: { type: string }
         beneficiary: { type: string }
+        gross: { $ref: '#/components/schemas/Amount' }
+        discount: { $ref: '#/components/schemas/Amount' }
+        adjustmentCode: { oneOf: [ { type: string }, { type: 'null' } ] }
         amount: { $ref: '#/components/schemas/Amount' }
     Quote:
       type: object
@@ -433,6 +651,8 @@ components:
         subjectCategory: { oneOf: [ { type: string }, { type: 'null' } ] }
         quantities: { type: object, additionalProperties: { type: string } }
         date: { type: string, format: date }
+        campaignCode: { oneOf: [ { type: string }, { type: 'null' } ] }
+        expiryDate: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
         lines: { type: array, items: { $ref: '#/components/schemas/QuoteLine' } }
         total: { type: integer, minimum: 0 }
         currency: { type: string }

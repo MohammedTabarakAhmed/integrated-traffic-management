@@ -52,6 +52,15 @@ final class FeeMethodJson {
                 n.put("type", "FORMULA");
                 n.put("expression", f.expression());
             }
+            case FeeMethod.Late l -> {
+                n.put("type", "LATE");
+                n.put("period", l.period().name());
+                n.put("rate", l.rate());
+                n.put("graceDays", l.graceDays());
+                if (l.maximum() != null) {
+                    n.put("maximum", l.maximum());
+                }
+            }
         }
         return json.writeValueAsString(n);
     }
@@ -74,6 +83,9 @@ final class FeeMethodJson {
                         FeeMethod.Tiered.Mode.valueOf(n.get("mode").asString()), tiers);
             }
             case "FORMULA" -> new FeeMethod.Formula(n.get("expression").asString());
+            case "LATE" -> new FeeMethod.Late(FeeMethod.Late.Period.valueOf(n.get("period").asString()),
+                    n.get("rate").asLong(), n.get("graceDays").asInt(),
+                    n.hasNonNull("maximum") ? n.get("maximum").asLong() : null);
             default -> throw new IllegalStateException("unknown fee method " + n.get("type"));
         };
     }

@@ -137,4 +137,6 @@ routes:
       - /v1/fee-versions/*
       - /v1/quotes
       - /v1/quotes/*
+      - /v1/fee-adjustments
+      - /v1/fee-adjustments/*
 #END

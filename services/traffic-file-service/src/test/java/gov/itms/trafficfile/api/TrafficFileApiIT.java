@@ -510,4 +510,73 @@ class TrafficFileApiIT {
                 + "where file_number = :n").param("n", number).update())
                 .isInstanceOf(DataAccessException.class);
     }
+
+    // ------------------------------------------------------------------ ban list (DL-013)
+
+    private static RequestPostProcessor banOfficer() {
+        return user("u-ban", "ban-officer", "BAN_LIST_OFFICER", "trafficfile.ban.place", "trafficfile.ban.lift",
+                "trafficfile.ban.read");
+    }
+
+    @Test
+    @Tag("DL-013")
+    @DisplayName("a banned person cannot be given a file until the ban is lifted; entries are masked and audited")
+    void banList() throws Exception {
+        String passport = newPassport();
+        Map<String, Object> ban = new HashMap<>();
+        ban.put("person", Map.of("type", "PASSPORT", "passportNo", passport, "passportCountry", "GBR"));
+        ban.put("reason", "court order 12/2026");
+        ban.put("source", "COURT");
+        ban.put("sourceRef", "CO-" + passport);
+        ban.put("endDate", LocalDate.now().plusYears(1).toString());
+        MvcResult placed = postAs("/v1/ban-entries", ban, banOfficer());
+        assertThat(placed.getResponse().getStatus()).as(placed.getResponse().getContentAsString()).isEqualTo(201);
+        String id = body(placed).get("id").asString();
+        assertThat(body(placed).get("inForce").asBoolean()).isTrue();
+        assertThat(body(placed).get("person").get("passportNo").asString()).startsWith("*");
+        assertThat(body(placed).get("fileNumber").isNull()).isTrue();
+
+        assertThat(postAs("/v1/ban-entries", ban, banOfficer()).getResponse().getStatus())
+                .as("the same source reference twice").isEqualTo(409);
+        MvcResult refused = postAs("/v1/traffic-files/individuals", visitor(passport, LocalDate.of(1980, 1, 1)),
+                officer());
+        assertThat(code(refused)).isEqualTo("PERSON_BANNED");
+
+        MvcResult search = postAs("/v1/ban-entries/searches",
+                Map.of("person", Map.of("type", "PASSPORT", "passportNo", passport, "passportCountry", "GBR")),
+                banOfficer());
+        assertThat(body(search).get("items")).hasSize(1);
+        assertThat(getAs("/v1/ban-entries/" + id, banOfficer()).getResponse().getStatus()).isEqualTo(200);
+        assertThat(getAs("/v1/ban-entries/" + id, reader()).getResponse().getStatus()).isEqualTo(403);
+
+        MvcResult lifted = postAs("/v1/ban-entries/" + id + "/lifts", Map.of("reason", "order revoked"),
+                banOfficer());
+        assertThat(body(lifted).get("status").asString()).isEqualTo("LIFTED");
+        assertThat(code(postAs("/v1/ban-entries/" + id + "/lifts", Map.of("reason", "again"), banOfficer())))
+                .isEqualTo("BAN_NOT_ACTIVE");
+        assertThat(postAs("/v1/traffic-files/individuals", visitor(passport, LocalDate.of(1980, 1, 1)), officer())
+                .getResponse().getStatus()).isEqualTo(201);
+
+        assertThat(db.sql("select count(*) from ban_entry_history where ban_id = cast(:id as uuid)").param("id", id)
+                .query(Long.class).single()).isEqualTo(2);
+        assertThat(db.sql("select count(*) from event_outbox where event_type in ('itms.ban.placed', 'itms.ban.lifted') "
+                + "and subject = :id").param("id", id).query(Long.class).single()).isEqualTo(2);
+        assertThat(db.sql("select string_agg(data::text, ' ') from event_outbox where subject = :id").param("id", id)
+                .query(String.class).single()).doesNotContain(passport);
+        assertThatThrownBy(() -> db.sql("delete from ban_entry where id = cast(:id as uuid)").param("id", id).update())
+                .isInstanceOf(DataAccessException.class).hasMessageContaining("never deleted");
+    }
+
+    @Test
+    @Tag("DL-013")
+    @DisplayName("ban dates are checked")
+    void banDates() throws Exception {
+        Map<String, Object> ban = new HashMap<>();
+        ban.put("person", Map.of("type", "NATIONAL_ID", "nationalIdNo", "123456789"));
+        ban.put("reason", "administrative ban");
+        ban.put("source", "AUTHORITY");
+        ban.put("startDate", LocalDate.now().toString());
+        ban.put("endDate", LocalDate.now().minusDays(1).toString());
+        assertThat(code(postAs("/v1/ban-entries", ban, banOfficer()))).isEqualTo("BAN_DATES_INVALID");
+    }
 }

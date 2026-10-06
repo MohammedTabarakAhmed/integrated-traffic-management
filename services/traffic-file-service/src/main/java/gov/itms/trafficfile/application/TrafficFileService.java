@@ -32,6 +32,7 @@ import org.springframework.transaction.annotation.Transactional;
  *       services in any region (CC-113), so files are not region-restricted for staff (Q-057);</li>
  *   <li>identity numbers are masked unless the caller holds {@value #SENSITIVE_READ}, and health-related fields
  *       (classified secret) are shown only to them (SEC-014; done in the API);</li>
+ *   <li>a person with a ban in force (DL-013) cannot be given a file (Q-059);</li>
  *   <li>every change and every view is audited in the same transaction (CC-120); changes publish a domain event
  *       through the outbox (INT-005) carrying no personal data.</li>
  * </ul>
@@ -47,15 +48,17 @@ public class TrafficFileService {
     static final String EVENT_PROFILE_UPDATED = "itms.traffic-file.profile-updated";
 
     private final TrafficFileRepository files;
+    private final BanRepository bans;
     private final IdentityRegister register;
     private final AuditRecorder audit;
     private final DomainEventRecorder events;
     private final Clock clock;
     private final Pattern nationalIdPattern;
 
-    public TrafficFileService(TrafficFileRepository files, IdentityRegister register, AuditRecorder audit,
-                              DomainEventRecorder events, Clock clock, Pattern nationalIdPattern) {
+    public TrafficFileService(TrafficFileRepository files, BanRepository bans, IdentityRegister register,
+                              AuditRecorder audit, DomainEventRecorder events, Clock clock, Pattern nationalIdPattern) {
         this.files = files;
+        this.bans = bans;
         this.register = register;
         this.audit = audit;
         this.events = events;
@@ -85,6 +88,10 @@ public class TrafficFileService {
         }
         Instant now = clock.instant();
         LocalDate today = LocalDate.ofInstant(now, clock.getZone());
+        if (bans.findByDocument(command.document()).stream().anyMatch(b -> b.inForce(today))) {
+            throw DomainException.validation("PERSON_BANNED",
+                    "this person is on the ban list and cannot be given a traffic file", List.of("DL-013"));
+        }
         TrafficFile file = switch (command.document()) {
             case Identity.NationalId nationalId -> fromRegister(nationalId, command, channel, caller, now, today);
             case Identity.Passport passport -> fromPassport(passport, command, channel, caller, now, today);

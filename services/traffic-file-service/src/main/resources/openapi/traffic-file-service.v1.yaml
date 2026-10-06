@@ -19,6 +19,11 @@ info:
     and any fleet managers (DL-004), each an active individual's traffic file; they are replaced with
     `/representatives-updates`.
 
+    Ban list (DL-013; ADR-043): people barred from services, entered by identity document (they may have no file),
+    with a reason, a source (with its own reference, used once) and a period. A ban is lifted once with a reason, or
+    expires after its end date. A person with a ban in force cannot be given a traffic file (422 `PERSON_BANNED`,
+    Q-059). The list is national: `trafficfile.ban.place`, `.lift` and `.read` in any grant.
+
     Data scope (CC-001): opening needs `trafficfile.create` in a grant that reaches `regionOpened`. Reading and
     updating need `trafficfile.read` / `trafficfile.update` in any grant, since a customer may use services in any
     region (CC-113, Q-057).
@@ -33,7 +38,7 @@ info:
 
     Not yet in this version: photo (DL-006), eye and medical results (DL-007, DL-008),
     duplicate detection and merge (DL-009), register change events (DL-010), the 360° view (DL-011), rules per
-    category (DL-012) and the ban list (DL-013). Codes are checked for their format only until the reference-data
+    category (DL-012). Codes are checked for their format only until the reference-data
     client exists (Q-044, Q-057).
 
     The channel is the `X-Channel` header (set by the gateway or BFF); a file cannot be opened or changed without a
@@ -49,6 +54,7 @@ security:
   - bearerAuth: []
 tags:
   - name: Traffic files
+  - name: Ban list
 
 paths:
   /v1/traffic-files/individuals:
@@ -61,7 +67,8 @@ paths:
         `trafficfile.create` does not reach `regionOpened` (403 `SCOPE_EXCEEDED`); the document fields do not match its
         type (422 `DOCUMENT_FIELDS_INVALID`); a national identity number is given with `visitorIdentity` (422
         `REGISTER_FIELDS_GIVEN`), is malformed (422 `FIELD_INVALID`), unknown to the register (422
-        `REGISTER_PERSON_NOT_FOUND`) or reported deceased (422 `PERSON_DECEASED`); a passport is given without
+        `REGISTER_PERSON_NOT_FOUND`) or reported deceased (422 `PERSON_DECEASED`); the person is on the ban list
+        (422 `PERSON_BANNED`, DL-013); a passport is given without
         `visitorIdentity` (422 `VISITOR_IDENTITY_REQUIRED`); the birth date lies in the future (422
         `BIRTH_DATE_IN_FUTURE`); the document already has a file (409 `FILE_ALREADY_EXISTS`); the register does not
         answer (503 `REGISTER_UNAVAILABLE`).
@@ -255,6 +262,113 @@ paths:
         '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
 
+  /v1/ban-entries:
+    post:
+      tags: [Ban list]
+      operationId: placeBan
+      summary: Put a person on the ban list (DL-013)
+      description: |
+        Refused when: no known `X-Channel` (422 `CHANNEL_REQUIRED`); the end date is before the start date (422
+        `BAN_DATES_INVALID`) or has passed (422 `BAN_END_IN_PAST`); the source already used `sourceRef` (409
+        `DUPLICATE_SOURCE_REF`). `startDate` defaults to today. The person's traffic file, if any, is linked.
+      x-itms-permission: trafficfile.ban.place
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlaceBanRequest' }
+      responses:
+        '201':
+          description: Ban placed (or, on a retry with the same Idempotency-Key, the stored response)
+          headers:
+            Location: { schema: { type: string } }
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BanEntry' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/ban-entries/searches:
+    post:
+      tags: [Ban list]
+      operationId: searchBans
+      summary: Every ban entry of an identity document, newest first (the search is audited, CC-102)
+      x-itms-permission: trafficfile.ban.read
+      x-itms-scope: national
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SearchBansRequest' }
+      responses:
+        '200':
+          description: Ban entries (active, lifted and expired)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BanEntryCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/ban-entries/{banId}:
+    get:
+      tags: [Ban list]
+      operationId: getBan
+      summary: A ban entry (the view is audited, CC-120)
+      x-itms-permission: trafficfile.ban.read
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/BanId'
+      responses:
+        '200':
+          description: Ban entry
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BanEntry' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/ban-entries/{banId}/lifts:
+    post:
+      tags: [Ban list]
+      operationId: liftBan
+      summary: Lift a ban, with a reason (DL-013)
+      description: A ban that is already lifted or has expired answers 409 `BAN_NOT_ACTIVE`.
+      x-itms-permission: trafficfile.ban.lift
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/BanId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LiftBanRequest' }
+      responses:
+        '200':
+          description: The lifted ban (or, on a retry with the same Idempotency-Key, the stored response)
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BanEntry' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -263,6 +377,11 @@ components:
       bearerFormat: JWT
 
   parameters:
+    BanId:
+      name: banId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
     FileNumber:
       name: fileNumber
       in: path
@@ -426,6 +545,80 @@ components:
         licenceExpiry: { type: string, format: date }
         signatories: { type: array, items: { $ref: '#/components/schemas/FileNumber' } }
         fleetManagers: { type: array, items: { $ref: '#/components/schemas/FileNumber' } }
+    Reason:
+      type: string
+      minLength: 3
+      maxLength: 500
+    PlaceBanRequest:
+      type: object
+      additionalProperties: false
+      required: [person, reason, source]
+      properties:
+        person: { $ref: '#/components/schemas/Document' }
+        reason: { $ref: '#/components/schemas/Reason' }
+        source: { $ref: '#/components/schemas/Code' }
+        sourceRef: { oneOf: [ { type: string, pattern: '^[A-Za-z0-9._:/-]{1,100}$' }, { type: 'null' } ] }
+        startDate: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
+        endDate: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
+    LiftBanRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: { $ref: '#/components/schemas/Reason' }
+    SearchBansRequest:
+      type: object
+      additionalProperties: false
+      required: [person]
+      properties:
+        person: { $ref: '#/components/schemas/Document' }
+    BanChange:
+      type: object
+      additionalProperties: false
+      required: [actorId, channel, at]
+      properties:
+        actorId: { type: string }
+        actorUsername: { oneOf: [ { type: string }, { type: 'null' } ] }
+        channel: { $ref: '#/components/schemas/Channel' }
+        at: { type: string, format: date-time }
+        reason: { oneOf: [ { type: string }, { type: 'null' } ] }
+    BanPerson:
+      type: object
+      additionalProperties: false
+      description: Identity numbers are masked to the last four characters unless the caller holds
+        `trafficfile.sensitive.read`
+      required: [type]
+      properties:
+        type: { $ref: '#/components/schemas/DocumentType' }
+        nationalIdNo: { oneOf: [ { type: string }, { type: 'null' } ] }
+        passportNo: { oneOf: [ { type: string }, { type: 'null' } ] }
+        passportCountry: { oneOf: [ { $ref: '#/components/schemas/Country' }, { type: 'null' } ] }
+    BanEntry:
+      type: object
+      additionalProperties: false
+      required: [id, person, reason, source, startDate, status, inForce, placed, version]
+      properties:
+        id: { type: string, format: uuid }
+        person: { $ref: '#/components/schemas/BanPerson' }
+        fileNumber: { oneOf: [ { type: string }, { type: 'null' } ] }
+        reason: { type: string }
+        source: { $ref: '#/components/schemas/Code' }
+        sourceRef: { oneOf: [ { type: string }, { type: 'null' } ] }
+        startDate: { type: string, format: date }
+        endDate: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
+        status: { type: string, enum: [ACTIVE, LIFTED, EXPIRED] }
+        inForce: { type: boolean, description: Active and started today }
+        placed: { $ref: '#/components/schemas/BanChange' }
+        lifted: { oneOf: [ { $ref: '#/components/schemas/BanChange' }, { type: 'null' } ] }
+        version: { type: integer }
+    BanEntryCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/BanEntry' }
     SearchRequest:
       type: object
       additionalProperties: false

@@ -77,6 +77,8 @@ itms:
       - /v1/traffic-files/*/profile-updates
       - /v1/traffic-files/companies
       - /v1/traffic-files/*/representatives-updates
+      - /v1/ban-entries
+      - /v1/ban-entries/*/lifts
     retention: ${ITMS_IDEMPOTENCY_RETENTION:24h}
     lock-timeout: ${ITMS_IDEMPOTENCY_LOCK_TIMEOUT:30s}
     cleanup-interval: ${ITMS_IDEMPOTENCY_CLEANUP_INTERVAL:15m}

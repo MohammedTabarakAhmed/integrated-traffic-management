@@ -41,8 +41,8 @@ class TrafficFileServiceTest {
     private final FakeRegister register = new FakeRegister();
     private final List<String> audit = new ArrayList<>();
     private final List<String> events = new ArrayList<>();
-    private final TrafficFileService service = new TrafficFileService(files, register, auditRecorder(),
-            eventRecorder(), CLOCK, Pattern.compile("^[0-9]{6,20}$"));
+    private final TrafficFileService service = new TrafficFileService(files, new FakeBans(), register,
+            auditRecorder(), eventRecorder(), CLOCK, Pattern.compile("^[0-9]{6,20}$"));
 
     private Caller caller(Set<String> regions, String... permissions) {
         Set<String> held = Set.of(permissions);

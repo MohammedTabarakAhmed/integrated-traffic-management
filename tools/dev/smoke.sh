@@ -492,4 +492,18 @@ res=$(post_tf "$TF_CHECKER" /v1/traffic-files/companies "{\"licence\":{\"source\
 [[ "$(body_of "$res" | json_field "['code']")" =~ ^(REPRESENTATIVE_INVALID|FILE_ALREADY_EXISTS)$ ]] || { echo "FAIL: a company as signatory: $(body_of "$res")"; exit 1; }
 echo "   company $company (Rapid Transport LLC); representatives replaced; expired, cancelled, unknown licences refused"
 
+echo "25. Ban list (DL-013): a banned visitor cannot get a file until the ban is lifted"
+banned="SMB$(date +%s)"
+res=$(post_tf "$TF_CHECKER" /v1/ban-entries "{\"person\":{\"type\":\"PASSPORT\",\"passportNo\":\"$banned\",\"passportCountry\":\"FRA\"},\"reason\":\"smoke test ban\",\"source\":\"COURT\"}")
+[[ "$(status_of "$res")" == 201 ]] || { echo "FAIL: placing a ban returned $(status_of "$res"): $(body_of "$res")"; exit 1; }
+ban_id=$(body_of "$res" | json_field "['id']")
+visitor_body="{\"document\":{\"type\":\"PASSPORT\",\"passportNo\":\"$banned\",\"passportCountry\":\"FRA\"},\"category\":\"INDIVIDUAL\",\"type\":\"VISITOR\",\"regionOpened\":\"DXB\",\"visitorIdentity\":{\"name\":{\"givenEn\":\"Ban\",\"familyEn\":\"Smoke\"},\"nationality\":\"FRA\",\"birthDate\":\"1980-01-01\",\"gender\":\"MALE\"}}"
+res=$(post_tf "$TF_CHECKER" /v1/traffic-files/individuals "$visitor_body")
+[[ "$(body_of "$res" | json_field "['code']")" == PERSON_BANNED ]] || { echo "FAIL: a banned person got a file: $(body_of "$res")"; exit 1; }
+res=$(post_tf "$TF_CHECKER" "/v1/ban-entries/$ban_id/lifts" '{"reason":"smoke test lift"}')
+[[ "$(body_of "$res" | json_field "['status']")" == LIFTED ]] || { echo "FAIL: lifting the ban: $(body_of "$res")"; exit 1; }
+res=$(post_tf "$TF_CHECKER" /v1/traffic-files/individuals "$visitor_body")
+[[ "$(status_of "$res")" == 201 ]] || { echo "FAIL: after the lift the file should open, got $(status_of "$res")"; exit 1; }
+echo "   ban $ban_id placed, opening refused, lifted, file opened"
+
 echo "SMOKE OK"

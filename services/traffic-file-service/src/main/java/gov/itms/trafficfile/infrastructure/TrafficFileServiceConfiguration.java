@@ -2,6 +2,7 @@ package gov.itms.trafficfile.infrastructure;
 
 import gov.itms.platform.audit.AuditRecorder;
 import gov.itms.platform.events.DomainEventRecorder;
+import gov.itms.trafficfile.application.BanListService;
 import gov.itms.trafficfile.application.CommercialRegister;
 import gov.itms.trafficfile.application.CompanyFileService;
 import gov.itms.trafficfile.application.IdentityRegister;
@@ -59,9 +60,20 @@ public class TrafficFileServiceConfiguration {
     }
 
     @Bean
-    TrafficFileService trafficFileService(JdbcTrafficFileRepository files, IdentityRegister register,
-                                          AuditRecorder audit, DomainEventRecorder events, Clock clock,
-                                          TrafficFileProperties properties) {
-        return new TrafficFileService(files, register, audit, events, clock, properties.nationalIdRegex());
+    JdbcBanRepository banRepository(JdbcClient jdbc) {
+        return new JdbcBanRepository(jdbc);
+    }
+
+    @Bean
+    BanListService banListService(JdbcBanRepository bans, JdbcTrafficFileRepository files, AuditRecorder audit,
+                                  DomainEventRecorder events, Clock clock) {
+        return new BanListService(bans, files, audit, events, clock);
+    }
+
+    @Bean
+    TrafficFileService trafficFileService(JdbcTrafficFileRepository files, JdbcBanRepository bans,
+                                          IdentityRegister register, AuditRecorder audit, DomainEventRecorder events,
+                                          Clock clock, TrafficFileProperties properties) {
+        return new TrafficFileService(files, bans, register, audit, events, clock, properties.nationalIdRegex());
     }
 }

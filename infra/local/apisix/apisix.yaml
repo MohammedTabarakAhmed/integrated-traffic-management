@@ -121,4 +121,6 @@ routes:
     plugin_config_id: protected-api
     uris:
       - /v1/traffic-files/*
+      - /v1/ban-entries
+      - /v1/ban-entries/*
 #END

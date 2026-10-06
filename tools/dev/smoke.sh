@@ -535,4 +535,24 @@ first_outcome=$(notice "$ev" 784199012345671 | json_field "['outcome']")
 [[ "$(notice "$ev-none" 123456780 | json_field "['outcome']")" == NO_FILE ]] || { echo "FAIL: notice without a file"; exit 1; }
 echo "   citizen notice $first_outcome, repeat DUPLICATE, unknown person NO_FILE"
 
+echo "28. Fees (CC-040..CC-047): maker submits, checker approves, the customer sees an itemised quote"
+FEES=http://localhost:8086
+fee_service="SMK$(date +%s | tail -c 7)"
+post_fee() { # token path body
+  curl -s -w '\n%{http_code}' -H "Authorization: Bearer $1" -H 'Content-Type: application/json' -H 'X-Channel: BACKOFFICE' \
+    -H "Idempotency-Key: $(new_key)" "$FEES$2" -d "$3"
+}
+today=$(date -u +%F)
+res=$(post_fee "$TF_MAKER" /v1/fee-versions "{\"feeCode\":\"BASE_$fee_service\",\"serviceCode\":\"$fee_service\",\"nameNl\":\"رسم\",\"nameEn\":\"Base fee\",\"financialItem\":\"REV_SMOKE\",\"beneficiary\":\"AUTHORITY\",\"method\":{\"type\":\"PER_UNIT\",\"unit\":\"YEAR\",\"rate\":\"10000\"},\"effectiveFrom\":\"$today\",\"reason\":\"smoke test fee\"}")
+[[ "$(status_of "$res")" == 201 ]] || { echo "FAIL: submitting a fee returned $(status_of "$res"): $(body_of "$res")"; exit 1; }
+fee_id=$(body_of "$res" | json_field "['id']")
+res=$(post_fee "$TF_MAKER" "/v1/fee-versions/$fee_id/approvals" '{}')
+[[ "$(status_of "$res")" == 403 ]] || { echo "FAIL: the maker approved their own fee ($(status_of "$res"))"; exit 1; }
+res=$(post_fee "$TF_CHECKER" "/v1/fee-versions/$fee_id/approvals" '{"reason":"checked"}')
+[[ "$(body_of "$res" | json_field "['status']")" == APPROVED ]] || { echo "FAIL: approval: $(body_of "$res")"; exit 1; }
+quote=$(curl -s -H "Authorization: Bearer $TF_CHECKER" -H 'Content-Type: application/json' -H 'X-Channel: PORTAL' \
+  "$FEES/v1/quotes" -d "{\"serviceCode\":\"$fee_service\",\"region\":\"DXB\",\"customerCategory\":\"CITIZEN\",\"quantities\":{\"YEAR\":\"2\"}}")
+[[ "$(printf '%s' "$quote" | json_field "['total']")" == 20000 ]] || { echo "FAIL: quote $quote"; exit 1; }
+echo "   fee BASE_$fee_service approved by the checker; quote total 20000 (2 years x 10000)"
+
 echo "SMOKE OK"

@@ -30,6 +30,10 @@ upstreams:
     type: roundrobin
     nodes:
       "traffic-file-service:8080": 1
+  - id: fees-service
+    type: roundrobin
+    nodes:
+      "fees-service:8080": 1
 
 plugin_configs:
   - id: protected-api
@@ -124,4 +128,13 @@ routes:
       - /v1/ban-entries
       - /v1/ban-entries/*
       - /v1/identity-register-notifications
+  - id: fees-service
+    name: fees-service
+    upstream_id: fees-service
+    plugin_config_id: protected-api
+    uris:
+      - /v1/fee-versions
+      - /v1/fee-versions/*
+      - /v1/quotes
+      - /v1/quotes/*
 #END

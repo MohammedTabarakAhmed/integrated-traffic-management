@@ -1,0 +1,454 @@
+openapi: 3.1.0
+info:
+  title: ITMS Fees Service
+  version: 1.0.0
+  description: |
+    Fees (CC-040..CC-042, CC-046, CC-047; ADR-046). A fee belongs to one service of the catalogue and has versions.
+    Each version says where and to whom it applies (region, customer category, subject category such as a vehicle
+    or licence category; each optional, "any" when absent), from when to when (effective dates, inclusive), how it is
+    calculated (fixed, per unit, tiered or a formula, CC-041) and which financial item and beneficiary entity receive
+    it (CC-042). Amounts are integer minor units of the configured currency (Q-006).
+
+    Maker-checker (CC-046, CC-002): a version is submitted PENDING (`fees.version.submit`) and approved or rejected
+    once (`fees.version.approve`) by someone else; the maker may withdraw their own pending version. A version never
+    starts in the past, so fees never change retroactively. Approving a version ends the previous approved version of
+    the same fee and applicability the day before; an approved version that starts on or after the new start date is
+    an overlap (409). Versions never change otherwise and are never deleted.
+
+    Quotes (CC-047): `POST /v1/quotes` gives the itemised breakdown for a service, region, customer category, subject
+    category and quantities (for example `{"YEAR": "1", "SEAT": "7"}`), on today or a later date. For each fee the most
+    specific approved version in force applies. A quote is frozen when made and kept until it expires (configuration);
+    later fee changes never alter it (CC-046). Any signed-in user may ask for a quote.
+
+    Not yet in this version: exemptions and discounts (CC-043), late fees (CC-044) and levies such as VAT (CC-045).
+    Codes are checked for their format only until the reference-data client exists (Q-044, Q-062).
+
+    The channel is the `X-Channel` header. Submitting and deciding need an `Idempotency-Key` (ADR-032).
+    Only GET/POST are used (INT-003). Request input (SEC-022) is hardened once in itms-platform.
+servers:
+  - url: /
+security:
+  - bearerAuth: []
+tags:
+  - name: Fee versions
+  - name: Quotes
+
+paths:
+  /v1/fee-versions:
+    post:
+      tags: [Fee versions]
+      operationId: submitFeeVersion
+      summary: Submit a fee version for approval (CC-040, CC-041, CC-042, CC-046)
+      description: |
+        Refused when: no known `X-Channel` (422 `CHANNEL_REQUIRED`); a field is malformed (422 `FIELD_INVALID`), the
+        formula is invalid (422 `FORMULA_INVALID`), the tiers are not increasing (422 `TIERS_INVALID`), the end date is
+        before the start (422 `FEE_DATES_INVALID`) or the start is in the past (422 `FEE_START_IN_PAST`); the fee code
+        belongs to another service (422 `FEE_SERVICE_MISMATCH`).
+      x-itms-permission: fees.version.submit
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SubmitVersionRequest' }
+      responses:
+        '201':
+          description: Submitted (or, on a retry with the same Idempotency-Key, the stored response)
+          headers:
+            Location: { schema: { type: string } }
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeeVersion' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [Fee versions]
+      operationId: listFeeVersions
+      summary: Versions of a fee (oldest first) or of a service's fees, optionally of one status
+      x-itms-permission: fees.version.read
+      x-itms-scope: national
+      parameters:
+        - name: feeCode
+          in: query
+          schema: { $ref: '#/components/schemas/Code' }
+        - name: serviceCode
+          in: query
+          schema: { $ref: '#/components/schemas/ServiceCode' }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/VersionStatus' }
+      responses:
+        '200':
+          description: Versions
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeeVersionCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/fee-versions/{versionId}:
+    get:
+      tags: [Fee versions]
+      operationId: getFeeVersion
+      summary: A fee version
+      x-itms-permission: fees.version.read
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/VersionId'
+      responses:
+        '200':
+          description: Fee version
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeeVersion' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/fee-versions/{versionId}/approvals:
+    post:
+      tags: [Fee versions]
+      operationId: approveFeeVersion
+      summary: Approve a pending fee version (CC-046)
+      description: |
+        Refused when the approver submitted it (403 `SAME_MAKER_CHECKER`), it is already decided (409
+        `FEE_VERSION_DECIDED`), it would overlap a later-starting approved version (409 `FEE_VERSION_OVERLAP`) or its
+        start date has passed (422 `FEE_START_IN_PAST`; submit it again with a new date).
+      x-itms-permission: fees.version.approve
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/VersionId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DecisionRequest' }
+      responses:
+        '200':
+          description: Approved
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeeVersion' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/fee-versions/{versionId}/rejections:
+    post:
+      tags: [Fee versions]
+      operationId: rejectFeeVersion
+      summary: Reject a pending fee version, or withdraw one's own (CC-046)
+      x-itms-permission: fees.version.approve
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/VersionId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RejectRequest' }
+      responses:
+        '200':
+          description: Rejected or withdrawn
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeeVersion' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/quotes:
+    post:
+      tags: [Quotes]
+      operationId: createQuote
+      summary: An itemised, frozen fee breakdown for a request (CC-047)
+      description: |
+        Refused when the date has passed (422 `QUOTE_DATE_IN_PAST`), a fee needs a quantity that is not given (422
+        `QUANTITY_REQUIRED`), or a fee has equally specific versions (409 `FEE_AMBIGUOUS`, a configuration error).
+        A service without applicable fees gives an empty quote with total 0.
+      x-itms-permission: authenticated
+      x-itms-scope: national
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QuoteRequest' }
+      responses:
+        '201':
+          description: Quote
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Quote' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/quotes/{quoteId}:
+    get:
+      tags: [Quotes]
+      operationId: getQuote
+      summary: A quote, as frozen when made (CC-046, CC-047)
+      x-itms-permission: authenticated
+      x-itms-scope: national
+      parameters:
+        - name: quoteId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Quote
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Quote' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    VersionId:
+      name: versionId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Chosen by the client, new for every intended action, and sent again unchanged on a retry (API_SPECIFICATION
+        §2, ADR-032). A retry with the same key and request gets the stored response, marked `Idempotent-Replayed`.
+      schema: { type: string, pattern: '^[A-Za-z0-9._:-]{8,128}$' }
+
+  headers:
+    IdempotentReplayed:
+      description: '`true` when the response is the stored response of an earlier request with the same Idempotency-Key'
+      schema: { type: string, enum: ['true'] }
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid bearer token
+    Problem:
+      description: Problem details (RFC 9457, API_SPECIFICATION §3)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+
+  schemas:
+    Code:
+      type: string
+      pattern: '^[A-Z0-9_]{1,40}$'
+    NullableCode:
+      oneOf: [ { $ref: '#/components/schemas/Code' }, { type: 'null' } ]
+    ServiceCode:
+      type: string
+      pattern: '^[A-Z][A-Z0-9_]{1,19}$'
+    Decimal:
+      type: string
+      description: A non-negative decimal with up to four fraction digits (minor units, or a quantity)
+      pattern: '^[0-9]{1,12}(\.[0-9]{1,4})?$'
+    Amount:
+      type: integer
+      minimum: 0
+      maximum: 1000000000000
+      description: Minor units of the configured currency
+    Channel:
+      type: string
+      enum: [PORTAL, APP, BACKOFFICE, PARTNER, KIOSK, CALLCENTRE, FIELD, ASSISTANT, AGENT]
+    VersionStatus:
+      type: string
+      enum: [PENDING, APPROVED, REJECTED]
+    Tier:
+      type: object
+      additionalProperties: false
+      required: [rate]
+      properties:
+        upTo: { oneOf: [ { $ref: '#/components/schemas/Decimal' }, { type: 'null' } ] }
+        rate: { $ref: '#/components/schemas/Decimal' }
+    Method:
+      type: object
+      additionalProperties: false
+      description: |
+        FIXED: `amount`. PER_UNIT: `unit`, `rate` (minor units per unit), optional `minimum`/`maximum`. TIERED: `unit`,
+        `mode` (GRADUATED: each band at its rate; VOLUME: the whole quantity at the rate of its band) and `tiers`
+        (increasing `upTo`, inclusive; the last open-ended). FORMULA: `expression` with numbers, quantity names in lower
+        case, `+ - * /`, parentheses, `min`, `max`, `round`, `ceil`, `floor`.
+      required: [type]
+      properties:
+        type: { type: string, enum: [FIXED, PER_UNIT, TIERED, FORMULA] }
+        amount: { oneOf: [ { $ref: '#/components/schemas/Amount' }, { type: 'null' } ] }
+        unit: { $ref: '#/components/schemas/NullableCode' }
+        rate: { oneOf: [ { $ref: '#/components/schemas/Decimal' }, { type: 'null' } ] }
+        minimum: { oneOf: [ { $ref: '#/components/schemas/Amount' }, { type: 'null' } ] }
+        maximum: { oneOf: [ { $ref: '#/components/schemas/Amount' }, { type: 'null' } ] }
+        mode: { oneOf: [ { type: string, enum: [GRADUATED, VOLUME] }, { type: 'null' } ] }
+        tiers:
+          oneOf:
+            - type: array
+              maxItems: 20
+              items: { $ref: '#/components/schemas/Tier' }
+            - type: 'null'
+        expression: { oneOf: [ { type: string, maxLength: 500 }, { type: 'null' } ] }
+    SubmitVersionRequest:
+      type: object
+      additionalProperties: false
+      required: [feeCode, serviceCode, nameNl, nameEn, financialItem, beneficiary, method, effectiveFrom, reason]
+      properties:
+        feeCode: { $ref: '#/components/schemas/Code' }
+        serviceCode: { $ref: '#/components/schemas/ServiceCode' }
+        nameNl: { type: string, maxLength: 200 }
+        nameEn: { type: string, maxLength: 200 }
+        region: { $ref: '#/components/schemas/NullableCode' }
+        customerCategory: { $ref: '#/components/schemas/NullableCode' }
+        subjectCategory: { $ref: '#/components/schemas/NullableCode' }
+        financialItem: { $ref: '#/components/schemas/Code' }
+        beneficiary: { $ref: '#/components/schemas/Code' }
+        method: { $ref: '#/components/schemas/Method' }
+        effectiveFrom: { type: string, format: date }
+        effectiveTo: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
+        reason: { type: string, minLength: 3, maxLength: 500 }
+    DecisionRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        reason: { oneOf: [ { type: string, minLength: 3, maxLength: 500 }, { type: 'null' } ] }
+    RejectRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 3, maxLength: 500 }
+    Decision:
+      type: object
+      additionalProperties: false
+      required: [actorId, channel, at]
+      properties:
+        actorId: { type: string }
+        actorUsername: { oneOf: [ { type: string }, { type: 'null' } ] }
+        channel: { $ref: '#/components/schemas/Channel' }
+        at: { type: string, format: date-time }
+        reason: { oneOf: [ { type: string }, { type: 'null' } ] }
+    FeeVersion:
+      type: object
+      additionalProperties: false
+      required: [id, feeCode, versionNo, serviceCode, nameNl, nameEn, financialItem, beneficiary, method, units,
+                 currency, effectiveFrom, status, submitted]
+      properties:
+        id: { type: string, format: uuid }
+        feeCode: { type: string }
+        versionNo: { type: integer, minimum: 1 }
+        serviceCode: { type: string }
+        nameNl: { type: string }
+        nameEn: { type: string }
+        region: { $ref: '#/components/schemas/NullableCode' }
+        customerCategory: { $ref: '#/components/schemas/NullableCode' }
+        subjectCategory: { $ref: '#/components/schemas/NullableCode' }
+        financialItem: { type: string }
+        beneficiary: { type: string }
+        method: { $ref: '#/components/schemas/Method' }
+        units: { type: array, items: { type: string }, description: Quantity units the method needs }
+        currency: { type: string }
+        effectiveFrom: { type: string, format: date }
+        effectiveTo: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
+        status: { $ref: '#/components/schemas/VersionStatus' }
+        submitted: { $ref: '#/components/schemas/Decision' }
+        decided: { oneOf: [ { $ref: '#/components/schemas/Decision' }, { type: 'null' } ] }
+    FeeVersionCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/FeeVersion' } }
+    QuoteRequest:
+      type: object
+      additionalProperties: false
+      required: [serviceCode, region, customerCategory]
+      properties:
+        serviceCode: { $ref: '#/components/schemas/ServiceCode' }
+        region: { $ref: '#/components/schemas/Code' }
+        customerCategory: { $ref: '#/components/schemas/Code' }
+        subjectCategory: { $ref: '#/components/schemas/NullableCode' }
+        quantities:
+          oneOf:
+            - type: object
+              maxProperties: 20
+              propertyNames: { pattern: '^[A-Z0-9_]{1,40}$' }
+              additionalProperties: { $ref: '#/components/schemas/Decimal' }
+            - type: 'null'
+        date: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
+    QuoteLine:
+      type: object
+      additionalProperties: false
+      required: [feeCode, feeVersionId, versionNo, nameNl, nameEn, financialItem, beneficiary, amount]
+      properties:
+        feeCode: { type: string }
+        feeVersionId: { type: string, format: uuid }
+        versionNo: { type: integer }
+        nameNl: { type: string }
+        nameEn: { type: string }
+        financialItem: { type: string }
+        beneficiary: { type: string }
+        amount: { $ref: '#/components/schemas/Amount' }
+    Quote:
+      type: object
+      additionalProperties: false
+      required: [id, serviceCode, region, customerCategory, quantities, date, lines, total, currency, createdAt,
+                 expiresAt, expired]
+      properties:
+        id: { type: string, format: uuid }
+        serviceCode: { type: string }
+        region: { type: string }
+        customerCategory: { type: string }
+        subjectCategory: { oneOf: [ { type: string }, { type: 'null' } ] }
+        quantities: { type: object, additionalProperties: { type: string } }
+        date: { type: string, format: date }
+        lines: { type: array, items: { $ref: '#/components/schemas/QuoteLine' } }
+        total: { type: integer, minimum: 0 }
+        currency: { type: string }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        expired: { type: boolean }
+    Problem:
+      type: object
+      required: [status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        code: { type: string }
+        detail: { type: string }
+        instance: { type: string }
+        correlationId: { type: string }
+        requirementRefs: { type: array, items: { type: string } }
+        errors: { type: array, items: { type: object } }

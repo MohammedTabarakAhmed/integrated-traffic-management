@@ -81,6 +81,22 @@ services:
       timeout: 3s
       retries: 20
 
+  traffic-file-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: trafficfile
+      POSTGRES_USER: ${TF_DB_USER:?run tools/dev/up.sh}
+      POSTGRES_PASSWORD_FILE: /run/secrets/tf_db_password
+    secrets:
+      - tf_db_password
+    volumes:
+      - traffic-file-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d trafficfile"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   keycloak:
     image: quay.io/keycloak/keycloak:26.8.0
     command: ["start-dev", "--import-realm"]
@@ -263,6 +279,56 @@ services:
       timeout: 3s
       retries: 30
 
+  traffic-file-service:
+    build: ../../services/traffic-file-service
+    environment:
+      <<: [*itms-observability, *itms-events]
+      TRAFFIC_FILE_DB_URL: jdbc:postgresql://traffic-file-postgres:5432/trafficfile
+      # Short-lived login from OpenBao (ADR-039), files under /run/secrets/spring/datasource; owner role on connect.
+      SPRING_DATASOURCE_HIKARI_CONNECTIONINITSQL: SET ROLE itms_owner
+      ITMS_OIDC_ISSUER: http://localhost:8180/realms/itms
+      ITMS_OIDC_JWKS_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/certs
+      ITMS_AUTHORISATION_SOURCE: iam
+      ITMS_IAM_URL: http://iam-service:8080
+      # Partner #1 mock (ICD-01; infra/local/mocks/identity-register).
+      ITMS_IDENTITY_REGISTER_URL: http://identity-register-mock:8080
+    volumes:
+      - type: volume
+        source: db-credentials
+        target: /run/secrets/spring/datasource
+        read_only: true
+        volume:
+          subpath: traffic-file-service
+    ports:
+      - "127.0.0.1:8085:8080"
+    depends_on:
+      bao-agent:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+      kafka:
+        condition: service_healthy
+      traffic-file-postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      iam-service:
+        condition: service_healthy
+      identity-register-mock:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8090/actuator/health/readiness | grep -q UP"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  # ---- Partner mocks (Gate C). Built from the ICDs; never used outside local development and tests.
+  identity-register-mock:
+    image: wiremock/wiremock:3.13.1
+    command: ["--port", "8080", "--disable-banner"]
+    volumes:
+      - ./mocks/identity-register/mappings:/home/wiremock/mappings:ro
+
   # ---- Message broker (INT-005, ADR-002, ADR-040). Local development only: one KRaft node, plain text, inside the
   # compose network (not published to the host). Real environments run >= 3 brokers per site with TLS and SASL.
   kafka:
@@ -308,6 +374,8 @@ services:
       transaction-service:
         condition: service_healthy
       hold-eligibility-service:
+        condition: service_healthy
+      traffic-file-service:
         condition: service_healthy
     healthcheck:
       # Ready once routes are loaded and the token check answers: an unauthenticated call gets 401.
@@ -355,7 +423,7 @@ services:
       openbao:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "for s in iam-service reference-data-service transaction-service hold-eligibility-service; do test -s /run/db-credentials/$$s/username && test -s /run/db-credentials/$$s/password || exit 1; done"]
+      test: ["CMD-SHELL", "for s in iam-service reference-data-service transaction-service hold-eligibility-service traffic-file-service; do test -s /run/db-credentials/$$s/username && test -s /run/db-credentials/$$s/password || exit 1; done"]
       interval: 2s
       timeout: 3s
       retries: 30
@@ -434,6 +502,8 @@ secrets:
     environment: TXN_DB_PASSWORD
   hold_db_password:
     environment: HOLD_DB_PASSWORD
+  tf_db_password:
+    environment: TF_DB_PASSWORD
   transaction_service_client_secret:
     environment: DEV_TRANSACTION_SERVICE_SECRET
   grafana_admin_password:
@@ -446,6 +516,7 @@ volumes:
   iam-db:
   transaction-db:
   hold-db:
+  traffic-file-db:
   tempo-data:
   loki-data:
   prometheus-data:

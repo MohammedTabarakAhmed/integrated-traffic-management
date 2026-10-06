@@ -1,0 +1,408 @@
+openapi: 3.1.0
+info:
+  title: ITMS Traffic File Service
+  version: 1.0.0
+  description: |
+    Traffic files (§6.1; DL-001, DL-002, DL-005, DL-012; ADR-041): the master record of a person (and, in a later
+    version, a company) that every licence, vehicle, violation and transaction refers to. A file number is given once
+    and never changes.
+
+    Opening an individual's file (DL-001): with a national identity number, the identity (names in both languages,
+    nationality, date of birth, gender, residency) comes from the national identity register (ICD-01) and staff cannot
+    change it (DL-002; the response lists these `lockedFields`). A visitor's file is opened from the passport, with the
+    identity entered by staff. One file per identity document: a second answers 409 `FILE_ALREADY_EXISTS` naming the
+    existing file.
+
+    Data scope (CC-001): opening needs `trafficfile.create` in a grant that reaches `regionOpened`. Reading and
+    updating need `trafficfile.read` / `trafficfile.update` in any grant, since a customer may use services in any
+    region (CC-113, Q-057).
+
+    Sensitive data (SEC-014): identity numbers are masked to their last four characters, and health-related fields
+    (`bloodGroup`, `physicalConditions`, classified secret) are left out, unless the caller holds
+    `trafficfile.sensitive.read`. Searches use POST so that an identity number never appears in a URL.
+
+    Every change and every view or search is audited (CC-120, CC-102); every version is kept (DAT-002) and shown by
+    `/history`. Opening and profile changes publish `itms.traffic-file.opened` / `itms.traffic-file.profile-updated`
+    events without personal data (INT-005).
+
+    Not yet in this version: companies (DL-003, DL-004), photo (DL-006), eye and medical results (DL-007, DL-008),
+    duplicate detection and merge (DL-009), register change events (DL-010), the 360° view (DL-011), rules per
+    category (DL-012) and the ban list (DL-013). Codes are checked for their format only until the reference-data
+    client exists (Q-044, Q-057).
+
+    The channel is the `X-Channel` header (set by the gateway or BFF); a file cannot be opened or changed without a
+    known channel. Opening and profile updates need an `Idempotency-Key` (ADR-032).
+
+    Only GET/POST are used (INT-003); business actions are POSTs to sub-resources.
+    Request input (SEC-022), all endpoints, enforced once in itms-platform: enum values are exactly their names as
+    JSON strings; text is a JSON string without the NUL character (U+0000); every `date-time` / `date` is an RFC 3339
+    string with a four-digit year. A request that breaks one of these rules is refused with 400 `VALIDATION_FAILED`.
+servers:
+  - url: /
+security:
+  - bearerAuth: []
+tags:
+  - name: Traffic files
+
+paths:
+  /v1/traffic-files/individuals:
+    post:
+      tags: [Traffic files]
+      operationId: openIndividualFile
+      summary: Open an individual's traffic file (DL-001, DL-002)
+      description: |
+        Refused when: the request has no known `X-Channel` (422 `CHANNEL_REQUIRED`); the caller's grant of
+        `trafficfile.create` does not reach `regionOpened` (403 `SCOPE_EXCEEDED`); the document fields do not match its
+        type (422 `DOCUMENT_FIELDS_INVALID`); a national identity number is given with `visitorIdentity` (422
+        `REGISTER_FIELDS_GIVEN`), is malformed (422 `FIELD_INVALID`), unknown to the register (422
+        `REGISTER_PERSON_NOT_FOUND`) or reported deceased (422 `PERSON_DECEASED`); a passport is given without
+        `visitorIdentity` (422 `VISITOR_IDENTITY_REQUIRED`); the birth date lies in the future (422
+        `BIRTH_DATE_IN_FUTURE`); the document already has a file (409 `FILE_ALREADY_EXISTS`); the register does not
+        answer (503 `REGISTER_UNAVAILABLE`).
+      x-itms-permission: trafficfile.create
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OpenIndividualRequest' }
+      responses:
+        '201':
+          description: File opened (or, on a retry with the same Idempotency-Key, the stored response)
+          headers:
+            Location: { schema: { type: string } }
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TrafficFile' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/traffic-files/searches:
+    post:
+      tags: [Traffic files]
+      operationId: searchTrafficFiles
+      summary: Find the file of an identity document (CC-100 exact search; the search is audited, CC-102)
+      x-itms-permission: trafficfile.read
+      x-itms-scope: national
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SearchRequest' }
+      responses:
+        '200':
+          description: The file holding the document, or no item
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TrafficFileCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/traffic-files/{fileNumber}:
+    get:
+      tags: [Traffic files]
+      operationId: getTrafficFile
+      summary: A traffic file (the view is audited, CC-120)
+      x-itms-permission: trafficfile.read
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/FileNumber'
+      responses:
+        '200':
+          description: Traffic file
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TrafficFile' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/traffic-files/{fileNumber}/history:
+    get:
+      tags: [Traffic files]
+      operationId: getTrafficFileHistory
+      summary: Every stored version of a traffic file, oldest first (DAT-002, CC-121; the view is audited)
+      x-itms-permission: trafficfile.read
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/FileNumber'
+      responses:
+        '200':
+          description: Versions
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FileVersionCollection' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/traffic-files/{fileNumber}/profile-updates:
+    post:
+      tags: [Traffic files]
+      operationId: updateTrafficFileProfile
+      summary: Replace the profile of a traffic file (DL-005); identity fields cannot be changed here (DL-002)
+      description: |
+        `version` is the version the caller last read; if the file changed since, 409 `VERSION_MISMATCH`. A merged,
+        closed or deceased file cannot be changed (409 `FILE_NOT_ACTIVE`).
+      x-itms-permission: trafficfile.update
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/FileNumber'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProfileUpdateRequest' }
+      responses:
+        '200':
+          description: The updated file (or, on a retry with the same Idempotency-Key, the stored response)
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TrafficFile' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    FileNumber:
+      name: fileNumber
+      in: path
+      required: true
+      schema: { type: string, pattern: '^[A-Z0-9][A-Z0-9-]{0,19}$' }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Chosen by the client, new for every intended action, and sent again unchanged on a retry (API_SPECIFICATION
+        §2, ADR-032). A retry with the same key and the same request gets the stored successful response again,
+        marked `Idempotent-Replayed: true`. The same key with another request answers 409 `IDEMPOTENCY_KEY_REUSED`;
+        while the first request still runs, 409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`. A missing key answers 400
+        `IDEMPOTENCY_KEY_REQUIRED`, a malformed one 400 `IDEMPOTENCY_KEY_INVALID`.
+      schema: { type: string, pattern: '^[A-Za-z0-9._:-]{8,128}$' }
+
+  headers:
+    IdempotentReplayed:
+      description: '`true` when the response is the stored response of an earlier request with the same Idempotency-Key'
+      schema: { type: string, enum: ['true'] }
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid bearer token
+    Problem:
+      description: Problem details (RFC 9457, API_SPECIFICATION §3)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+
+  schemas:
+    Code:
+      type: string
+      pattern: '^[A-Z0-9_]{1,40}$'
+    NullableCode:
+      oneOf: [ { $ref: '#/components/schemas/Code' }, { type: 'null' } ]
+    Country:
+      type: string
+      description: ISO 3166-1 alpha-3 country code
+      pattern: '^[A-Z]{3}$'
+    Channel:
+      type: string
+      description: Channels of API_SPECIFICATION §2 (`X-Channel`)
+      enum: [PORTAL, APP, BACKOFFICE, PARTNER, KIOSK, CALLCENTRE, FIELD, ASSISTANT, AGENT]
+    DocumentType:
+      type: string
+      enum: [NATIONAL_ID, PASSPORT]
+    Document:
+      type: object
+      additionalProperties: false
+      description: |
+        A national identity number (`nationalIdNo`, format set per environment, Q-057), or a passport
+        (`passportNo` and `passportCountry`).
+      required: [type]
+      properties:
+        type: { $ref: '#/components/schemas/DocumentType' }
+        nationalIdNo: { oneOf: [ { type: string, maxLength: 40 }, { type: 'null' } ] }
+        passportNo: { oneOf: [ { type: string, pattern: '^[A-Z0-9]{5,20}$' }, { type: 'null' } ] }
+        passportCountry: { oneOf: [ { $ref: '#/components/schemas/Country' }, { type: 'null' } ] }
+    Name:
+      type: object
+      additionalProperties: false
+      description: Given and family name in the national language and in English; at least one complete pair (CC-012)
+      properties:
+        givenNl: { oneOf: [ { type: string, maxLength: 100 }, { type: 'null' } ] }
+        familyNl: { oneOf: [ { type: string, maxLength: 100 }, { type: 'null' } ] }
+        givenEn: { oneOf: [ { type: string, maxLength: 100 }, { type: 'null' } ] }
+        familyEn: { oneOf: [ { type: string, maxLength: 100 }, { type: 'null' } ] }
+    VisitorIdentity:
+      type: object
+      additionalProperties: false
+      required: [name, nationality, birthDate, gender]
+      properties:
+        name: { $ref: '#/components/schemas/Name' }
+        nationality: { $ref: '#/components/schemas/Country' }
+        birthDate: { type: string, format: date }
+        gender: { $ref: '#/components/schemas/Code' }
+    CodeList:
+      type: array
+      maxItems: 20
+      uniqueItems: true
+      items: { $ref: '#/components/schemas/Code' }
+    Profile:
+      type: object
+      additionalProperties: false
+      description: |
+        DL-005. Codes are reference-data codes. `bloodGroup` and `physicalConditions` are health data (secret); in
+        responses they are `null` unless the caller holds `trafficfile.sensitive.read`.
+      properties:
+        mobile: { oneOf: [ { type: string, pattern: '^\+[1-9][0-9]{6,14}$' }, { type: 'null' } ] }
+        email: { oneOf: [ { type: string, maxLength: 320 }, { type: 'null' } ] }
+        address: { oneOf: [ { type: string, maxLength: 500 }, { type: 'null' } ] }
+        bloodGroup: { $ref: '#/components/schemas/NullableCode' }
+        educationLevel: { $ref: '#/components/schemas/NullableCode' }
+        profession: { $ref: '#/components/schemas/NullableCode' }
+        languages: { oneOf: [ { $ref: '#/components/schemas/CodeList' }, { type: 'null' } ] }
+        physicalConditions: { oneOf: [ { $ref: '#/components/schemas/CodeList' }, { type: 'null' } ] }
+        religion: { $ref: '#/components/schemas/NullableCode' }
+        determinationStatus: { $ref: '#/components/schemas/NullableCode' }
+    OpenIndividualRequest:
+      type: object
+      additionalProperties: false
+      required: [document, category, type, regionOpened]
+      properties:
+        document: { $ref: '#/components/schemas/Document' }
+        category: { $ref: '#/components/schemas/Code' }
+        type: { $ref: '#/components/schemas/Code' }
+        regionOpened: { $ref: '#/components/schemas/Code' }
+        visitorIdentity: { oneOf: [ { $ref: '#/components/schemas/VisitorIdentity' }, { type: 'null' } ] }
+        profile: { oneOf: [ { $ref: '#/components/schemas/Profile' }, { type: 'null' } ] }
+    SearchRequest:
+      type: object
+      additionalProperties: false
+      required: [document]
+      properties:
+        document: { $ref: '#/components/schemas/Document' }
+    ProfileUpdateRequest:
+      type: object
+      additionalProperties: false
+      required: [version, profile]
+      properties:
+        version: { type: integer, minimum: 1 }
+        profile: { $ref: '#/components/schemas/Profile' }
+    Change:
+      type: object
+      additionalProperties: false
+      required: [actorId, channel, at]
+      properties:
+        actorId: { type: string }
+        actorUsername: { oneOf: [ { type: string }, { type: 'null' } ] }
+        channel: { $ref: '#/components/schemas/Channel' }
+        at: { type: string, format: date-time }
+    Identity:
+      type: object
+      additionalProperties: false
+      required: [documentType, name, nationality, birthDate, gender]
+      properties:
+        documentType: { $ref: '#/components/schemas/DocumentType' }
+        nationalIdNo:
+          oneOf: [ { type: string }, { type: 'null' } ]
+          description: Masked to the last four characters unless the caller holds `trafficfile.sensitive.read`
+        passportNo:
+          oneOf: [ { type: string }, { type: 'null' } ]
+          description: Masked to the last four characters unless the caller holds `trafficfile.sensitive.read`
+        passportCountry: { oneOf: [ { $ref: '#/components/schemas/Country' }, { type: 'null' } ] }
+        name: { $ref: '#/components/schemas/Name' }
+        nationality: { $ref: '#/components/schemas/Country' }
+        birthDate: { type: string, format: date }
+        gender: { $ref: '#/components/schemas/Code' }
+        residencyStatus: { $ref: '#/components/schemas/NullableCode' }
+        residencyExpiry: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
+    TrafficFile:
+      type: object
+      additionalProperties: false
+      required: [fileNumber, kind, category, type, status, regionOpened, identitySource, identity, lockedFields,
+                 profile, opened, lastChange, version]
+      properties:
+        fileNumber: { type: string }
+        kind: { type: string, enum: [INDIVIDUAL, COMPANY] }
+        category: { $ref: '#/components/schemas/Code' }
+        type: { $ref: '#/components/schemas/Code' }
+        status: { type: string, enum: [ACTIVE, MERGED, CLOSED, DECEASED] }
+        regionOpened: { $ref: '#/components/schemas/Code' }
+        identitySource:
+          type: string
+          enum: [REGISTER, DOCUMENT]
+          description: REGISTER = from the national identity register, fields locked (DL-002); DOCUMENT = passport
+        registerSyncedAt: { oneOf: [ { type: string, format: date-time }, { type: 'null' } ] }
+        identity: { $ref: '#/components/schemas/Identity' }
+        lockedFields:
+          type: array
+          description: Identity fields staff cannot change because they come from the register (DL-002)
+          items: { type: string }
+        profile: { $ref: '#/components/schemas/Profile' }
+        opened: { $ref: '#/components/schemas/Change' }
+        lastChange: { $ref: '#/components/schemas/Change' }
+        version: { type: integer, minimum: 1 }
+    TrafficFileCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/TrafficFile' }
+    FileVersion:
+      type: object
+      additionalProperties: false
+      required: [version, validFrom, changedBy, state]
+      properties:
+        version: { type: integer }
+        validFrom: { type: string, format: date-time }
+        validTo: { oneOf: [ { type: string, format: date-time }, { type: 'null' } ] }
+        changedBy: { type: string }
+        state:
+          type: object
+          description: The stored row of that version (identity numbers masked and health fields removed unless the
+            caller holds `trafficfile.sensitive.read`)
+    FileVersionCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/FileVersion' }
+    Problem:
+      type: object
+      required: [status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        code: { type: string }
+        detail: { type: string }
+        instance: { type: string }
+        correlationId: { type: string }
+        requirementRefs: { type: array, items: { type: string } }
+        errors: { type: array, items: { type: object } }

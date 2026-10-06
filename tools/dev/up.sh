@@ -28,6 +28,8 @@ wanted = {
     "TXN_DB_PASSWORD": lambda: secrets.token_urlsafe(24),
     "HOLD_DB_USER": lambda: "hold",
     "HOLD_DB_PASSWORD": lambda: secrets.token_urlsafe(24),
+    "TF_DB_USER": lambda: "trafficfile",
+    "TF_DB_PASSWORD": lambda: secrets.token_urlsafe(24),
     "KC_ADMIN_USER": lambda: "kc-admin",
     "KC_ADMIN_PASSWORD": lambda: secrets.token_urlsafe(24),
     "DEV_IAM_ADMIN_PASSWORD": lambda: secrets.token_urlsafe(16),
@@ -59,14 +61,15 @@ if [[ "${1:-}" == "down" ]]; then
 fi
 
 echo "== Building service jars"
-mvn -B -ntp -q package -DskipTests -pl services/iam-service,services/reference-data-service,services/transaction-service,services/hold-eligibility-service -am
+mvn -B -ntp -q package -DskipTests -pl services/iam-service,services/reference-data-service,services/transaction-service,services/hold-eligibility-service,services/traffic-file-service -am
 
 echo "== Starting the databases and OpenBao"
-"${COMPOSE[@]}" up -d --wait postgres iam-postgres transaction-postgres hold-postgres openbao
+"${COMPOSE[@]}" up -d --wait postgres iam-postgres transaction-postgres hold-postgres traffic-file-postgres openbao
 
 echo "== Database owner role itms_owner (ADR-039)"
 for db in "postgres refdata $REFDATA_DB_USER" "iam-postgres iam $IAM_DB_USER" \
-          "transaction-postgres transaction $TXN_DB_USER" "hold-postgres hold $HOLD_DB_USER"; do
+          "transaction-postgres transaction $TXN_DB_USER" "hold-postgres hold $HOLD_DB_USER" \
+          "traffic-file-postgres trafficfile $TF_DB_USER"; do
   set -- $db
   "${COMPOSE[@]}" exec -T "$1" psql -q -v ON_ERROR_STOP=1 -U "$3" -d "$2" < infra/local/db/itms-owner.sql
   echo "   $2: itms_owner owns the schema"
@@ -79,6 +82,7 @@ BAO_AGENT_TOKEN=$({ printf "export BAO_TOKEN='%s' ITMS_DB_LOGIN_TTL='%s' ITMS_DB
       "$IAM_DB_USER" "$IAM_DB_PASSWORD" "$REFDATA_DB_USER" "$REFDATA_DB_PASSWORD"
     printf "export TXN_DB_USER='%s' TXN_DB_PASSWORD='%s' HOLD_DB_USER='%s' HOLD_DB_PASSWORD='%s'\n" \
       "$TXN_DB_USER" "$TXN_DB_PASSWORD" "$HOLD_DB_USER" "$HOLD_DB_PASSWORD"
+    printf "export TF_DB_USER='%s' TF_DB_PASSWORD='%s'\n" "$TF_DB_USER" "$TF_DB_PASSWORD"
     cat infra/local/openbao/configure.sh
   } | "${COMPOSE[@]}" exec -T openbao sh -s | tail -n 1)
 export BAO_AGENT_TOKEN
@@ -128,6 +132,9 @@ grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker TRANSACTION_OFFICER
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker HOLD_OFFICER
 # Hold overrides for one transaction (CC-034; ADR-035): dev.maker is the supervisor, so it is not the placer.
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker HOLD_SUPERVISOR
+# Traffic files (DL-001, DL-005; ADR-041): dev.checker opens and updates files; dev.maker sees sensitive data.
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker TRAFFIC_FILE_OFFICER
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker TRAFFIC_FILE_SENSITIVE_READER
 # dev.checker is also the development access reviewer ("manager", SEC-007, ADR-026); dev.iam-admin, the IT
 # administrator, opens and closes reviews.
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker ACCESS_REVIEWER
@@ -144,6 +151,7 @@ ITMS local stack is up:
   reference-data-service  http://localhost:8081/v1/reference-lists   (bearer token required)
   transaction-service     http://localhost:8083/v1/services          (bearer token required)
   hold-eligibility-service http://localhost:8084/v1/holds            (bearer token required)
+  traffic-file-service    http://localhost:8085/v1/traffic-files/... (bearer token required)
   Keycloak                http://localhost:8180   (realm: itms; users dev.iam-admin / dev.maker / dev.checker;
                                                    passwords in $ENV_FILE; clients itms-directory-feed and
                                                    itms-transaction-service use DEV_DIRECTORY_FEED_SECRET and

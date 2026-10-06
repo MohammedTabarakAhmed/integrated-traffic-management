@@ -425,4 +425,50 @@ printf '%s' "$first" | "$PY" -c "import json,sys; e=json.load(sys.stdin); assert
 echo "   gateway: 401 without or with a forged token, routed to all four services, no /actuator, correlation id and rate limit set"
 echo "   broker: every iam audit record relayed; itms.audit.v1 holds CloudEvents"
 
+echo "23. Traffic files (DL-001, DL-002, DL-005, SEC-014): register identity locked, visitor by passport, masking"
+TF=http://localhost:8085
+TF_CHECKER=$(token dev.checker "$DEV_CHECKER_PASSWORD")
+TF_MAKER=$(token dev.maker "$DEV_MAKER_PASSWORD")
+post_tf() { # token path body -> prints "<body>\n<status>"
+  curl -s -w '\n%{http_code}' -H "Authorization: Bearer $1" -H 'Content-Type: application/json' -H 'X-Channel: BACKOFFICE' \
+    -H "Idempotency-Key: $(new_key)" "$TF$2" -d "$3"
+}
+# The citizen of the identity-register mock; a second run finds the file opened by the first (409 names it).
+res=$(post_tf "$TF_CHECKER" /v1/traffic-files/individuals '{"document":{"type":"NATIONAL_ID","nationalIdNo":"784199012345671"},"category":"INDIVIDUAL","type":"CITIZEN","regionOpened":"DXB","profile":{"mobile":"+971500000001","languages":["AR","EN"]}}')
+case "$(status_of "$res")" in
+  201) citizen=$(body_of "$res" | json_field "['fileNumber']")
+       src=$(body_of "$res" | json_field "['identitySource']")
+       [[ "$src" == REGISTER ]] || { echo "FAIL: citizen identity source is $src"; exit 1; } ;;
+  409) [[ "$(body_of "$res" | json_field "['code']")" == FILE_ALREADY_EXISTS ]] || { echo "FAIL: $(body_of "$res")"; exit 1; }
+       citizen=$(curl -s -H "Authorization: Bearer $TF_CHECKER" -H 'Content-Type: application/json' "$TF/v1/traffic-files/searches" \
+         -d '{"document":{"type":"NATIONAL_ID","nationalIdNo":"784199012345671"}}' | json_field "['items'][0]['fileNumber']") ;;
+  *) echo "FAIL: opening the citizen's file returned $(status_of "$res"): $(body_of "$res")"; exit 1 ;;
+esac
+file=$(curl -s -H "Authorization: Bearer $TF_CHECKER" "$TF/v1/traffic-files/$citizen")
+masked=$(printf '%s' "$file" | json_field "['identity']['nationalIdNo']")
+[[ "$masked" == "***********5671" ]] || { echo "FAIL: officer sees the identity number unmasked or wrong: $masked"; exit 1; }
+[[ "$(printf '%s' "$file" | json_field "['identity']['name']['givenEn']")" == Ahmed ]] || { echo "FAIL: register name not used"; exit 1; }
+[[ "$(printf '%s' "$file" | json_field "['lockedFields']")" == *birthDate* ]] || { echo "FAIL: register fields not locked"; exit 1; }
+full=$(curl -s -H "Authorization: Bearer $TF_MAKER" "$TF/v1/traffic-files/$citizen" | json_field "['identity']['nationalIdNo']")
+[[ "$full" == 784199012345671 ]] || { echo "FAIL: the sensitive-data reader does not see the full number ($full)"; exit 1; }
+res=$(post_tf "$TF_CHECKER" /v1/traffic-files/individuals '{"document":{"type":"NATIONAL_ID","nationalIdNo":"784199012345671"},"category":"INDIVIDUAL","type":"CITIZEN","regionOpened":"DXB","visitorIdentity":{"name":{"givenEn":"X","familyEn":"Y"},"nationality":"ARE","birthDate":"1990-01-01","gender":"MALE"}}')
+[[ "$(status_of "$res")" == 422 ]] || { echo "FAIL: entering register fields should be 422, got $(status_of "$res")"; exit 1; }
+res=$(post_tf "$TF_CHECKER" /v1/traffic-files/individuals '{"document":{"type":"NATIONAL_ID","nationalIdNo":"784197012345673"},"category":"INDIVIDUAL","type":"CITIZEN","regionOpened":"DXB"}')
+[[ "$(status_of "$res")" == 422 && "$(body_of "$res" | json_field "['code']")" == PERSON_DECEASED ]] || { echo "FAIL: deceased person: $(status_of "$res")"; exit 1; }
+res=$(post_tf "$TF_CHECKER" /v1/traffic-files/individuals '{"document":{"type":"NATIONAL_ID","nationalIdNo":"999999999999999"},"category":"INDIVIDUAL","type":"CITIZEN","regionOpened":"DXB"}')
+[[ "$(status_of "$res")" == 503 ]] || { echo "FAIL: register down should be 503, got $(status_of "$res")"; exit 1; }
+passport="SMK$(date +%s)"
+res=$(post_tf "$TF_CHECKER" /v1/traffic-files/individuals "{\"document\":{\"type\":\"PASSPORT\",\"passportNo\":\"$passport\",\"passportCountry\":\"GBR\"},\"category\":\"INDIVIDUAL\",\"type\":\"VISITOR\",\"regionOpened\":\"DXB\",\"visitorIdentity\":{\"name\":{\"givenEn\":\"Jane\",\"familyEn\":\"Smoke\"},\"nationality\":\"GBR\",\"birthDate\":\"1985-05-05\",\"gender\":\"FEMALE\"}}")
+[[ "$(status_of "$res")" == 201 ]] || { echo "FAIL: visitor file returned $(status_of "$res"): $(body_of "$res")"; exit 1; }
+visitor=$(body_of "$res" | json_field "['fileNumber']")
+version=$(body_of "$res" | json_field "['version']")
+res=$(post_tf "$TF_CHECKER" "/v1/traffic-files/$visitor/profile-updates" "{\"version\":$version,\"profile\":{\"email\":\"jane@example.org\",\"bloodGroup\":\"O_POS\"}}")
+[[ "$(status_of "$res")" == 200 && "$(body_of "$res" | json_field "['version']")" == $((version + 1)) ]] || { echo "FAIL: profile update returned $(status_of "$res")"; exit 1; }
+[[ "$(body_of "$res" | json_field "['profile']['bloodGroup']")" == None ]] || { echo "FAIL: the officer sees health data"; exit 1; }
+res=$(post_tf "$TF_CHECKER" "/v1/traffic-files/$visitor/profile-updates" "{\"version\":$version,\"profile\":{}}")
+[[ "$(status_of "$res")" == 409 ]] || { echo "FAIL: a stale version should be 409, got $(status_of "$res")"; exit 1; }
+versions=$(curl -s -H "Authorization: Bearer $TF_CHECKER" "$TF/v1/traffic-files/$visitor/history" | json_field "['items'].__len__()")
+[[ "$versions" == 2 ]] || { echo "FAIL: expected 2 versions, got $versions"; exit 1; }
+echo "   citizen $citizen (register, masked for the officer), visitor $visitor (passport, 2 versions); deceased 422, register down 503"
+
 echo "SMOKE OK"

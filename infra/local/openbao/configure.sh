@@ -23,6 +23,7 @@ configure iam-service iam-postgres iam "$IAM_DB_USER" "$IAM_DB_PASSWORD"
 configure reference-data-service postgres refdata "$REFDATA_DB_USER" "$REFDATA_DB_PASSWORD"
 configure transaction-service transaction-postgres transaction "$TXN_DB_USER" "$TXN_DB_PASSWORD"
 configure hold-eligibility-service hold-postgres hold "$HOLD_DB_USER" "$HOLD_DB_PASSWORD"
+configure traffic-file-service traffic-file-postgres trafficfile "$TF_DB_USER" "$TF_DB_PASSWORD"
 
 # The agent may only read database logins.
 printf 'path "database/creds/*" {\n  capabilities = ["read"]\n}\n' | bao policy write itms-db-agent - >/dev/null

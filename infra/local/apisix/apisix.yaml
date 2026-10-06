@@ -26,6 +26,10 @@ upstreams:
     type: roundrobin
     nodes:
       "hold-eligibility-service:8080": 1
+  - id: traffic-file-service
+    type: roundrobin
+    nodes:
+      "traffic-file-service:8080": 1
 
 plugin_configs:
   - id: protected-api
@@ -111,4 +115,10 @@ routes:
       - /v1/holds/*
       - /v1/eligibility-checks
       - /v1/eligibility-checks/*
+  - id: traffic-file-service
+    name: traffic-file-service
+    upstream_id: traffic-file-service
+    plugin_config_id: protected-api
+    uris:
+      - /v1/traffic-files/*
 #END

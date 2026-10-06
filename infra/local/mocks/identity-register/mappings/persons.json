@@ -1,0 +1,60 @@
+{
+  "mappings": [
+    {
+      "name": "ICD-01 citizen",
+      "request": { "method": "GET", "url": "/v1/persons/784199012345671" },
+      "response": {
+        "status": 200,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": {
+          "nationalIdNo": "784199012345671",
+          "givenNameNl": "أحمد", "familyNameNl": "المنصوري",
+          "givenNameEn": "Ahmed", "familyNameEn": "Al Mansoori",
+          "nationalityCode": "ARE", "residencyStatus": "CITIZEN", "residencyExpiry": null,
+          "birthDate": "1990-04-12", "genderCode": "M", "lifeStatus": "ALIVE"
+        }
+      }
+    },
+    {
+      "name": "ICD-01 resident",
+      "request": { "method": "GET", "url": "/v1/persons/784198812345672" },
+      "response": {
+        "status": 200,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": {
+          "nationalIdNo": "784198812345672",
+          "givenNameNl": "ماريا", "familyNameNl": "سانتوس",
+          "givenNameEn": "Maria", "familyNameEn": "Santos",
+          "nationalityCode": "PHL", "residencyStatus": "RESIDENT", "residencyExpiry": "2028-01-31",
+          "birthDate": "1988-09-03", "genderCode": "F", "lifeStatus": "ALIVE"
+        }
+      }
+    },
+    {
+      "name": "ICD-01 deceased",
+      "request": { "method": "GET", "url": "/v1/persons/784197012345673" },
+      "response": {
+        "status": 200,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": {
+          "nationalIdNo": "784197012345673",
+          "givenNameNl": "سالم", "familyNameNl": "الكعبي",
+          "givenNameEn": "Salem", "familyNameEn": "Al Kaabi",
+          "nationalityCode": "ARE", "residencyStatus": "CITIZEN", "residencyExpiry": null,
+          "birthDate": "1970-01-20", "genderCode": "M", "lifeStatus": "DECEASED"
+        }
+      }
+    },
+    {
+      "name": "ICD-01 register failure (for INT-009 tests)",
+      "request": { "method": "GET", "url": "/v1/persons/999999999999999" },
+      "response": { "status": 503 }
+    },
+    {
+      "name": "ICD-01 unknown person",
+      "priority": 10,
+      "request": { "method": "GET", "urlPathPattern": "/v1/persons/.*" },
+      "response": { "status": 404 }
+    }
+  ]
+}

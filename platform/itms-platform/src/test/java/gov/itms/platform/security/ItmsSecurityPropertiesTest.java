@@ -35,4 +35,25 @@ class ItmsSecurityPropertiesTest {
         assertThatThrownBy(() -> new ItmsSecurityProperties.Iam("http://iam", S2, S2, 1_000_001))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("cache-max-entries");
     }
+
+    @Test
+    @Tag("CC-083")
+    @Tag("SEC-001")
+    @DisplayName("CC-083, SEC-001: public paths are empty by default and must be /v1/ paths without '..'")
+    void publicPaths() {
+        ItmsSecurityProperties.Iam iam = new ItmsSecurityProperties.Iam("http://iam", S2, S2, 10);
+        assertThat(new ItmsSecurityProperties("https://idp", "https://idp/jwks", "itms-api",
+                ItmsSecurityProperties.AuthorisationSource.IAM, "permissions", "roles", iam, null).publicPaths())
+                .isEmpty();
+        assertThat(new ItmsSecurityProperties("https://idp", "https://idp/jwks", "itms-api",
+                ItmsSecurityProperties.AuthorisationSource.IAM, "permissions", "roles", iam,
+                java.util.List.of("/v1/certificate-verifications/*")).publicPaths())
+                .containsExactly("/v1/certificate-verifications/*");
+        for (String bad : new String[] {"/actuator/**", "/**", "/v1/../admin", "v1/x"}) {
+            assertThatThrownBy(() -> new ItmsSecurityProperties("https://idp", "https://idp/jwks", "itms-api",
+                    ItmsSecurityProperties.AuthorisationSource.IAM, "permissions", "roles", iam,
+                    java.util.List.of(bad))).as(bad).isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("public-paths");
+        }
+    }
 }

@@ -138,6 +138,28 @@ class LintTest(unittest.TestCase):
         self.assertEqual(["L12"], rules(self.spec))
         self.assertEqual([], rules(self.spec, idempotent=[]))
 
+    def test_public_operation(self) -> None:
+        """L07: permission `public` (CC-083) is only for operations without a token."""
+        get = self.spec["paths"]["/v1/me/holds"]["get"]
+        get["x-itms-permission"] = "public"
+        self.assertEqual(["L07", "L07"], rules(self.spec), "public behind a token, and no 403")
+        get["security"] = []
+        del get["responses"]["401"]
+        self.assertEqual([], rules(self.spec))
+
+    def test_binary_upload(self) -> None:
+        """L09: application/octet-stream only on an operation marked x-itms-binary-upload (CC-080, CC-085)."""
+        binary = {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}}
+        self.lift["requestBody"]["content"] = copy.deepcopy(binary)
+        self.assertEqual(["L09"], rules(self.spec), "not marked as a binary upload")
+        self.lift["x-itms-binary-upload"] = True
+        self.assertEqual([], rules(self.spec))
+        self.lift["requestBody"]["content"]["application/json"] = {"schema": {"$ref": "#/components/schemas/Lift"}}
+        self.assertEqual(["L09"], rules(self.spec), "a second media type")
+        self.lift["requestBody"]["content"] = {"application/octet-stream": {"schema": {"type": "string",
+                                                                                       "maxLength": 9}}}
+        self.assertEqual(["L09"], rules(self.spec), "not format binary")
+
     def test_repository_specifications_pass(self) -> None:
         count, problems = lint_openapi.check(Path(__file__).resolve().parents[2])
         self.assertGreaterEqual(count, 4)

@@ -1,0 +1,405 @@
+package gov.itms.violation.application;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import gov.itms.platform.audit.AuditRecorder;
+import gov.itms.platform.events.DomainEventRecorder;
+import gov.itms.platform.security.CurrentActor;
+import gov.itms.violation.domain.Actor;
+import gov.itms.violation.domain.BlackPoints;
+import gov.itms.violation.domain.CatalogueEntry;
+import gov.itms.violation.domain.CatalogueEntryTest;
+import gov.itms.violation.domain.Channel;
+import gov.itms.violation.domain.DomainException;
+import gov.itms.violation.domain.Violation;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+
+/**
+ * Black points are added when a violation is <em>recorded</em> (ADR-056). UAT-1 says "when a violation ... is
+ * confirmed"; the Q-001 interim answer agrees, but objections (and so a confirmation step) do not exist yet. Whether
+ * recording may stand in for confirmation is open (Q-072 (a)); these tests exercise the current implementation.
+ */
+@Tag("VF-030")
+class ViolationServiceTest {
+
+    private static final Instant NOW = Instant.parse("2026-10-06T08:00:00Z");
+    private static final LocalDate TODAY = LocalDate.of(2026, 10, 6);
+
+    private final MutableClock clock = new MutableClock(NOW);
+    private final Repo repo = new Repo();
+    private final List<String> audit = new ArrayList<>();
+    private final List<String> events = new ArrayList<>();
+    private final List<String> payablesRegistered = new ArrayList<>();
+    private final List<UUID> payablesCancelled = new ArrayList<>();
+    private final List<String> holds = new ArrayList<>();
+    private final ViolationService service = new ViolationService(repo, new Ports.Payables() {
+        @Override
+        public UUID register(String number, String file, String region, String currency, long amount,
+                             String financialItem, String beneficiary, String description) {
+            payablesRegistered.add(number + " " + file + " " + amount + " " + currency);
+            return UUID.randomUUID();
+        }
+
+        @Override
+        public void cancel(UUID payableId, String reason) {
+            payablesCancelled.add(payableId);
+        }
+    }, (file, from, until, sourceRef, reason) -> {
+        holds.add(file + " " + from + ".." + until);
+        return "HOLD-" + holds.size();
+    }, new AuditRecorder() {
+        @Override
+        public void record(String action, String entityType, String entityId, Object oldValue, Object newValue,
+                           String reason) {
+            audit.add(action + " " + entityId);
+        }
+
+        @Override
+        public void recordAs(CurrentActor actor, String action, String entityType, String entityId, Object oldValue,
+                             Object newValue, String reason) {
+            record(action, entityType, entityId, oldValue, newValue, reason);
+        }
+    }, new DomainEventRecorder() {
+        @Override
+        public void record(String eventType, String subject, Object data) {
+            events.add(eventType + " " + subject);
+        }
+
+        @Override
+        public void recordAs(CurrentActor actor, String eventType, String subject, Object data) {
+            record(eventType, subject, data);
+        }
+    }, new ViolationService.Settings(new BlackPoints.Policy(12, 24, List.of(3, 6, 12), List.of(12, 18)),
+            Set.of("DUPLICATE", "WRONG_PLATE"), "XTS", ZoneOffset.UTC, Duration.ofDays(30)), clock);
+
+    private static Caller caller(String id, Set<String> regions, String... permissions) {
+        Set<String> held = Set.of(permissions);
+        return new Caller(new Actor(id, id), Channel.FIELD, new Caller.Grants() {
+            @Override
+            public boolean allowsInRegion(String permission, String region) {
+                return held.contains(permission) && regions.contains(region);
+            }
+
+            @Override
+            public boolean holds(String permission) {
+                return held.contains(permission);
+            }
+        });
+    }
+
+    private static final Caller ADMIN = caller("u-admin", Set.of(), ViolationService.CATALOGUE_MANAGE);
+    private static final Caller OFFICER = caller("u-officer", Set.of("NORTH", "SOUTH"), ViolationService.RECORD,
+            ViolationService.READ);
+    private static final Caller SUPERVISOR = caller("u-super", Set.of("NORTH"), ViolationService.CANCEL,
+            ViolationService.READ);
+
+    private CatalogueEntry publish(String code, String region, long fine, int points, Integer repeatDays,
+                                   Long repeatFine) {
+        return service.publish(CatalogueEntryTest.entry(code, region, fine, points, repeatDays, repeatFine, TODAY,
+                null), "new catalogue entry", ADMIN);
+    }
+
+    private Violation record(String code, String region, String driver) {
+        return service.record(new Violation.Report(code, NOW.minus(Duration.ofHours(1)), region, "Main road",
+                "A 1", null, "TF-OWNER", driver, null, null, Violation.Source.OFFICER, null, List.of()), OFFICER);
+    }
+
+    @Test
+    @Tag("VF-002")
+    @DisplayName("VF-002: the regional version in force wins; other regions get the national one")
+    void regionalVersion() {
+        publish("PARKING", null, 20_000, 0, null, null);
+        publish("PARKING", "NORTH", 30_000, 0, null, null);
+        assertThat(record("PARKING", "NORTH", null).fineMinor()).isEqualTo(30_000);
+        Violation south = record("PARKING", "SOUTH", null);
+        assertThat(south.fineMinor()).isEqualTo(20_000);
+        assertThat(south.catalogueVersion()).isEqualTo(1);
+        assertThat(south.number()).matches("V-2026-\\d{9}");
+        assertThatThrownBy(() -> record("UNKNOWN", "NORTH", null)).isInstanceOf(DomainException.class)
+                .extracting("code").isEqualTo("CATALOGUE_NOT_IN_FORCE");
+        assertThatThrownBy(() -> service.publish(CatalogueEntryTest.entry("PARKING", null, 1, 0, null, null,
+                TODAY.minusDays(1), null), "back-dated", ADMIN)).isInstanceOf(DomainException.class)
+                .extracting("code").isEqualTo("CATALOGUE_START_IN_PAST");
+    }
+
+    @Test
+    @Tag("VF-003")
+    @Tag("VF-015")
+    @Tag("VF-070")
+    @DisplayName("VF-003, VF-070: a repeat within the period costs the repeat fine; each fine becomes a payable")
+    void repeatAndPayable() {
+        publish("RED_LIGHT", null, 80_000, 0, 365, 160_000L);
+        Violation first = record("RED_LIGHT", "NORTH", "TF-DRIVER");
+        Violation second = record("RED_LIGHT", "NORTH", "TF-DRIVER");
+        assertThat(first.repeat()).isFalse();
+        assertThat(second.repeat()).isTrue();
+        assertThat(second.fineMinor()).isEqualTo(160_000);
+        assertThat(payablesRegistered).containsExactly(first.number() + " TF-DRIVER 80000 XTS",
+                second.number() + " TF-DRIVER 160000 XTS");
+        assertThat(first.payableId()).isNotNull();
+        assertThat(events).contains("itms.violation.recorded " + first.number());
+        publish("WARNING_ONLY", null, 0, 0, null, null);
+        assertThat(record("WARNING_ONLY", "NORTH", null).payableId()).as("no fine, no payable").isNull();
+    }
+
+    @Test
+    @Tag("VF-031")
+    @Tag("VF-033")
+    @DisplayName("VF-030, VF-033: points go to the responsible file and warn once per threshold crossed")
+    void pointsAndWarnings() {
+        publish("SEATBELT", null, 40_000, 6, null, null);
+        record("SEATBELT", "NORTH", "TF-D");
+        record("SEATBELT", "NORTH", "TF-D");
+        assertThat(service.standing("TF-D", OFFICER).activePoints()).isEqualTo(12);
+        assertThat(service.standing("TF-OWNER", OFFICER).activePoints()).as("the owner is not charged").isZero();
+        assertThat(events.stream().filter(e -> e.equals("itms.violation.points-warning TF-D")).count()).isEqualTo(1);
+        record("SEATBELT", "NORTH", "TF-D");
+        assertThat(events.stream().filter(e -> e.equals("itms.violation.points-warning TF-D")).count()).isEqualTo(2);
+        BlackPoints.Entry e = repo.points.getFirst();
+        assertThat(e.expiresOn()).isEqualTo(e.occurredOn().plusMonths(12));
+    }
+
+    @Test
+    @Tag("VF-032")
+    @Tag("UAT-1")
+    @DisplayName("UAT-1 (at recording, Q-072): 20 active + 6 = 26 suspends for 3 months with a hold; the next is 6 months")
+    void uat1Suspension() {
+        publish("SPEED_20", null, 30_000, 20, null, null);
+        publish("SPEED_6", null, 60_000, 6, null, null);
+        record("SPEED_20", "NORTH", "TF-UAT1");
+        assertThat(service.standing("TF-UAT1", OFFICER).activePoints()).isEqualTo(20);
+        assertThat(holds).isEmpty();
+
+        Violation trigger = record("SPEED_6", "NORTH", "TF-UAT1");
+        ViolationService.Standing standing = service.standing("TF-UAT1", OFFICER);
+        assertThat(standing.activeSuspension()).isNotNull();
+        assertThat(standing.activeSuspension().pointsAtOrder()).isEqualTo(26);
+        assertThat(standing.activeSuspension().ordinal()).isEqualTo(1);
+        assertThat(standing.activeSuspension().from()).isEqualTo(TODAY);
+        assertThat(standing.activeSuspension().until()).isEqualTo(TODAY.plusMonths(3).minusDays(1));
+        assertThat(standing.activeSuspension().holdId()).isEqualTo("HOLD-1");
+        assertThat(standing.activeSuspension().triggeredBy()).isEqualTo(trigger.id());
+        assertThat(holds).containsExactly("TF-UAT1 " + TODAY + ".." + TODAY.plusMonths(3).minusDays(1));
+        assertThat(events).contains("itms.violation.licence-suspended TF-UAT1");
+        assertThat(standing.activePoints()).as("the counted points are consumed").isZero();
+
+        // While suspended, more points never order a second suspension.
+        record("SPEED_20", "NORTH", "TF-UAT1");
+        record("SPEED_6", "NORTH", "TF-UAT1");
+        assertThat(holds).hasSize(1);
+
+        // After the first suspension ends, reaching the threshold again gives the second length (6 months).
+        clock.set(TODAY.plusMonths(3).atStartOfDay(ZoneOffset.UTC).toInstant().plus(Duration.ofHours(2)));
+        record("SPEED_6", "NORTH", "TF-UAT1");
+        LocalDate day = LocalDate.ofInstant(clock.instant(), ZoneOffset.UTC);
+        assertThat(holds).hasSize(2);
+        assertThat(holds.getLast()).isEqualTo("TF-UAT1 " + day + ".." + day.plusMonths(6).minusDays(1));
+        assertThat(repo.suspensions).extracting(BlackPoints.Suspension::ordinal).containsExactly(1, 2);
+    }
+
+    @Test
+    @Tag("VF-021")
+    @DisplayName("VF-021: a supervisor cancels with a listed reason; the payable is withdrawn and the points cancelled")
+    void cancel() {
+        publish("SEATBELT", null, 40_000, 6, null, null);
+        Violation v = record("SEATBELT", "NORTH", "TF-C");
+        assertThatThrownBy(() -> service.cancel(v.number(), "BECAUSE", null, SUPERVISOR))
+                .isInstanceOf(DomainException.class).extracting("code").isEqualTo("CANCEL_REASON_INVALID");
+        assertThatThrownBy(() -> service.cancel(v.number(), "DUPLICATE", null, OFFICER))
+                .isInstanceOf(DomainException.class).extracting("code").isEqualTo("SCOPE_EXCEEDED");
+        Violation cancelled = service.cancel(v.number(), "DUPLICATE", "entered twice", SUPERVISOR);
+        assertThat(cancelled.status()).isEqualTo(Violation.Status.CANCELLED);
+        assertThat(payablesCancelled).containsExactly(v.payableId());
+        assertThat(service.standing("TF-C", OFFICER).activePoints()).isZero();
+        assertThat(events).contains("itms.violation.cancelled " + v.number());
+        assertThat(service.onPaid(v.number())).as("a cancelled violation is not paid").isFalse();
+    }
+
+    @Test
+    @Tag("VF-070")
+    @Tag("UAT-4")
+    @DisplayName("VF-070, UAT-4: the payment confirmation marks the violation PAID once; a receipt cancellation reopens")
+    void onPaidOnce() {
+        publish("PARKING", null, 20_000, 0, null, null);
+        Violation v = record("PARKING", "NORTH", null);
+        assertThat(service.onPaid(v.number())).isTrue();
+        assertThat(service.onPaid(v.number())).isFalse();
+        assertThat(service.onPaid("V-2026-999999999")).isFalse();
+        assertThat(events.stream().filter(e -> e.equals("itms.violation.paid " + v.number())).count()).isEqualTo(1);
+        assertThat(service.onReceiptCancelled(v.number())).isTrue();
+        assertThat(service.onReceiptCancelled(v.number())).isFalse();
+        assertThat(repo.violations.get(v.number()).status()).isEqualTo(Violation.Status.OPEN);
+    }
+
+    @Test
+    @Tag("VF-010")
+    @Tag("CC-001")
+    @DisplayName("violation times must be recent and not in the future; recording is scoped by region")
+    void timesAndScope() {
+        publish("PARKING", null, 20_000, 0, null, null);
+        assertThatThrownBy(() -> service.record(new Violation.Report("PARKING", NOW.plusSeconds(120), "NORTH", "road",
+                "A 1", null, "TF-1", null, null, null, Violation.Source.OFFICER, null, List.of()), OFFICER))
+                .isInstanceOf(DomainException.class).extracting("code").isEqualTo("OCCURRED_AT_INVALID");
+        assertThatThrownBy(() -> service.record(new Violation.Report("PARKING", NOW.minus(Duration.ofDays(31)),
+                "NORTH", "road", "A 1", null, "TF-1", null, null, null, Violation.Source.OFFICER, null, List.of()),
+                OFFICER)).isInstanceOf(DomainException.class).extracting("code").isEqualTo("OCCURRED_AT_INVALID");
+        assertThatThrownBy(() -> service.record(new Violation.Report("PARKING", NOW, "EAST", "road", "A 1", null,
+                "TF-1", null, null, null, Violation.Source.OFFICER, null, List.of()), OFFICER))
+                .isInstanceOf(DomainException.class).extracting("code").isEqualTo("SCOPE_EXCEEDED");
+        Violation v = record("PARKING", "SOUTH", null);
+        assertThatThrownBy(() -> service.get(v.number(), SUPERVISOR)).isInstanceOf(DomainException.class)
+                .extracting("code").isEqualTo("SCOPE_EXCEEDED");
+    }
+
+    private static final class MutableClock extends Clock {
+        private Instant now;
+
+        MutableClock(Instant now) {
+            this.now = now;
+        }
+
+        void set(Instant at) {
+            now = at;
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            return now;
+        }
+    }
+
+    private static final class Repo implements Ports.ViolationRepository {
+        final Map<String, List<CatalogueEntry>> catalogue = new HashMap<>();
+        final Map<String, Violation> violations = new LinkedHashMap<>();
+        final List<BlackPoints.Entry> points = new ArrayList<>();
+        final List<BlackPoints.Suspension> suspensions = new ArrayList<>();
+        long sequence;
+
+        @Override
+        public void lockCatalogue(String code) {
+        }
+
+        @Override
+        public int nextCatalogueVersion(String code) {
+            return catalogue.getOrDefault(code, List.of()).size() + 1;
+        }
+
+        @Override
+        public void insertCatalogue(CatalogueEntry entry) {
+            catalogue.computeIfAbsent(entry.code(), c -> new ArrayList<>()).add(entry);
+        }
+
+        @Override
+        public List<CatalogueEntry> catalogueVersions(String code) {
+            return catalogue.getOrDefault(code, List.of()).stream()
+                    .sorted(Comparator.comparingInt(CatalogueEntry::versionNo).reversed()).toList();
+        }
+
+        @Override
+        public List<CatalogueEntry> latestCatalogue() {
+            return catalogue.values().stream().map(List::getLast).toList();
+        }
+
+        @Override
+        public long nextViolationSequence() {
+            return ++sequence;
+        }
+
+        @Override
+        public void insertViolation(Violation violation) {
+            violations.put(violation.number(), violation);
+        }
+
+        @Override
+        public Optional<Violation> findByNumber(String number) {
+            return Optional.ofNullable(violations.get(number));
+        }
+
+        @Override
+        public Optional<Violation> findForUpdate(String number) {
+            return findByNumber(number);
+        }
+
+        @Override
+        public void updateViolation(Violation violation) {
+        }
+
+        @Override
+        public List<Violation> byFile(String fileNumber, Violation.Status status, int limit) {
+            return violations.values().stream().filter(v -> v.report().responsibleFileNumber().equals(fileNumber))
+                    .filter(v -> status == null || v.status() == status).limit(limit).toList();
+        }
+
+        @Override
+        public boolean hadViolationSince(String fileNumber, String catalogueCode, Instant since) {
+            return violations.values().stream().anyMatch(v -> v.report().responsibleFileNumber().equals(fileNumber)
+                    && v.catalogueCode().equals(catalogueCode) && v.status() != Violation.Status.CANCELLED
+                    && !v.report().occurredAt().isBefore(since));
+        }
+
+        @Override
+        public void lockFile(String fileNumber) {
+        }
+
+        @Override
+        public void insertPoints(BlackPoints.Entry entry) {
+            points.add(entry);
+        }
+
+        @Override
+        public List<BlackPoints.Entry> points(String fileNumber) {
+            return points.stream().filter(p -> p.fileNumber().equals(fileNumber)).toList();
+        }
+
+        @Override
+        public void setPointsStatus(List<UUID> ids, BlackPoints.EntryStatus status) {
+            points.replaceAll(p -> ids.contains(p.id()) ? new BlackPoints.Entry(p.id(), p.fileNumber(),
+                    p.violationId(), p.points(), p.occurredOn(), p.expiresOn(), status) : p);
+        }
+
+        @Override
+        public void cancelPointsOf(UUID violationId) {
+            points.replaceAll(p -> p.violationId().equals(violationId) && p.status() == BlackPoints.EntryStatus.ACTIVE
+                    ? new BlackPoints.Entry(p.id(), p.fileNumber(), p.violationId(), p.points(), p.occurredOn(),
+                    p.expiresOn(), BlackPoints.EntryStatus.CANCELLED) : p);
+        }
+
+        @Override
+        public List<BlackPoints.Suspension> suspensions(String fileNumber) {
+            return suspensions.stream().filter(s -> s.fileNumber().equals(fileNumber)).toList();
+        }
+
+        @Override
+        public void insertSuspension(BlackPoints.Suspension suspension) {
+            suspensions.add(suspension);
+        }
+    }
+}

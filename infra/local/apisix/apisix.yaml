@@ -66,6 +66,10 @@ upstreams:
     type: roundrobin
     nodes:
       "vehicle-service:8080": 1
+  - id: violation-service
+    type: roundrobin
+    nodes:
+      "violation-service:8080": 1
 
 plugin_configs:
   - id: protected-api
@@ -279,4 +283,14 @@ routes:
       - /v1/vehicles
       - /v1/vehicles/*
       - /v1/plate-series
+  - id: violation-service
+    name: violation-service
+    upstream_id: violation-service
+    plugin_config_id: protected-api
+    uris:
+      - /v1/violations
+      - /v1/violations/*
+      - /v1/violation-catalogue
+      - /v1/violation-catalogue/*
+      - /v1/black-point-accounts/*
 #END

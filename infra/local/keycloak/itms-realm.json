@@ -110,6 +110,31 @@
           }
         }
       ]
+    },
+    {
+      "id": "7d0c1a3e-5b2f-4c1d-9e8a-100000000004",
+      "clientId": "itms-violation-service",
+      "name": "violation-service's own account for service-to-service calls to payment-service and hold-eligibility-service (VF-015, VF-032, ADR-034). LOCAL DEVELOPMENT ONLY: the secret is set by tools/dev/up.sh",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "fullScopeAllowed": false,
+      "protocolMappers": [
+        {
+          "name": "itms-api audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "itms-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
     }
   ],
   "users": [
@@ -157,6 +182,12 @@
       "username": "service-account-itms-vehicle-service",
       "enabled": true,
       "serviceAccountClientId": "itms-vehicle-service"
+    },
+    {
+      "id": "7d0c1a3e-5b2f-4c1d-9e8a-000000000013",
+      "username": "service-account-itms-violation-service",
+      "enabled": true,
+      "serviceAccountClientId": "itms-violation-service"
     }
   ]
 }

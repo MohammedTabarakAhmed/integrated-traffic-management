@@ -1,0 +1,405 @@
+openapi: 3.1.0
+info:
+  title: ITMS Violation Service
+  version: 1.0.0
+  description: |
+    Violations, fines and black points — the Increment 1 core (ADR-056).
+
+    Catalogue (VF-001..VF-004): entries are published as versions with effective dates and optional regional
+    variants; a violation uses the version in force on its date (the regional variant first). Speed violations have
+    bands with their own fine and points; a repeat within the configured days uses the repeat fine.
+
+    Recording (VF-014, VF-015, VF-070): officers and devices record violations. The responsible party is the identified
+    driver, otherwise the registered owner. The fine is registered as a payable at payment-service and the responsible
+    party is notified through the event `itms.violation.recorded`. When payment-service confirms a payment the
+    violation becomes PAID (UAT-4); a cancelled receipt makes it OPEN again.
+
+    Black points (VF-030..VF-033, UAT-1): points go to the responsible traffic file and expire after the configured
+    months (default 12). Crossing a warning threshold (default 12, 18) emits `itms.violation.points-warning`. Reaching
+    the suspension threshold (default 24) suspends the licence for the period of that ordinal (default 3, 6, 12 months)
+    from the day the violation is recorded, places a hold on licence services at hold-eligibility-service and emits
+    `itms.violation.licence-suspended` (SMS and app notification through notification-service).
+
+    Cancellation (VF-021) needs `violation.cancel` and a reason code from the configured list. Every status change is
+    audited (VF-020). The channel is the `X-Channel` header. Only GET/POST are used (INT-003).
+servers:
+  - url: /
+security:
+  - bearerAuth: []
+tags:
+  - name: Catalogue
+  - name: Violations
+  - name: Black points
+
+paths:
+  /v1/violation-catalogue:
+    post:
+      tags: [Catalogue]
+      operationId: publishCatalogueEntry
+      summary: Publish a new version of a catalogue entry (VF-001..VF-004)
+      x-itms-permission: violation.catalogue.manage
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CatalogueEntry' }
+      responses:
+        '201':
+          description: Published
+          headers:
+            Location: { schema: { type: string } }
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CatalogueEntry' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [Catalogue]
+      operationId: listCatalogue
+      summary: The latest version of every entry and regional variant
+      x-itms-permission: authenticated
+      x-itms-scope: national
+      responses:
+        '200': { $ref: '#/components/responses/CatalogueCollection' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/violation-catalogue/{code}:
+    get:
+      tags: [Catalogue]
+      operationId: getCatalogueVersions
+      summary: Every version of one entry, newest first (VF-002)
+      x-itms-permission: authenticated
+      x-itms-scope: national
+      parameters:
+        - { name: code, in: path, required: true, schema: { $ref: '#/components/schemas/Code' } }
+      responses:
+        '200': { $ref: '#/components/responses/CatalogueCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/violations:
+    post:
+      tags: [Violations]
+      operationId: recordViolation
+      summary: Record a violation; fine payable, black points and notification follow (VF-014, VF-015, VF-030)
+      description: |
+        404 `CATALOGUE_NOT_IN_FORCE`; 422 `SPEED_REQUIRED` / `SPEED_NOT_IN_BANDS` for speed entries; 503 when
+        payment-service or hold-eligibility-service does not answer (nothing is recorded).
+      x-itms-permission: violation.record
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Report' }
+      responses:
+        '201':
+          description: Recorded
+          headers:
+            Location: { schema: { type: string } }
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Violation' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [Violations]
+      operationId: listViolations
+      summary: Violations of a traffic file, newest first; audited
+      x-itms-permission: violation.read
+      x-itms-scope: national
+      parameters:
+        - { name: fileNumber, in: query, required: true, schema: { $ref: '#/components/schemas/Ref' } }
+        - { name: status, in: query, schema: { type: string, enum: [OPEN, PAID, CANCELLED] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+      responses:
+        '200':
+          description: Violations
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Violation' } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/violations/{number}:
+    get:
+      tags: [Violations]
+      operationId: getViolation
+      summary: A violation; the read is audited
+      x-itms-permission: violation.read
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/Number'
+      responses:
+        '200':
+          description: Violation
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Violation' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/violations/{number}/cancellations:
+    post:
+      tags: [Violations]
+      operationId: cancelViolation
+      summary: A supervisor cancels an open violation with a reason code (VF-021)
+      x-itms-permission: violation.cancel
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/Number'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reasonCode]
+              properties:
+                reasonCode: { $ref: '#/components/schemas/Code' }
+                note: { oneOf: [ { type: string, minLength: 3, maxLength: 500 }, { type: 'null' } ] }
+      responses:
+        '200':
+          description: Cancelled
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Violation' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/black-point-accounts/{fileNumber}:
+    get:
+      tags: [Black points]
+      operationId: getBlackPointAccount
+      summary: Active points, entries and suspensions of a traffic file (VF-030..VF-032); audited
+      x-itms-permission: violation.read
+      x-itms-scope: national
+      parameters:
+        - { name: fileNumber, in: path, required: true, schema: { $ref: '#/components/schemas/Ref' } }
+      responses:
+        '200':
+          description: Standing
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [fileNumber, activePoints, threshold, entries, suspensions]
+                properties:
+                  fileNumber: { type: string }
+                  activePoints: { type: integer }
+                  threshold: { type: integer }
+                  activeSuspension: { oneOf: [ { $ref: '#/components/schemas/Suspension' }, { type: 'null' } ] }
+                  entries:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [id, fileNumber, violationId, points, occurredOn, expiresOn, status]
+                      properties:
+                        id: { type: string, format: uuid }
+                        fileNumber: { type: string }
+                        violationId: { type: string, format: uuid }
+                        points: { type: integer }
+                        occurredOn: { type: string, format: date }
+                        expiresOn: { type: string, format: date }
+                        status: { type: string, enum: [ACTIVE, CONSUMED, CANCELLED] }
+                  suspensions: { type: array, items: { $ref: '#/components/schemas/Suspension' } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    Number:
+      name: number
+      in: path
+      required: true
+      schema: { type: string, pattern: '^V-[0-9]{4}-[0-9]{9}$' }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Chosen by the client, new for every intended action, and sent again unchanged on a retry (API_SPECIFICATION
+        §2, ADR-032). A retry with the same key and request gets the stored response, marked `Idempotent-Replayed`.
+      schema: { type: string, pattern: '^[A-Za-z0-9._:-]{8,128}$' }
+
+  headers:
+    IdempotentReplayed:
+      description: '`true` when the response is the stored response of an earlier request with the same Idempotency-Key'
+      schema: { type: string, enum: ['true'] }
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid bearer token
+    Problem:
+      description: Problem details (RFC 9457, API_SPECIFICATION §3)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    CatalogueCollection:
+      description: Catalogue entries
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [items]
+            properties:
+              items: { type: array, items: { $ref: '#/components/schemas/CatalogueEntry' } }
+
+  schemas:
+    Code:
+      type: string
+      pattern: '^[A-Z0-9][A-Z0-9_]{0,39}$'
+    Ref:
+      type: string
+      pattern: '^[A-Z0-9][A-Z0-9-]{0,59}$'
+    NullableCode:
+      oneOf: [ { $ref: '#/components/schemas/Code' }, { type: 'null' } ]
+    NullableRef:
+      oneOf: [ { $ref: '#/components/schemas/Ref' }, { type: 'null' } ]
+    SpeedBand:
+      type: object
+      additionalProperties: false
+      required: [fromKmh, fineMinor, blackPoints]
+      properties:
+        fromKmh: { type: integer, minimum: 0 }
+        toKmh: { oneOf: [ { type: integer, minimum: 1 }, { type: 'null' } ] }
+        fineMinor: { type: integer, minimum: 0 }
+        blackPoints: { type: integer, minimum: 0, maximum: 100 }
+    CatalogueEntry:
+      type: object
+      additionalProperties: false
+      required: [code, legalArticle, descriptionNl, descriptionEn, fineMinor, blackPoints, impoundDays, suspensionDays,
+                 courtReferral, appliesTo, financialItem, beneficiary, effectiveFrom]
+      properties:
+        code: { $ref: '#/components/schemas/Code' }
+        versionNo: { oneOf: [ { type: integer }, { type: 'null' } ] }
+        region: { $ref: '#/components/schemas/NullableCode' }
+        legalArticle: { type: string, maxLength: 100 }
+        descriptionNl: { type: string, maxLength: 500 }
+        descriptionEn: { type: string, maxLength: 500 }
+        fineMinor: { type: integer, minimum: 0, maximum: 1000000000 }
+        blackPoints: { type: integer, minimum: 0, maximum: 100 }
+        impoundDays: { type: integer, minimum: 0, maximum: 3650 }
+        suspensionDays: { type: integer, minimum: 0, maximum: 3650 }
+        courtReferral: { type: boolean }
+        appliesTo: { type: string, enum: [DRIVER, VEHICLE, BOTH] }
+        speedBands: { oneOf: [ { type: array, maxItems: 20, items: { $ref: '#/components/schemas/SpeedBand' } }, { type: 'null' } ] }
+        repeatWithinDays: { oneOf: [ { type: integer, minimum: 1, maximum: 3650 }, { type: 'null' } ] }
+        repeatFineMinor: { oneOf: [ { type: integer, minimum: 0 }, { type: 'null' } ] }
+        financialItem: { $ref: '#/components/schemas/Code' }
+        beneficiary: { $ref: '#/components/schemas/Code' }
+        effectiveFrom: { type: string, format: date }
+        effectiveTo: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
+        reason: { oneOf: [ { type: string, minLength: 3, maxLength: 500 }, { type: 'null' } ] }
+    Report:
+      type: object
+      additionalProperties: false
+      required: [catalogueCode, occurredAt, region, location, source]
+      properties:
+        catalogueCode: { $ref: '#/components/schemas/Code' }
+        occurredAt: { type: string, format: date-time }
+        region: { $ref: '#/components/schemas/Code' }
+        location: { type: string, maxLength: 300 }
+        plate: { oneOf: [ { type: string, pattern: '^[A-Z0-9 -]{1,20}$' }, { type: 'null' } ] }
+        vin: { oneOf: [ { type: string, pattern: '^[A-HJ-NPR-Z0-9]{17}$' }, { type: 'null' } ] }
+        ownerFileNumber: { $ref: '#/components/schemas/NullableRef' }
+        driverFileNumber: { $ref: '#/components/schemas/NullableRef' }
+        speedLimitKmh: { oneOf: [ { type: integer, minimum: 5, maximum: 200 }, { type: 'null' } ] }
+        measuredSpeedKmh: { oneOf: [ { type: integer, minimum: 0, maximum: 500 }, { type: 'null' } ] }
+        source: { type: string, enum: [DEVICE, OFFICER] }
+        deviceId: { oneOf: [ { type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{0,39}$' }, { type: 'null' } ] }
+        evidenceIds:
+          oneOf:
+            - { type: array, maxItems: 20, items: { type: string, pattern: '^[A-Za-z0-9-]{1,64}$' } }
+            - { type: 'null' }
+    Violation:
+      type: object
+      additionalProperties: false
+      required: [number, catalogueCode, catalogueVersion, occurredAt, region, location, responsibleFileNumber,
+                 fineMinor, blackPoints, repeat, status, evidenceIds, recordedAt]
+      properties:
+        number: { type: string }
+        catalogueCode: { type: string }
+        catalogueVersion: { type: integer }
+        occurredAt: { type: string, format: date-time }
+        region: { type: string }
+        location: { type: string }
+        plate: { oneOf: [ { type: string }, { type: 'null' } ] }
+        responsibleFileNumber: { type: string }
+        overKmh: { oneOf: [ { type: integer }, { type: 'null' } ] }
+        fineMinor: { type: integer }
+        blackPoints: { type: integer }
+        repeat: { type: boolean }
+        status: { type: string, enum: [OPEN, PAID, CANCELLED] }
+        cancelReason: { oneOf: [ { type: string }, { type: 'null' } ] }
+        evidenceIds: { type: array, items: { type: string } }
+        recordedAt: { type: string, format: date-time }
+    Suspension:
+      type: object
+      additionalProperties: false
+      required: [id, fileNumber, ordinal, from, until, pointsAtOrder, triggeredBy]
+      properties:
+        id: { type: string, format: uuid }
+        fileNumber: { type: string }
+        ordinal: { type: integer }
+        from: { type: string, format: date }
+        until: { type: string, format: date }
+        pointsAtOrder: { type: integer }
+        holdId: { oneOf: [ { type: string }, { type: 'null' } ] }
+        triggeredBy: { type: string, format: uuid }
+    Problem:
+      type: object
+      required: [status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        code: { type: string }
+        detail: { type: string }
+        instance: { type: string }
+        correlationId: { type: string }
+        requirementRefs: { type: array, items: { type: string } }
+        errors: { type: array, items: { type: object } }

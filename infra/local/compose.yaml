@@ -241,6 +241,22 @@ services:
       timeout: 3s
       retries: 20
 
+  violation-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: violation
+      POSTGRES_USER: ${VIO_DB_USER:?run tools/dev/up.sh}
+      POSTGRES_PASSWORD_FILE: /run/secrets/violation_db_password
+    secrets:
+      - violation_db_password
+    volumes:
+      - violation-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d violation"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   keycloak:
     image: quay.io/keycloak/keycloak:26.8.0
     command: ["start-dev", "--import-realm"]
@@ -902,6 +918,57 @@ services:
       timeout: 3s
       retries: 30
 
+  violation-service:
+    build: ../../services/violation-service
+    environment:
+      <<: [*itms-observability, *itms-events]
+      VIO_DB_URL: jdbc:postgresql://violation-postgres:5432/violation
+      # Fines become payables at payment-service and suspensions become holds at hold-eligibility-service, with this
+      # service's own client-credentials account (ADR-034); payment confirmations from the broker mark fines paid.
+      ITMS_PAYMENTS_URL: http://payment-service:8080
+      ITMS_HOLDS_URL: http://hold-eligibility-service:8080
+      ITMS_OIDC_TOKEN_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/token
+      ITMS_SERVICE_CLIENT_ID: itms-violation-service
+      ITMS_VIOLATIONS_CONSUMER_ENABLED: "true"
+      # Short-lived login from OpenBao (ADR-039), files under /run/secrets/spring/datasource; owner role on connect.
+      SPRING_DATASOURCE_HIKARI_CONNECTIONINITSQL: SET ROLE itms_owner
+      ITMS_OIDC_ISSUER: http://localhost:8180/realms/itms
+      ITMS_OIDC_JWKS_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/certs
+      ITMS_AUTHORISATION_SOURCE: iam
+      ITMS_IAM_URL: http://iam-service:8080
+    secrets:
+      - source: violation_service_client_secret
+        target: itms.clients.payments.client-secret
+      - source: violation_service_client_secret
+        target: itms.clients.holds.client-secret
+    volumes:
+      - type: volume
+        source: db-credentials
+        target: /run/secrets/spring/datasource
+        read_only: true
+        volume:
+          subpath: violation-service
+    ports:
+      - "127.0.0.1:8096:8080"
+    depends_on:
+      bao-agent:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+      kafka:
+        condition: service_healthy
+      violation-postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      iam-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8090/actuator/health/readiness | grep -q UP"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
   # ---- Partner mocks (Gate C). Built from the ICDs; never used outside local development and tests.
   identity-register-mock:
     image: wiremock/wiremock:3.13.1
@@ -999,6 +1066,8 @@ services:
         condition: service_healthy
       vehicle-service:
         condition: service_healthy
+      violation-service:
+        condition: service_healthy
     healthcheck:
       # Ready once routes are loaded and the token check answers: an unauthenticated call gets 401.
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9080 && printf 'GET /v1/roles HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && head -1 <&3 | grep -q ' 401 '"]
@@ -1045,7 +1114,7 @@ services:
       openbao:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "for s in iam-service reference-data-service transaction-service hold-eligibility-service traffic-file-service fees-service rules-service workflow-service notification-service document-service appointment-service audit-service payment-service vehicle-service; do test -s /run/db-credentials/$$s/username && test -s /run/db-credentials/$$s/password || exit 1; done"]
+      test: ["CMD-SHELL", "for s in iam-service reference-data-service transaction-service hold-eligibility-service traffic-file-service fees-service rules-service workflow-service notification-service document-service appointment-service audit-service payment-service vehicle-service violation-service; do test -s /run/db-credentials/$$s/username && test -s /run/db-credentials/$$s/password || exit 1; done"]
       interval: 2s
       timeout: 3s
       retries: 30
@@ -1116,6 +1185,10 @@ services:
 # /run/secrets/ in the containers, never set as container environment variables. In real environments the secret
 # store delivers the same files (Kubernetes secrets through the external-secrets operator, ADR-014).
 secrets:
+  violation_service_client_secret:
+    environment: DEV_VIOLATION_SERVICE_SECRET
+  violation_db_password:
+    environment: VIO_DB_PASSWORD
   vehicle_service_client_secret:
     environment: DEV_VEHICLE_SERVICE_SECRET
   vehicle_db_password:
@@ -1180,5 +1253,6 @@ volumes:
   audit-db:
   payment-db:
   vehicle-db:
+  violation-db:
   db-credentials:
   kafka-data:

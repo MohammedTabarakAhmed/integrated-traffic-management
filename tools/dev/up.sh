@@ -51,6 +51,8 @@ wanted = {
     "DEV_PAYMENT_CALLBACK_KEY": lambda: secrets.token_hex(32),
     "VEH_DB_USER": lambda: "vehicle",
     "VEH_DB_PASSWORD": lambda: secrets.token_urlsafe(24),
+    "VIO_DB_USER": lambda: "violation",
+    "VIO_DB_PASSWORD": lambda: secrets.token_urlsafe(24),
     "KC_ADMIN_USER": lambda: "kc-admin",
     "KC_ADMIN_PASSWORD": lambda: secrets.token_urlsafe(24),
     "DEV_IAM_ADMIN_PASSWORD": lambda: secrets.token_urlsafe(16),
@@ -59,6 +61,7 @@ wanted = {
     "DEV_DIRECTORY_FEED_SECRET": lambda: secrets.token_urlsafe(32),
     "DEV_TRANSACTION_SERVICE_SECRET": lambda: secrets.token_urlsafe(32),
     "DEV_VEHICLE_SERVICE_SECRET": lambda: secrets.token_urlsafe(32),
+    "DEV_VIOLATION_SERVICE_SECRET": lambda: secrets.token_urlsafe(32),
     "GRAFANA_ADMIN_PASSWORD": lambda: secrets.token_urlsafe(16),
     "BAO_ROOT_TOKEN": lambda: secrets.token_urlsafe(24),
 }
@@ -83,15 +86,15 @@ if [[ "${1:-}" == "down" ]]; then
 fi
 
 echo "== Building service jars"
-mvn -B -ntp -q package -DskipTests -pl services/iam-service,services/reference-data-service,services/transaction-service,services/hold-eligibility-service,services/traffic-file-service,services/fees-service,services/rules-service,services/workflow-service,services/notification-service,services/document-service,services/appointment-service,services/audit-service,services/payment-service,services/vehicle-service -am
+mvn -B -ntp -q package -DskipTests -pl services/iam-service,services/reference-data-service,services/transaction-service,services/hold-eligibility-service,services/traffic-file-service,services/fees-service,services/rules-service,services/workflow-service,services/notification-service,services/document-service,services/appointment-service,services/audit-service,services/payment-service,services/vehicle-service,services/violation-service -am
 
 echo "== Starting the databases and OpenBao"
-"${COMPOSE[@]}" up -d --wait postgres iam-postgres transaction-postgres hold-postgres traffic-file-postgres fees-postgres rules-postgres workflow-postgres notification-postgres document-postgres appointment-postgres audit-postgres payment-postgres vehicle-postgres openbao
+"${COMPOSE[@]}" up -d --wait postgres iam-postgres transaction-postgres hold-postgres traffic-file-postgres fees-postgres rules-postgres workflow-postgres notification-postgres document-postgres appointment-postgres audit-postgres payment-postgres vehicle-postgres violation-postgres openbao
 
 echo "== Database owner role itms_owner (ADR-039)"
 for db in "postgres refdata $REFDATA_DB_USER" "iam-postgres iam $IAM_DB_USER" \
           "transaction-postgres transaction $TXN_DB_USER" "hold-postgres hold $HOLD_DB_USER" \
-          "traffic-file-postgres trafficfile $TF_DB_USER" "fees-postgres fees $FEES_DB_USER" "rules-postgres rules $RULES_DB_USER" "workflow-postgres workflow $WORKFLOW_DB_USER" "notification-postgres notification $NOTIF_DB_USER" "document-postgres document $DOC_DB_USER" "appointment-postgres appointment $APPT_DB_USER" "audit-postgres audit $AUDIT_DB_USER" "payment-postgres payment $PAY_DB_USER" "vehicle-postgres vehicle $VEH_DB_USER"; do
+          "traffic-file-postgres trafficfile $TF_DB_USER" "fees-postgres fees $FEES_DB_USER" "rules-postgres rules $RULES_DB_USER" "workflow-postgres workflow $WORKFLOW_DB_USER" "notification-postgres notification $NOTIF_DB_USER" "document-postgres document $DOC_DB_USER" "appointment-postgres appointment $APPT_DB_USER" "audit-postgres audit $AUDIT_DB_USER" "payment-postgres payment $PAY_DB_USER" "vehicle-postgres vehicle $VEH_DB_USER" "violation-postgres violation $VIO_DB_USER"; do
   set -- $db
   "${COMPOSE[@]}" exec -T "$1" psql -q -v ON_ERROR_STOP=1 -U "$3" -d "$2" < infra/local/db/itms-owner.sql
   echo "   $2: itms_owner owns the schema"
@@ -114,6 +117,7 @@ BAO_AGENT_TOKEN=$({ printf "export BAO_TOKEN='%s' ITMS_DB_LOGIN_TTL='%s' ITMS_DB
     printf "export AUDIT_DB_USER='%s' AUDIT_DB_PASSWORD='%s'\n" "$AUDIT_DB_USER" "$AUDIT_DB_PASSWORD"
     printf "export PAY_DB_USER='%s' PAY_DB_PASSWORD='%s'\n" "$PAY_DB_USER" "$PAY_DB_PASSWORD"
     printf "export VEH_DB_USER='%s' VEH_DB_PASSWORD='%s'\n" "$VEH_DB_USER" "$VEH_DB_PASSWORD"
+    printf "export VIO_DB_USER='%s' VIO_DB_PASSWORD='%s'\n" "$VIO_DB_USER" "$VIO_DB_PASSWORD"
     cat infra/local/openbao/configure.sh
   } | "${COMPOSE[@]}" exec -T openbao sh -s | tail -n 1)
 export BAO_AGENT_TOKEN
@@ -135,6 +139,7 @@ KC=(env MSYS_NO_PATHCONV=1 docker compose -f infra/local/compose.yaml --env-file
 # transaction-service's own account for service-to-service calls (CC-032, ADR-034); compose passes it the same secret.
 "${KC[@]}" update clients/7d0c1a3e-5b2f-4c1d-9e8a-100000000002 -r itms -s "secret=$DEV_TRANSACTION_SERVICE_SECRET"
 "${KC[@]}" update clients/7d0c1a3e-5b2f-4c1d-9e8a-100000000003 -r itms -s "secret=$DEV_VEHICLE_SERVICE_SECRET"
+"${KC[@]}" update clients/7d0c1a3e-5b2f-4c1d-9e8a-100000000004 -r itms -s "secret=$DEV_VIOLATION_SERVICE_SECRET"
 
 echo "== Granting development roles through iam-service (dev.iam-admin is the bootstrap administrator)"
 IAM=http://localhost:8082
@@ -208,6 +213,10 @@ grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker CASHIER_SUPERVISOR
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker VEHICLE_OFFICER
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker PLATE_ADMIN
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker INSPECTION_CENTRE
+# Violations (VF-*; ADR-056): dev.maker records violations and keeps the catalogue; dev.checker cancels (supervisor).
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker VIOLATION_OFFICER
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker VIOLATION_CATALOGUE_ADMIN
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker VIOLATION_SUPERVISOR
 # dev.checker is also the development access reviewer ("manager", SEC-007, ADR-026); dev.iam-admin, the IT
 # administrator, opens and closes reviews.
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker ACCESS_REVIEWER
@@ -217,6 +226,9 @@ grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000010 service-account-itms-directory-feed D
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000011 service-account-itms-transaction-service ELIGIBILITY_CHECKER
 # vehicle-service registers registration fees as payables at payment-service (ADR-055).
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000012 service-account-itms-vehicle-service PAYABLE_REGISTRAR
+# violation-service registers fines as payables and places licence suspension holds (VF-015, VF-032; ADR-056).
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000013 service-account-itms-violation-service PAYABLE_REGISTRAR
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000013 service-account-itms-violation-service SUSPENSION_HOLD_PLACER
 
 cat <<EOF
 
@@ -236,6 +248,7 @@ ITMS local stack is up:
   audit-service           http://localhost:8093                     (bearer token required)
   payment-service         http://localhost:8094                     (bearer token required)
   vehicle-service         http://localhost:8095                     (bearer token required)
+  violation-service       http://localhost:8096                     (bearer token required)
   Keycloak                http://localhost:8180   (realm: itms; users dev.iam-admin / dev.maker / dev.checker;
                                                    passwords in $ENV_FILE; clients itms-directory-feed and
                                                    itms-transaction-service use DEV_DIRECTORY_FEED_SECRET and

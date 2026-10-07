@@ -33,6 +33,7 @@ configure appointment-service appointment-postgres appointment "$APPT_DB_USER" "
 configure audit-service audit-postgres audit "$AUDIT_DB_USER" "$AUDIT_DB_PASSWORD"
 configure payment-service payment-postgres payment "$PAY_DB_USER" "$PAY_DB_PASSWORD"
 configure vehicle-service vehicle-postgres vehicle "$VEH_DB_USER" "$VEH_DB_PASSWORD"
+configure violation-service violation-postgres violation "$VIO_DB_USER" "$VIO_DB_PASSWORD"
 
 # The agent may only read database logins.
 printf 'path "database/creds/*" {\n  capabilities = ["read"]\n}\n' | bao policy write itms-db-agent - >/dev/null

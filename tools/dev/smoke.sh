@@ -12,7 +12,9 @@
 # submission's trace crosses transaction-service and hold-eligibility-service, and every service's logs reach Loki
 # (NFR-040) -> no ITMS container holds a password or secret in its environment; they read secret files (SEC-004)
 # -> services use short-lived OpenBao logins, not the database superuser; a rotated login is picked up without a
-# restart and the old one can be dropped (SEC-004, ADR-039).
+# restart and the old one can be dropped (SEC-004, ADR-039) -> ... -> rules, workflow, notifications, documents and
+# certificates, appointments, the central audit trail, payments (signed callbacks), vehicles (UAT-3 check) and
+# violations (UAT-1 suspension, UAT-4 duplicate callback) run end to end (steps 29-37).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 set -a; source infra/local/.env; set +a
@@ -554,5 +556,263 @@ quote=$(curl -s -H "Authorization: Bearer $TF_CHECKER" -H 'Content-Type: applica
   "$FEES/v1/quotes" -d "{\"serviceCode\":\"$fee_service\",\"region\":\"DXB\",\"customerCategory\":\"CITIZEN\",\"quantities\":{\"YEAR\":\"2\"}}")
 [[ "$(printf '%s' "$quote" | json_field "['total']")" == 20000 ]] || { echo "FAIL: quote $quote"; exit 1; }
 echo "   fee BASE_$fee_service approved by the checker; quote total 20000 (2 years x 10000)"
+
+S_MAKER=$(token dev.maker "$DEV_MAKER_PASSWORD") # fresh: earlier tokens may have expired
+S_CHECKER=$(token dev.checker "$DEV_CHECKER_PASSWORD")
+SMK=$(date +%s)
+post_to() { # base token path body [channel] -> prints "<body>\n<status>"
+  curl -s -w '\n%{http_code}' -H "Authorization: Bearer $2" -H 'Content-Type: application/json' \
+    -H "X-Channel: ${5:-BACKOFFICE}" -H "Idempotency-Key: $(new_key)" "$1$3" -d "$4"
+}
+get_from() { curl -s -H "Authorization: Bearer $2" "$1$3"; } # base token path
+db_sql() { "${DC[@]}" exec -T "$1" psql -qtA -U "$3" -d "$2" -c "$4"; } # container database user query
+pay_sql() { db_sql payment-postgres payment "$PAY_DB_USER" "$1"; }
+expect() { # result status [code]
+  [[ "$(status_of "$1")" == "$2" ]] || { echo "FAIL: expected $2, got $(status_of "$1"): $(body_of "$1")"; exit 1; }
+  [[ -z "${3:-}" || "$(body_of "$1" | json_field "['code']")" == "$3" ]] || { echo "FAIL: expected $3: $(body_of "$1")"; exit 1; }
+}
+wait_until() { # seconds command... : retries the command once a second until it succeeds
+  local n=$1; shift
+  for _ in $(seq 1 "$n"); do "$@" && return 0; sleep 1; done
+  return 1
+}
+sign_callback() { # payment-id txn status amount currency paid-at -> ICD-03 HMAC-SHA256 hex
+  "$PY" -c "import hmac,hashlib,sys; print(hmac.new(sys.argv[1].encode(), '|'.join(sys.argv[2:]).encode(), hashlib.sha256).hexdigest())" \
+    "$DEV_PAYMENT_CALLBACK_KEY" "$1" "$2" "$3" "$4" "$5" "$6"
+}
+callback() { # payment-id txn amount -> result of a signed SUCCESS callback, relayed by dev.maker (PAYMENT_GATEWAY_ADAPTER)
+  local at="2026-10-07T08:00:00Z" sig
+  sig=$(sign_callback "$1" "$2" SUCCESS "$3" XTS "$at")
+  post_to "$PAY" "$S_MAKER" "/v1/payments/$1/callbacks" \
+    "{\"gatewayTxnId\":\"$2\",\"merchantRef\":\"$1\",\"status\":\"SUCCESS\",\"amountMinor\":$3,\"currency\":\"XTS\",\"paidAt\":\"$at\",\"signature\":\"$sig\"}" PARTNER
+}
+today=$(date -u +%F)
+PAY=http://localhost:8094
+
+echo "29. Business rules (CC-050..CC-052): maker submits a decision table, tests it, cannot approve it; the checker approves"
+RULES=http://localhost:8087
+rule_set="SMK_RULE_$SMK"
+table='{"hitPolicy":"FIRST","inputs":[{"name":"age","type":"NUMBER"}],"outputs":[{"name":"eligible","type":"BOOLEAN"}],"rules":[{"when":{"age":{"op":"GE","values":[18]}},"then":{"eligible":true},"description":"adult"}],"defaults":{"eligible":false}}'
+res=$(post_to "$RULES" "$S_MAKER" /v1/rule-versions "{\"ruleSetCode\":\"$rule_set\",\"nameNl\":\"العمر\",\"nameEn\":\"Minimum age\",\"table\":$table,\"effectiveFrom\":\"$today\",\"reason\":\"smoke test rule\"}")
+expect "$res" 201
+rule_id=$(body_of "$res" | json_field "['id']")
+expect "$(post_to "$RULES" "$S_MAKER" "/v1/rule-versions/$rule_id/approvals" '{}')" 403
+res=$(post_to "$RULES" "$S_MAKER" "/v1/rule-versions/$rule_id/test-runs" '{"cases":[{"inputs":{"age":18},"expected":{"eligible":true}},{"inputs":{"age":17},"expected":{"eligible":false}}]}')
+expect "$res" 200
+[[ "$(body_of "$res" | json_field "['passed']")" == 2 ]] || { echo "FAIL: test run $(body_of "$res")"; exit 1; }
+res=$(post_to "$RULES" "$S_CHECKER" "/v1/rule-versions/$rule_id/approvals" '{"reason":"checked"}')
+[[ "$(body_of "$res" | json_field "['status']")" == APPROVED ]] || { echo "FAIL: approval $(body_of "$res")"; exit 1; }
+echo "   $rule_set v1: test run 2/2 passed; maker refused (403); checker approved"
+
+echo "30. Workflow (CC-060, CC-061, CC-063): a case enters the officer queue, is claimed, decided by its assignee only, completed"
+WF=http://localhost:8088
+wf="WF_SMK$SMK"
+res=$(post_to "$WF" "$S_MAKER" /v1/workflow-definitions "{\"code\":\"$wf\",\"serviceCode\":\"SMK_WF\",\"nameNl\":\"مراجعة\",\"nameEn\":\"Smoke review\",\"firstStep\":\"REVIEW\",\"steps\":[{\"code\":\"REVIEW\",\"kind\":\"REVIEW\",\"nameNl\":\"مراجعة\",\"nameEn\":\"Review\",\"role\":\"CASE_OFFICER\",\"assignment\":\"MANUAL\",\"sla\":\"PT24H\",\"escalationRole\":\"CASE_SUPERVISOR\",\"outcomes\":{\"APPROVED\":\"END\",\"REJECTED\":\"END\"}}],\"reason\":\"smoke test workflow\"}")
+expect "$res" 201
+res=$(post_to "$WF" "$S_MAKER" /v1/work-items "{\"workflowCode\":\"$wf\",\"reference\":\"SMK-$SMK\",\"serviceCode\":\"SMK_WF\",\"region\":\"DXB\"}")
+expect "$res" 201
+item=$(body_of "$res" | json_field "['id']")
+[[ "$(body_of "$res" | json_field "['queueRole']")" == CASE_OFFICER ]] || { echo "FAIL: wrong queue $(body_of "$res")"; exit 1; }
+expect "$(post_to "$WF" "$S_CHECKER" "/v1/work-items/$item/claims" '{}')" 200
+expect "$(post_to "$WF" "$S_MAKER" "/v1/work-items/$item/decisions" '{"outcome":"APPROVED"}')" 403 NOT_ASSIGNEE
+res=$(post_to "$WF" "$S_CHECKER" "/v1/work-items/$item/decisions" '{"outcome":"APPROVED","reason":"documents complete"}')
+[[ "$(body_of "$res" | json_field "['status']")" == COMPLETED ]] || { echo "FAIL: decision $(body_of "$res")"; exit 1; }
+steps=$(get_from "$WF" "$S_CHECKER" "/v1/work-items/$item/history" | json_field "['items'].__len__()")
+(( steps >= 3 )) || { echo "FAIL: expected >= 3 history entries, got $steps"; exit 1; }
+echo "   case $item: claimed by the officer, the supervisor refused (not assignee), completed APPROVED ($steps history entries)"
+
+echo "31. Notifications (CC-070, CC-073, CC-074): a bilingual template is sent; the SMS reaches the gateway mock, the inbox is delivered"
+NOTIF=http://localhost:8089
+tpl="SMK_TPL_$SMK"
+recipient="smk-r-$SMK"
+res=$(post_to "$NOTIF" "$S_MAKER" /v1/notification-templates "{\"code\":\"$tpl\",\"category\":\"SMOKE\",\"mandatory\":false,\"contents\":{\"SMS\":{\"bodyNl\":\"مرحبا {{name}}\",\"bodyEn\":\"Hello {{name}}\"},\"INBOX\":{\"subjectNl\":\"تحية\",\"subjectEn\":\"Greeting\",\"bodyNl\":\"مرحبا {{name}}\",\"bodyEn\":\"Hello {{name}}\"}},\"reason\":\"smoke test template\"}")
+expect "$res" 201
+expect "$(post_to "$NOTIF" "$S_CHECKER" "/v1/recipients/$recipient" '{"language":"EN","phone":"+971501234567"}')" 200
+res=$(post_to "$NOTIF" "$S_MAKER" /v1/notifications "{\"templateCode\":\"$tpl\",\"recipientId\":\"$recipient\",\"data\":{\"name\":\"Smoke\"},\"reference\":\"SMK-$SMK\"}")
+expect "$res" 201
+sms=$(body_of "$res" | "$PY" -c "import json,sys; print(next(i['id'] for i in json.load(sys.stdin)['items'] if i['channel']=='SMS'))")
+inbox=$(body_of "$res" | "$PY" -c "import json,sys; print(next(i['status'] for i in json.load(sys.stdin)['items'] if i['channel']=='INBOX'))")
+[[ "$inbox" == DELIVERED ]] || { echo "FAIL: inbox message $inbox"; exit 1; }
+sms_sent() { [[ "$(get_from "$NOTIF" "$S_CHECKER" "/v1/notifications/$sms" | json_field "['status']")" == SENT ]]; }
+wait_until 60 sms_sent || { echo "FAIL: the SMS was not sent to the gateway mock"; exit 1; }
+echo "   template $tpl: SMS $sms SENT through the messaging-gateway mock; inbox DELIVERED"
+
+echo "32. Documents and certificates (CC-080..CC-083): upload scanned by ClamAV into MinIO, download intact; certificate verified publicly"
+DOC=http://localhost:8091
+res=$(post_to "$DOC" "$S_MAKER" /v1/documents "{\"type\":\"SUPPORTING_DOCUMENT\",\"ownerType\":\"VEHICLE\",\"ownerId\":\"SMK-$SMK\",\"title\":\"Smoke document\"}")
+expect "$res" 201
+doc=$(body_of "$res" | json_field "['id']")
+pdf=$(mktemp); printf '%%PDF-1.7\n1 0 obj << >> endobj\n%%%%EOF smoke %s\n' "$SMK" > "$pdf"
+res=$(curl -s -w '\n%{http_code}' -H "Authorization: Bearer $S_MAKER" -H 'X-Channel: BACKOFFICE' \
+  -H 'Content-Type: application/octet-stream' --data-binary "@$pdf" "$DOC/v1/documents/$doc/content")
+expect "$res" 200
+[[ "$(body_of "$res" | json_field "['status']")" == AVAILABLE ]] || { echo "FAIL: upload $(body_of "$res")"; exit 1; }
+stored_sha=$(body_of "$res" | json_field "['sha256']")
+local_sha=$("$PY" -c "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$pdf")
+[[ "$stored_sha" == "$local_sha" ]] || { echo "FAIL: stored digest differs"; exit 1; }
+down_sha=$(curl -s -H "Authorization: Bearer $S_MAKER" "$DOC/v1/documents/$doc/content" | "$PY" -c "import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())")
+[[ "$down_sha" == "$local_sha" ]] || { echo "FAIL: downloaded content differs"; exit 1; }
+rm -f "$pdf"
+exe_doc=$(body_of "$(post_to "$DOC" "$S_MAKER" /v1/documents "{\"type\":\"SUPPORTING_DOCUMENT\",\"ownerType\":\"VEHICLE\",\"ownerId\":\"SMK-$SMK\"}")" | json_field "['id']")
+res=$(printf 'MZ\x90\x00 not a pdf' | curl -s -w '\n%{http_code}' -H "Authorization: Bearer $S_MAKER" -H 'X-Channel: BACKOFFICE' \
+  -H 'Content-Type: application/octet-stream' --data-binary @- "$DOC/v1/documents/$exe_doc/content")
+expect "$res" 422 FILE_TYPE_NOT_ALLOWED
+cert_tpl="SMK_CERT_$SMK"
+expect "$(post_to "$DOC" "$S_CHECKER" /v1/certificate-templates "{\"code\":\"$cert_tpl\",\"titleNl\":\"شهادة\",\"titleEn\":\"Smoke certificate\",\"bodyNl\":\"نشهد أن {{holderNameNl}}\",\"bodyEn\":\"We certify that {{holderNameEn}}\",\"validityDays\":30,\"reason\":\"smoke test template\"}")" 201
+res=$(post_to "$DOC" "$S_MAKER" /v1/certificates "{\"templateCode\":\"$cert_tpl\",\"holderNameNl\":\"اختبار\",\"holderNameEn\":\"Smoke Tester\",\"subjectType\":\"VEHICLE\",\"subjectId\":\"SMK-$SMK\"}")
+expect "$res" 201
+cert=$(body_of "$res" | json_field "['number']")
+cert_code=$(body_of "$res" | json_field "['verificationCode']")
+validity=$(curl -s "$GW/v1/certificate-verifications/$cert?code=$cert_code" | json_field "['validity']")
+[[ "$validity" == VALID ]] || { echo "FAIL: public verification through the gateway returned $validity"; exit 1; }
+status=$(curl -s -o /dev/null -w '%{http_code}' "$GW/v1/certificate-verifications/$cert?code=WRONGCODE2")
+[[ "$status" == 404 ]] || { echo "FAIL: a wrong code returned $status"; exit 1; }
+echo "   document $doc AVAILABLE (digest matches both ways), executable refused; certificate $cert VALID without a token, wrong code 404"
+
+echo "33. Appointments (CC-090..CC-092): a calendar is set up; an agent books the last place for a customer; a second booking is refused"
+APPT=http://localhost:8092
+centre="SMK$SMK"
+hours=$("$PY" -c "import json; print(json.dumps({d: [{'opens': '08:00', 'closes': '12:00'}] for d in ['MONDAY','TUESDAY','WEDNESDAY','THURSDAY','FRIDAY','SATURDAY','SUNDAY']}))")
+expect "$(post_to "$APPT" "$S_MAKER" /v1/appointment-centres "{\"code\":\"$centre\",\"region\":\"DXB\",\"zone\":\"Asia/Dubai\",\"weeklyHours\":$hours,\"active\":true}")" 200
+expect "$(post_to "$APPT" "$S_MAKER" /v1/appointment-resources "{\"code\":\"${centre}_R\",\"centreCode\":\"$centre\",\"type\":\"EXAMINER\",\"name\":\"Smoke examiner\",\"services\":[\"SMK_TEST\"],\"capacity\":1,\"active\":true}")" 200
+expect "$(post_to "$APPT" "$S_MAKER" /v1/appointment-service-settings '{"serviceCode":"SMK_TEST","slotMinutes":30,"horizonDays":30,"minLeadMinutes":60,"maxChanges":2,"noShowLimit":2,"noShowWindowDays":90,"penaltyDays":30}')" 200
+tomorrow=$(date -u -d tomorrow +%F 2>/dev/null || "$PY" -c "import datetime; print(datetime.date.today() + datetime.timedelta(days=1))")
+slot=$(get_from "$APPT" "$S_CHECKER" "/v1/slots?centreCode=$centre&serviceCode=SMK_TEST&from=$tomorrow&to=$tomorrow" | json_field "['items'][0]['start']")
+slot_utc=$("$PY" -c "import datetime,sys; print(datetime.datetime.fromisoformat(sys.argv[1].replace('Z','+00:00')).astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))" "$slot")
+res=$(post_to "$APPT" "$S_CHECKER" /v1/bookings "{\"serviceCode\":\"SMK_TEST\",\"centreCode\":\"$centre\",\"start\":\"$slot_utc\",\"customerId\":\"smk-c1-$SMK\"}")
+expect "$res" 201
+booking=$(body_of "$res" | json_field "['id']")
+expect "$(post_to "$APPT" "$S_CHECKER" /v1/bookings "{\"serviceCode\":\"SMK_TEST\",\"centreCode\":\"$centre\",\"start\":\"$slot_utc\",\"customerId\":\"smk-c2-$SMK\"}")" 409 SLOT_NOT_AVAILABLE
+res=$(post_to "$APPT" "$S_CHECKER" "/v1/bookings/$booking/cancellations" '{"reason":"smoke test cancellation"}')
+[[ "$(body_of "$res" | json_field "['status']")" == CANCELLED ]] || { echo "FAIL: cancellation $(body_of "$res")"; exit 1; }
+echo "   centre $centre: booking $booking at $slot_utc, second customer refused (capacity 1), cancelled"
+
+echo "34. Central audit trail (CC-120..CC-122): step 29's rule version reaches the hash chain through Kafka; the chain is intact"
+AUD=http://localhost:8093
+rule_timeline() { get_from "$AUD" "$S_CHECKER" "/v1/timelines/RuleVersion/$rule_id" | "$PY" -c "import json,sys; a=[i['action'] for i in json.load(sys.stdin)['items']]; sys.exit(0 if 'RULE_VERSION_APPROVED' in a and 'RULE_VERSION_SUBMITTED' in a else 1)"; }
+wait_until 90 rule_timeline || { echo "FAIL: rule version $rule_id not in the central audit trail"; exit 1; }
+hash=$(get_from "$AUD" "$S_CHECKER" "/v1/timelines/RuleVersion/$rule_id" | json_field "['items'][0]['hash']")
+[[ ${#hash} == 64 ]] || { echo "FAIL: audit record without a chain hash"; exit 1; }
+intact=$(get_from "$AUD" "$S_CHECKER" "/v1/audit-integrity?limit=100000" | json_field "['intact']")
+[[ "$intact" == True ]] || { echo "FAIL: audit chain broken"; exit 1; }
+status=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $S_CHECKER" "$AUD/v1/audit-records?from=2026-01-01T00:00:00Z")
+[[ "$status" == 422 ]] || { echo "FAIL: a search without a filter returned $status"; exit 1; }
+status=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $S_MAKER" "$AUD/v1/audit-records?actorId=x")
+[[ "$status" == 403 ]] || { echo "FAIL: a non-auditor searched the audit trail ($status)"; exit 1; }
+echo "   RuleVersion $rule_id: submitted and approved in the chain; chain intact; filterless search 422; non-auditor 403"
+
+echo "35. Payments (FN-001..FN-004, FN-011, FN-022): counter payment with a numbered receipt, same-day cancellation; signed gateway callback"
+pay_general() { # item-ref amount -> payable id
+  post_to "$PAY" "$S_MAKER" /v1/payables "{\"itemType\":\"GENERAL\",\"itemRef\":\"$1\",\"region\":\"DXB\",\"currency\":\"XTS\",\"lines\":[{\"financialItem\":\"SMOKE_REVENUE\",\"beneficiary\":\"AUTHORITY\",\"amountMinor\":$2}]}" \
+    | body_of_pipe | json_field "['id']"
+}
+body_of_pipe() { sed '$d'; }
+basket_of() { # payable ids as a JSON list -> basket id
+  post_to "$PAY" "$S_MAKER" /v1/baskets "{\"payableIds\":$1}" PORTAL | body_of_pipe | json_field "['id']"
+}
+payable=$(pay_general "SMK-PAY-$SMK" 1500)
+res=$(post_to "$PAY" "$S_MAKER" "/v1/baskets/$(basket_of "[\"$payable\"]")/payments" '{"method":"CASH","counterReference":"TILL-SMK"}')
+expect "$res" 201
+receipt=$(body_of "$res" | json_field "['receipt']['number']")
+[[ "$receipt" =~ ^R-DXB-BACKOFFICE-[0-9]{4}-[0-9]{8}$ ]] || { echo "FAIL: receipt number $receipt"; exit 1; }
+expect "$(post_to "$PAY" "$S_MAKER" "/v1/receipts/$receipt/cancellations" '{"reason":"smoke test"}')" 403
+res=$(post_to "$PAY" "$S_CHECKER" "/v1/receipts/$receipt/cancellations" '{"reason":"smoke test cancellation"}')
+[[ "$(body_of "$res" | json_field "['status']")" == CANCELLED ]] || { echo "FAIL: cancellation $(body_of "$res")"; exit 1; }
+[[ "$(get_from "$PAY" "$S_MAKER" "/v1/payables/$payable" | json_field "['status']")" == OPEN ]] || { echo "FAIL: payable not reopened"; exit 1; }
+gpayable=$(pay_general "SMK-PAYG-$SMK" 2500)
+res=$(post_to "$PAY" "$S_MAKER" "/v1/baskets/$(basket_of "[\"$gpayable\"]")/payments" '{"method":"GATEWAY_CARD","returnUrl":"http://localhost/return"}' PORTAL)
+expect "$res" 201
+gpayment=$(body_of "$res" | json_field "['payment']['id']")
+first=$(body_of "$(callback "$gpayment" "gw-smk-$SMK" 2500)" | json_field "['receiptNumber']")
+[[ -n "$first" && "$first" != None ]] || { echo "FAIL: the gateway callback gave no receipt"; exit 1; }
+expect "$(post_to "$PAY" "$S_MAKER" "/v1/payments/$gpayment/callbacks" "{\"gatewayTxnId\":\"x\",\"merchantRef\":\"$gpayment\",\"status\":\"SUCCESS\",\"amountMinor\":2500,\"currency\":\"XTS\",\"signature\":\"$(printf '0%.0s' $(seq 1 64))\"}" PARTNER)" 403 SIGNATURE_INVALID
+echo "   receipt $receipt cancelled by the supervisor (payable open again); gateway payment confirmed by a signed callback, receipt $first; forged signature 403"
+
+echo "36. Vehicles (VL-010, VL-024, VL-032; UAT-3 rule): insurance stops registration before payment; a paid registration assigns a plate"
+# The insurer mock has no "expired yesterday" policy and an expired VIN cannot be registered first, so the smoke shows
+# the UAT-3 check and message on a first registration; the renewal itself is VehicleApiIT.uat3RenewalBlockedByInsurance.
+VEH=http://localhost:8095
+FEES=http://localhost:8086
+quote_total=$(curl -s -H "Authorization: Bearer $S_MAKER" -H 'Content-Type: application/json' -H 'X-Channel: BACKOFFICE' "$FEES/v1/quotes" \
+  -d '{"serviceCode":"VEH_FIRST_REG","region":"DXB","customerCategory":"CITIZEN","subjectCategory":"PRIVATE"}' \
+  | "$PY" -c "import json,sys; print(json.load(sys.stdin).get('total', 0))" 2>/dev/null || echo 0)
+if [[ "$quote_total" == 0 ]]; then # first run on this stack: publish the first-registration fee
+  res=$(post_to "$FEES" "$S_MAKER" /v1/fee-versions "{\"feeCode\":\"VEH_FIRST_REG_FEE\",\"serviceCode\":\"VEH_FIRST_REG\",\"nameNl\":\"رسم التسجيل\",\"nameEn\":\"First registration fee\",\"financialItem\":\"REV_VEHICLE_REG\",\"beneficiary\":\"AUTHORITY\",\"method\":{\"type\":\"FIXED\",\"amount\":40000},\"effectiveFrom\":\"$today\",\"reason\":\"smoke test vehicle fee\"}")
+  expect "$res" 201
+  expect "$(post_to "$FEES" "$S_CHECKER" "/v1/fee-versions/$(body_of "$res" | json_field "['id']")/approvals" '{"reason":"checked"}')" 200
+fi
+expect "$(post_to "$VEH" "$S_CHECKER" /v1/plate-series '{"code":"SMK_DXB_PRIVATE","region":"DXB","plateCategory":"PRIVATE","colourCode":"WHITE","design":"STANDARD","prefix":"S","firstNumber":1,"lastNumber":99999,"premiumPattern":"^(\\d)\\1+$","active":true}')" 200
+new_vehicle() { # vin
+  post_to "$VEH" "$S_MAKER" /v1/vehicles "{\"vin\":\"$1\",\"spec\":{\"engineNo\":\"ENG-$SMK\",\"make\":\"TOYOTA\",\"model\":\"COROLLA\",\"modelYear\":$(date -u +%Y),\"bodyType\":\"SEDAN\",\"colours\":[\"WHITE\"],\"fuelType\":\"PETROL\",\"steering\":\"LEFT\",\"seats\":5,\"emptyWeightKg\":1200,\"grossWeightKg\":1700,\"axles\":2,\"cylinders\":4,\"category\":\"PRIVATE\"},\"ownerFileNumber\":\"TF-SMK-$SMK\",\"region\":\"DXB\"}"
+}
+expired_vin=$(printf 'WDB%09d00000' "$((SMK % 1000000000))")
+expect "$(new_vehicle "$expired_vin")" 201
+res=$(post_to "$VEH" "$S_MAKER" "/v1/vehicles/$expired_vin/registrations" '{"customerCategory":"CITIZEN"}' PORTAL)
+expect "$res" 409 INSURANCE_EXPIRED
+[[ "$(body_of "$res" | json_field "['detail']")" == "Your vehicle insurance has expired. Renew it with your insurer, then try again." ]] \
+  || { echo "FAIL: UAT-3 message $(body_of "$res")"; exit 1; }
+[[ "$(pay_sql "select count(*) from payable where traffic_file_number = 'TF-SMK-$SMK'")" == 0 ]]   || { echo "FAIL: a payable was registered although insurance stopped the registration"; exit 1; }
+down_vin=$(printf 'WDB%09d99999' "$((SMK % 1000000000))")
+expect "$(new_vehicle "$down_vin")" 201
+expect "$(post_to "$VEH" "$S_MAKER" "/v1/vehicles/$down_vin/registrations" '{"customerCategory":"CITIZEN"}' PORTAL)" 503 INSURANCE_UNAVAILABLE
+vin=$(printf 'WDB%013d1' "$SMK")
+expect "$(new_vehicle "$vin")" 201
+res=$(post_to "$VEH" "$S_MAKER" "/v1/vehicles/$vin/registrations" '{"customerCategory":"CITIZEN"}' PORTAL)
+expect "$res" 201
+item_ref="VR-$(body_of "$res" | json_field "['id']" | tr '[:lower:]' '[:upper:]')"
+reg_payable=$(pay_sql "select id from payable where item_ref = '$item_ref'")
+[[ -n "$reg_payable" ]] || { echo "FAIL: no payable $item_ref at payment-service"; exit 1; }
+expect "$(post_to "$PAY" "$S_MAKER" "/v1/baskets/$(basket_of "[\"$reg_payable\"]")/payments" '{"method":"CASH","counterReference":"TILL-VEH"}')" 201
+registered() { [[ "$(get_from "$VEH" "$S_MAKER" "/v1/vehicles/$vin" | json_field "['status']")" == REGISTERED ]]; }
+wait_until 60 registered || { echo "FAIL: vehicle $vin not registered after its payment"; exit 1; }
+plate=$(get_from "$VEH" "$S_MAKER" "/v1/vehicles/$vin" | json_field "['plateNumber']")
+[[ "$plate" == S\ * ]] || { echo "FAIL: plate $plate"; exit 1; }
+echo "   UAT-3: $expired_vin stopped before payment with the exact message; $down_vin insurer down 503; $vin paid at the counter -> REGISTERED, plate $plate"
+
+echo "37. Violations (VF-030..VF-032, VF-070; UAT-1, UAT-4): 20 + 6 points suspend the licence with a hold; three fines paid once"
+VIO=http://localhost:8096
+catalogue() { # code fine points
+  expect "$(post_to "$VIO" "$S_MAKER" /v1/violation-catalogue "{\"code\":\"$1\",\"legalArticle\":\"Art. 10\",\"descriptionNl\":\"مخالفة\",\"descriptionEn\":\"Smoke violation $1\",\"fineMinor\":$2,\"blackPoints\":$3,\"impoundDays\":0,\"suspensionDays\":0,\"courtReferral\":false,\"appliesTo\":\"DRIVER\",\"financialItem\":\"FINE_REVENUE\",\"beneficiary\":\"AUTHORITY\",\"effectiveFrom\":\"$today\",\"reason\":\"smoke test catalogue\"}")" 201
+}
+record() { # code owner-file driver-file -> violation number
+  local occurred driver
+  occurred=$(date -u -d '-1 hour' +%FT%TZ 2>/dev/null || "$PY" -c "import datetime; print((datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%SZ'))")
+  driver=${3:+,\"driverFileNumber\":\"$3\"}
+  post_to "$VIO" "$S_MAKER" /v1/violations "{\"catalogueCode\":\"$1\",\"occurredAt\":\"$occurred\",\"region\":\"DXB\",\"location\":\"Smoke road km 1\",\"plate\":\"S 1\",\"ownerFileNumber\":\"$2\"$driver,\"source\":\"OFFICER\"}" FIELD \
+    | body_of_pipe | json_field "['number']"
+}
+catalogue "SMK20_$SMK" 30000 20
+catalogue "SMK6_$SMK" 60000 6
+catalogue "SMKP_$SMK" 10000 0
+driver="TF-SMKD-$SMK" # throw-away file per run; it keeps its suspension and hold (harmless)
+record "SMK20_$SMK" "TF-SMKO-$SMK" "$driver" >/dev/null
+[[ "$(get_from "$VIO" "$S_MAKER" "/v1/black-point-accounts/$driver" | json_field "['activePoints']")" == 20 ]] || { echo "FAIL: 20 points expected"; exit 1; }
+record "SMK6_$SMK" "TF-SMKO-$SMK" "$driver" >/dev/null
+account=$(get_from "$VIO" "$S_MAKER" "/v1/black-point-accounts/$driver")
+until_expected=$("$PY" -c "import datetime,calendar; d=datetime.datetime.now(datetime.timezone.utc).date(); m=d.month+2; y=d.year+m//12; m=m%12+1; e=datetime.date(y,m,min(d.day,calendar.monthrange(y,m)[1])); print(e-datetime.timedelta(days=1))")
+printf '%s' "$account" | "$PY" -c "import json,sys; s=json.load(sys.stdin)['activeSuspension']; assert s and s['pointsAtOrder']==26 and s['ordinal']==1 and s['until']==sys.argv[1], s" "$until_expected" \
+  || { echo "FAIL: UAT-1 suspension $account"; exit 1; }
+holds=$(get_from http://localhost:8084 "$S_CHECKER" "/v1/holds?subjectType=TRAFFIC_FILE&subjectId=$driver" \
+  | "$PY" -c "import json,sys; print(','.join(h['holdType'] + '/' + h['status'] for h in json.load(sys.stdin)['items']))")
+[[ "$holds" == *LICENCE_SUSPENSION/ACTIVE* ]] || { echo "FAIL: no active suspension hold on $driver ($holds)"; exit 1; }
+owner="TF-SMKO3-$SMK"
+v1=$(record "SMKP_$SMK" "$owner"); v2=$(record "SMKP_$SMK" "$owner"); v3=$(record "SMKP_$SMK" "$owner")
+ids=$(pay_sql "select json_agg(id) from payable where item_ref in ('$v1','$v2','$v3')")
+[[ "$(printf '%s' "$ids" | json_field ".__len__()")" == 3 ]] || { echo "FAIL: payables of the three fines: $ids"; exit 1; }
+res=$(post_to "$PAY" "$S_MAKER" "/v1/baskets/$(basket_of "$ids")/payments" '{"method":"GATEWAY_CARD","returnUrl":"http://localhost/return"}' PORTAL)
+expect "$res" 201
+vpayment=$(body_of "$res" | json_field "['payment']['id']")
+r1=$(body_of "$(callback "$vpayment" "gw-uat4-$SMK" 30000)")
+r2=$(body_of "$(callback "$vpayment" "gw-uat4-$SMK" 30000)")
+[[ "$(printf '%s' "$r1" | json_field "['duplicate']")" == False && "$(printf '%s' "$r2" | json_field "['duplicate']")" == True ]] \
+  || { echo "FAIL: UAT-4 callbacks $r1 / $r2"; exit 1; }
+[[ "$(printf '%s' "$r1" | json_field "['receiptNumber']")" == "$(printf '%s' "$r2" | json_field "['receiptNumber']")" ]] || { echo "FAIL: two receipts"; exit 1; }
+[[ "$(pay_sql "select count(*) from receipt where payment_id = '$vpayment'")" == 1 ]] || { echo "FAIL: UAT-4 receipts"; exit 1; }
+[[ "$(pay_sql "select string_agg(outcome, ',' order by id) from payment_callback_log where payment_id = '$vpayment'")" == ACCEPTED,DUPLICATE ]] \
+  || { echo "FAIL: UAT-4 callback log"; exit 1; }
+all_paid() { for n in "$v1" "$v2" "$v3"; do [[ "$(get_from "$VIO" "$S_MAKER" "/v1/violations/$n" | json_field "['status']")" == PAID ]] || return 1; done; }
+wait_until 60 all_paid || { echo "FAIL: UAT-4 violations not all PAID"; exit 1; }
+echo "   UAT-1 (points at recording, Q-072): $driver 26 points -> suspended until $until_expected, LICENCE_SUSPENSION hold active"
+echo "   UAT-4: $v1 $v2 $v3 in one basket; two identical callbacks -> one receipt, second DUPLICATE; all three PAID"
 
 echo "SMOKE OK"

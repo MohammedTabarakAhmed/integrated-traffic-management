@@ -12,6 +12,9 @@
     <Or>
       <And><Class name="gov.itms.platform.audit.JdbcAuditRecorder"/><Field name="json"/></And>
       <And><Class name="gov.itms.platform.client.ServiceTokenProvider"/><Field name="tokenClient"/></And>
+      <And><Class name="gov.itms.platform.events.JdbcDomainEventRecorder"/><Field name="json"/></And>
+      <And><Class name="gov.itms.platform.events.KafkaEventPublisher"/><Field name="kafka"/></And>
+      <And><Class name="gov.itms.platform.events.OutboxRelay"/><Field name="~json|meters|tx"/></And>
       <And><Class name="gov.itms.platform.idempotency.IdempotencyCleanupJob"/><Field name="keys"/></And>
       <And><Class name="gov.itms.platform.idempotency.IdempotencyFilter"/><Field name="~json|keys"/></And>
       <And><Class name="gov.itms.platform.idempotency.IdempotencyKeys"/><Field name="store"/></And>
@@ -23,12 +26,34 @@
       <And><Class name="gov.itms.refdata.application.ReferenceDataService"/><Field name="~lists|items|changes"/></And>
       <And><Class name="gov.itms.transaction.application.CatalogueService"/><Field name="~services|rules|changes"/></And>
       <And><Class name="gov.itms.transaction.application.TransactionService"/><Field name="~services|rules|transactions"/></And>
+      <And><Class name="gov.itms.trafficfile.application.BanListService"/><Field name="~bans|files"/></And>
+      <And><Class name="gov.itms.trafficfile.application.CompanyFileService"/><Field name="files"/></And>
+      <And><Class name="gov.itms.trafficfile.application.DuplicateMergeService"/><Field name="files"/></And>
+      <And><Class name="gov.itms.trafficfile.application.RegisterSyncService"/><Field name="files"/></And>
+      <And><Class name="gov.itms.trafficfile.application.TrafficFileService"/><Field name="~bans|files"/></And>
+      <And><Class name="gov.itms.fees.application.AdjustmentService"/><Field name="fees"/></And>
+      <And><Class name="gov.itms.fees.application.FeeService"/><Field name="fees"/></And>
+      <And><Class name="gov.itms.fees.application.QuoteService"/><Field name="fees"/></And>
+      <And><Class name="gov.itms.rules.application.RuleService"/><Field name="rules"/></And>
+      <And><Class name="gov.itms.workflow.application.WorkflowService"/><Field name="repo"/></And>
+      <And><Class name="gov.itms.workflow.infrastructure.WorkflowServiceConfiguration$EscalationJob"/><Field name="workflow"/></And>
+      <And><Class name="gov.itms.notification.application.NotificationService"/><Field name="repo"/></And>
+      <And><Class name="gov.itms.document.application.CertificateService"/><Field name="~repo|store"/></And>
+      <And><Class name="gov.itms.document.application.DocumentService"/><Field name="~repo|store"/></And>
+      <And><Class name="gov.itms.appointment.application.AppointmentService"/><Field name="repo"/></And>
+      <And><Class name="gov.itms.appointment.infrastructure.AppointmentServiceConfiguration$ReminderJob"/><Field name="appointments"/></And>
+      <And><Class name="gov.itms.audit.application.AuditService"/><Field name="store"/></And>
+      <And><Class name="gov.itms.payment.application.PaymentService"/><Field name="repo"/></And>
+      <And><Class name="gov.itms.payment.infrastructure.PaymentServiceConfiguration$PendingJob"/><Field name="payments"/></And>
+      <And><Class name="gov.itms.vehicle.application.VehicleService"/><Field name="repo"/></And>
+      <And><Class name="gov.itms.violation.application.ViolationService"/><Field name="repo"/></And>
     </Or>
   </Match>
 
   <!-- EI_EXPOSE_REP on records whose collections are already immutable: the compact constructor replaces them with
        List.copyOf (Codes.distinct/codeList/blockedServices/roles) or Collections.unmodifiableSortedSet
-       (AssignmentScopes.clean, Role.cleanPermissions). SpotBugs cannot see through those helper methods. -->
+       (AssignmentScopes.clean, Role.cleanPermissions), or with Stream.toList() (traffic-file Codes.codes and
+       Company.fileNumbers). SpotBugs cannot see through those helper methods. -->
   <Match>
     <Bug pattern="EI_EXPOSE_REP"/>
     <Or>
@@ -37,6 +62,8 @@
         <Field name="~customerTypes|channels|requiredDocuments|regions"/></And>
       <And><Class name="gov.itms.iam.domain.AssignmentScopes"/><Field name="~regions|centres|modules"/></And>
       <And><Class name="gov.itms.iam.domain.Role"/><Field name="permissions"/></And>
+      <And><Class name="gov.itms.trafficfile.domain.Company"/><Field name="~activities|signatories|fleetManagers"/></And>
+      <And><Class name="gov.itms.trafficfile.domain.Profile"/><Field name="~languages|physicalConditions"/></And>
     </Or>
   </Match>
 
@@ -72,5 +99,35 @@
   <Match>
     <Bug pattern="REDOS"/>
     <Class name="gov.itms.transaction.domain.ServiceSpec"/>
+  </Match>
+
+  <!-- REDOS: JdbcDomainEventRecorder.EVENT_TYPE ([a-z][a-z0-9]*(\.[a-z][a-z0-9-]*)+) cannot backtrack: each repeated group
+       must start with a literal dot that no character class in the pattern matches, so every input has one parse and
+       matching is linear. Event types are code constants of the services, never request input (ADR-040). -->
+  <Match>
+    <Bug pattern="REDOS"/>
+    <Class name="gov.itms.platform.events.JdbcDomainEventRecorder"/>
+  </Match>
+  <!-- CT_CONSTRUCTOR_THROW: DuplicateMergeService refuses a similarity threshold outside (0, 1] when Spring creates the
+       singleton from configuration, so a misconfigured service never starts. A finalizer attack needs hostile code
+       subclassing it inside the service; the class stays non-final because Spring proxies it for @Transactional. -->
+  <Match>
+    <Bug pattern="CT_CONSTRUCTOR_THROW"/>
+    <Class name="gov.itms.trafficfile.application.DuplicateMergeService"/>
+  </Match>
+
+  <!-- UNENCRYPTED_SOCKET: ClamAV's clamd INSTREAM protocol has no TLS. The scanner runs beside document-service in the
+       application zone, reachable only from it (network policy, SECURITY_DESIGN zones); production scanner choice and
+       transport protection are open with security (Q-067). Reviewed as a deliberate, recorded exception. -->
+  <Match>
+    <Bug pattern="UNENCRYPTED_SOCKET"/>
+    <Class name="gov.itms.document.infrastructure.ClamdScanner"/>
+  </Match>
+
+  <!-- VA_FORMAT_STRING_USES_NEWLINE: HtmlCertificateRenderer formats an HTML text block; its line breaks are part of the
+       document and must be LF on every platform, so %n (the platform separator) would be wrong. -->
+  <Match>
+    <Bug pattern="VA_FORMAT_STRING_USES_NEWLINE"/>
+    <Class name="gov.itms.document.infrastructure.HtmlCertificateRenderer"/>
   </Match>
 </FindBugsFilter>

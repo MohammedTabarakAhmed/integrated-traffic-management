@@ -101,7 +101,7 @@ class JdbcNotificationRepository implements NotificationRepository {
 
     @Override
     public List<Template> latestTemplates() {
-        return jdbc.sql(TEMPLATE_SELECT + """
+        return jdbc.sql(TEMPLATE_SELECT + " " + """
                          t where version_no = (select max(version_no) from notification_template x
                              where x.code = t.code) order by code""")
                 .query(this::mapTemplate).list();
@@ -210,7 +210,7 @@ class JdbcNotificationRepository implements NotificationRepository {
     @Override
     public List<Notification> byRecipient(String recipientId, String reference, int limit) {
         return jdbc.sql(NOTIFICATION_SELECT + """
-                         where recipient_id = :r and (cast(:ref as varchar) is null or reference = :ref)
+                          where recipient_id = :r and (cast(:ref as varchar) is null or reference = :ref)
                          order by created_at desc, id limit :limit""")
                 .param("r", recipientId).param("ref", reference).param("limit", limit)
                 .query(this::mapNotification).list();
@@ -219,7 +219,7 @@ class JdbcNotificationRepository implements NotificationRepository {
     @Override
     public List<Notification> inbox(String recipientId, boolean unreadOnly, int limit) {
         return jdbc.sql(NOTIFICATION_SELECT + """
-                         where recipient_id = :r and channel = 'INBOX' and (not :unread or read_at is null)
+                          where recipient_id = :r and channel = 'INBOX' and (not :unread or read_at is null)
                          order by created_at desc, id limit :limit""")
                 .param("r", recipientId).param("unread", unreadOnly).param("limit", limit)
                 .query(this::mapNotification).list();
@@ -228,7 +228,7 @@ class JdbcNotificationRepository implements NotificationRepository {
     @Override
     public List<Notification> dueForSending(Instant now, int limit) {
         return jdbc.sql(NOTIFICATION_SELECT + """
-                         where status = 'QUEUED' and next_attempt_at <= :now
+                          where status = 'QUEUED' and next_attempt_at <= :now
                          order by next_attempt_at limit :limit for update skip locked""")
                 .param("now", Timestamp.from(now)).param("limit", limit).query(this::mapNotification).list();
     }

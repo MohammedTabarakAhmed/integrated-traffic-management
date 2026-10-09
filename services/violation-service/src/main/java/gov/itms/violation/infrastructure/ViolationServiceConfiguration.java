@@ -46,6 +46,8 @@ public class ViolationServiceConfiguration {
                                       List<String> suspensionBlockedServices,
                                       List<String> suspensionLiftableByRoles) {
         public ViolationProperties {
+            suspensionMonths = List.copyOf(suspensionMonths);
+            warningThresholds = List.copyOf(warningThresholds);
             cancelReasons = cancelReasons == null || cancelReasons.isEmpty()
                     ? List.of("WRONG_PLATE", "DEVICE_FAULT", "DUPLICATE", "OBJECTION_ACCEPTED", "COURT_ORDER")
                     : List.copyOf(cancelReasons);

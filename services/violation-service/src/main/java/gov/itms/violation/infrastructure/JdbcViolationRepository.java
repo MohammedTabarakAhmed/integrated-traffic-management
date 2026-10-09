@@ -95,7 +95,7 @@ class JdbcViolationRepository implements Ports.ViolationRepository {
 
     @Override
     public List<CatalogueEntry> latestCatalogue() {
-        return jdbc.sql(CATALOGUE_SELECT + """
+        return jdbc.sql(CATALOGUE_SELECT + " " + """
                          c where version_no = (select max(version_no) from violation_catalogue x
                              where x.code = c.code and x.region is not distinct from c.region) order by code, region""")
                 .query(this::mapCatalogue).list();
@@ -156,7 +156,7 @@ class JdbcViolationRepository implements Ports.ViolationRepository {
     @Override
     public List<Violation> byFile(String fileNumber, Violation.Status status, int limit) {
         return jdbc.sql(VIOLATION_SELECT + """
-                         where responsible_file_number = :f and (cast(:s as varchar) is null or status = :s)
+                          where responsible_file_number = :f and (cast(:s as varchar) is null or status = :s)
                          order by recorded_at desc limit :l""")
                 .param("f", fileNumber).param("s", status == null ? null : status.name()).param("l", limit)
                 .query(JdbcViolationRepository::mapViolation).list();

@@ -55,10 +55,19 @@ public class RuleService {
 
     /** One sample case of a test run, with an optional expected output (the first output row for COLLECT). */
     public record TestCase(Map<String, Object> inputs, Map<String, Object> expected) {
+        public TestCase {
+            // inputs may hold explicit nulls (an input left empty), which Map.copyOf refuses
+            inputs = inputs == null ? null : java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(inputs));
+            expected = expected == null ? null : java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(expected));
+        }
     }
 
     public record TestResult(int caseNo, List<Integer> matchedRules, List<Map<String, Object>> outputs, Boolean passed,
                              String error) {
+        public TestResult {
+            matchedRules = List.copyOf(matchedRules);
+            outputs = List.copyOf(outputs);
+        }
     }
 
     @Transactional

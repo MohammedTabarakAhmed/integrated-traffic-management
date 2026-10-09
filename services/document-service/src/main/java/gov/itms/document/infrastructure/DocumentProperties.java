@@ -57,6 +57,7 @@ public record DocumentProperties(Store store, Scanner scanner, List<Type> types,
     public record Type(String code, List<String> mediaTypes, DataSize maxSize,
                        @DefaultValue("CONFIDENTIAL") Document.Classification classification) {
         public Type {
+            mediaTypes = mediaTypes == null ? null : List.copyOf(mediaTypes);
             if (code == null || !code.matches(Document.CODE)) {
                 throw new IllegalArgumentException("itms.documents.types[].code must be a code (CC-081)");
             }

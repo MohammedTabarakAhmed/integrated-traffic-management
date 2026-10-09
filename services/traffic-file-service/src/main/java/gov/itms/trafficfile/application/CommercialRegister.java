@@ -20,6 +20,9 @@ public interface CommercialRegister {
     /** The fields ICD-04 returns. Activity codes are already mapped to ITMS reference-data codes. */
     record CompanyLicence(String licenceNo, String nameNl, String nameEn, List<String> activities,
                           LocalDate expiryDate, boolean cancelled) {
+        public CompanyLicence {
+            activities = activities == null ? List.of() : List.copyOf(activities);
+        }
     }
 
     class RegisterUnavailableException extends RuntimeException {

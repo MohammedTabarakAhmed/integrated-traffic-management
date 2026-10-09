@@ -127,7 +127,7 @@ class JdbcDocumentRepository implements Ports.DocumentRepository {
     @Override
     public List<Document> byRecord(String recordType, String recordId, int limit) {
         return jdbc.sql(DOCUMENT_SELECT + """
-                         where id in (select document_id from document_link where record_type = :t and record_id = :r)
+                          where id in (select document_id from document_link where record_type = :t and record_id = :r)
                          order by created_at desc limit :l""")
                 .param("t", recordType).param("r", recordId).param("l", limit).query(this::mapDocument).list();
     }
@@ -171,7 +171,7 @@ class JdbcDocumentRepository implements Ports.DocumentRepository {
 
     @Override
     public List<Certificate.Template> latestTemplates() {
-        return jdbc.sql(TEMPLATE_SELECT + """
+        return jdbc.sql(TEMPLATE_SELECT + " " + """
                          t where version_no = (select max(version_no) from certificate_template x
                              where x.code = t.code) order by code""")
                 .query(JdbcDocumentRepository::mapTemplate).list();

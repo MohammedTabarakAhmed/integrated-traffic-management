@@ -28,7 +28,8 @@ public record AuditRecord(long seq, UUID auditId, Instant occurredAt, String ser
 
     public AuditRecord {
         Objects.requireNonNull(auditId);
-        Objects.requireNonNull(occurredAt);
+        // timestamptz keeps microseconds; hashing a finer instant would break the chain once stored (CC-122)
+        occurredAt = Objects.requireNonNull(occurredAt).truncatedTo(java.time.temporal.ChronoUnit.MICROS);
         Objects.requireNonNull(service);
         Objects.requireNonNull(action);
         Objects.requireNonNull(entityType);

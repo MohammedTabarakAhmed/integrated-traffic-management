@@ -53,6 +53,10 @@ public class CompanyFileService {
     /** What staff give to open a company's file. */
     public record OpenCompany(Company.Licence licence, TrafficFile.Classification classification, String regionOpened,
                               List<String> signatories, List<String> fleetManagers) {
+        public OpenCompany {
+            signatories = signatories == null ? null : List.copyOf(signatories);
+            fleetManagers = fleetManagers == null ? null : List.copyOf(fleetManagers);
+        }
     }
 
     @Transactional

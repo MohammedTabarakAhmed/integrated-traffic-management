@@ -96,7 +96,7 @@ class JdbcWorkflowRepository implements WorkflowRepository {
 
     @Override
     public List<WorkflowDefinition> latestDefinitions(String serviceCode) {
-        return jdbc.sql(DEFINITION_SELECT + """
+        return jdbc.sql(DEFINITION_SELECT + " " + """
                          d where version_no = (select max(version_no) from workflow_definition x where x.code = d.code)
                          and (cast(:s as varchar) is null or service_code = :s) order by code""")
                 .param("s", serviceCode).query(this::mapDefinition).list();
@@ -248,7 +248,7 @@ class JdbcWorkflowRepository implements WorkflowRepository {
     @Override
     public List<WorkItem> overdueForEscalation(Instant now, int limit) {
         return jdbc.sql(ITEM_SELECT + """
-                         where status = 'OPEN' and escalated_at is null and due_at < :now
+                          where status = 'OPEN' and escalated_at is null and due_at < :now
                          order by due_at limit :limit for update skip locked""")
                 .param("now", Timestamp.from(now)).param("limit", limit).query(this::mapItem).list();
     }

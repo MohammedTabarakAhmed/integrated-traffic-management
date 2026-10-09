@@ -704,7 +704,9 @@ services:
 
   # ---- Object store (ADR-005; MinIO stands in for Ceph RGW) and malware scanner (CC-081). Local development only.
   minio:
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    # MinIO stopped publishing community images (2025); the Chainguard build of the same server (RELEASE.2026-09-22),
+    # pinned by digest, carries minio, mc and a shell.
+    image: chainguard/minio@sha256:e7ca559d9f7c0b5f24f5f669bb92f40f3ca88d56273b808bf3a7c116c17d2ffa
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER_FILE: /run/secrets/minio_access_key
@@ -721,7 +723,7 @@ services:
       retries: 20
 
   minio-init:
-    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    image: chainguard/minio@sha256:e7ca559d9f7c0b5f24f5f669bb92f40f3ca88d56273b808bf3a7c116c17d2ffa
     entrypoint: ["sh", "-c", "mc alias set local http://minio:9000 \"$$(cat /run/secrets/minio_access_key)\" \"$$(cat /run/secrets/minio_secret_key)\" && mc mb --ignore-existing local/itms-documents"]
     secrets:
       - minio_access_key

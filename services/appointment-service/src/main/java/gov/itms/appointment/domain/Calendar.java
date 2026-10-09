@@ -179,7 +179,8 @@ public final class Calendar {
             LocalDateTime end = day.atTime(p.closes());
             while (!t.plus(length).isAfter(end)) {
                 ZonedDateTime z = t.atZone(centre.zone());
-                if (!z.isBefore(notBefore)) {
+                boolean exists = !centre.zone().getRules().getValidOffsets(t).isEmpty();
+                if (exists && !z.isBefore(notBefore)) {
                     starts.add(z);
                 }
                 t = t.plus(length);

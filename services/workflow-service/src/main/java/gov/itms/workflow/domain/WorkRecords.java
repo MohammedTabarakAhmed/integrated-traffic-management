@@ -34,6 +34,10 @@ public final class WorkRecords {
     /** One entry of a case's timeline. */
     public record HistoryEntry(UUID itemId, String action, String stepCode, String actorId, Instant at,
                                Map<String, Object> detail) {
+        public HistoryEntry {
+            // detail may hold nulls (no previous assignee), which Map.copyOf refuses
+            detail = detail == null ? null : java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(detail));
+        }
     }
 
     /**

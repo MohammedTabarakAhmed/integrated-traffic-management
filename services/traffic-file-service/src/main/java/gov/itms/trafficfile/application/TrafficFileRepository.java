@@ -57,6 +57,9 @@ public interface TrafficFileRepository {
     List<FileVersion> history(UUID fileId);
 
     record FileVersion(long version, Instant validFrom, Instant validTo, String changedBy, Map<String, Object> state) {
+        public FileVersion {
+            state = state == null ? null : java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(state));
+        }
     }
 
     class DuplicateIdentityException extends RuntimeException {

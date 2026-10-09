@@ -181,7 +181,7 @@ class JdbcPaymentRepository implements Ports.PaymentRepository {
     @Override
     public List<Payment> pendingForInquiry(Instant olderThan, int limit) {
         return jdbc.sql(PAYMENT_SELECT + """
-                         where status = 'PENDING' and created_at < :t
+                          where status = 'PENDING' and created_at < :t
                          order by coalesce(last_inquiry_at, created_at) limit :l for update skip locked""")
                 .param("t", Timestamp.from(olderThan)).param("l", limit)
                 .query(JdbcPaymentRepository::mapPayment).list();

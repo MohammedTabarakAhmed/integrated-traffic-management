@@ -248,7 +248,7 @@ class JdbcAppointmentRepository implements AppointmentRepository {
     @Override
     public List<Booking> byCentre(String centreCode, Instant from, Instant to, int limit) {
         return jdbc.sql(BOOKING_SELECT + """
-                         where centre_code = :c and start_at >= :from and start_at < :to
+                          where centre_code = :c and start_at >= :from and start_at < :to
                          order by start_at, resource_code limit :l""")
                 .param("c", centreCode).param("from", Timestamp.from(from)).param("to", Timestamp.from(to))
                 .param("l", limit).query(JdbcAppointmentRepository::mapBooking).list();
@@ -257,7 +257,7 @@ class JdbcAppointmentRepository implements AppointmentRepository {
     @Override
     public List<Booking> noShows(String customerId, String serviceCode, Instant since) {
         return jdbc.sql(BOOKING_SELECT + """
-                         where customer_id = :c and service_code = :s and status = 'NO_SHOW' and closed_at >= :since
+                          where customer_id = :c and service_code = :s and status = 'NO_SHOW' and closed_at >= :since
                          order by closed_at desc""")
                 .param("c", customerId).param("s", serviceCode).param("since", Timestamp.from(since))
                 .query(JdbcAppointmentRepository::mapBooking).list();
@@ -266,7 +266,7 @@ class JdbcAppointmentRepository implements AppointmentRepository {
     @Override
     public List<Booking> dueForReminder(Instant now, Instant until, int limit) {
         return jdbc.sql(BOOKING_SELECT + """
-                         where status = 'BOOKED' and reminder_sent_at is null and start_at > :now
+                          where status = 'BOOKED' and reminder_sent_at is null and start_at > :now
                              and start_at <= :until
                          order by start_at limit :l for update skip locked""")
                 .param("now", Timestamp.from(now)).param("until", Timestamp.from(until)).param("l", limit)

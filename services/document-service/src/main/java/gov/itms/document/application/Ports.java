@@ -91,7 +91,26 @@ public final class Ports {
     public interface CertificateRenderer {
 
         /** The rendered document and its media type. */
-        record Rendered(byte[] content, String mediaType) {
+        /**
+         * A final class, not a record: SpotBugs misreads a record whose constructor copies an array. The bytes are
+         * copied in and out, so callers cannot change a rendered certificate.
+         */
+        final class Rendered {
+            private final byte[] content;
+            private final String mediaType;
+
+            public Rendered(byte[] content, String mediaType) {
+                this.content = content.clone();
+                this.mediaType = mediaType;
+            }
+
+            public byte[] content() {
+                return content.clone();
+            }
+
+            public String mediaType() {
+                return mediaType;
+            }
         }
 
         Rendered render(Certificate.Template template, Certificate.Issued certificate, String bodyNl, String bodyEn,

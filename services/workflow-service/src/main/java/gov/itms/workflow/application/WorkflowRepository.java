@@ -15,6 +15,9 @@ public interface WorkflowRepository {
     /** Filters of a work list (CC-063); {@code null} means any. */
     record ListFilter(Collection<WorkItem.Status> statuses, String serviceCode, Boolean overdue, Boolean escalated,
                       Instant now, int limit) {
+        public ListFilter {
+            statuses = statuses == null ? null : List.copyOf(statuses);
+        }
     }
 
     // definitions

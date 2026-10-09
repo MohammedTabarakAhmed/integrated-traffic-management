@@ -32,6 +32,9 @@ public final class Ports {
         void history(UUID vehicleId, String event, String actorId, Map<String, Object> detail, Instant at);
 
         record HistoryEntry(String event, String actorId, Map<String, Object> detail, Instant at) {
+            public HistoryEntry {
+                detail = detail == null ? null : java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(detail));
+            }
         }
 
         List<HistoryEntry> history(UUID vehicleId);
@@ -86,6 +89,9 @@ public final class Ports {
         }
 
         record Quote(String id, List<Line> lines, long total, String currency) {
+            public Quote {
+                lines = List.copyOf(lines);
+            }
         }
 
         Quote quote(String serviceCode, String region, String customerCategory, String subjectCategory,

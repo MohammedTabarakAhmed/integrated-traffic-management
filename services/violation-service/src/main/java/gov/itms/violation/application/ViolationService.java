@@ -56,6 +56,10 @@ public class ViolationService {
     /** A file's black point standing (VF-030..VF-032; UAT-1). */
     public record Standing(String fileNumber, int activePoints, int threshold, BlackPoints.Suspension activeSuspension,
                            List<BlackPoints.Entry> entries, List<BlackPoints.Suspension> suspensions) {
+        public Standing {
+            entries = List.copyOf(entries);
+            suspensions = List.copyOf(suspensions);
+        }
     }
 
     private final Ports.ViolationRepository repo;

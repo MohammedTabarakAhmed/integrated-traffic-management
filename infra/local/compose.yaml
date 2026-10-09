@@ -1,4 +1,4 @@
-# Local development stack (NOT a production topology; see docs/HLD.md §8).
+# Local development stack (NOT a production topology; see docs/brief/02_TECHNICAL_REQUIREMENTS.md (HLD part) §8).
 # Start with: tools/dev/up.sh   (generates infra/local/.env with random dev secrets on first run)
 # All ports bind to 127.0.0.1 only.
 name: itms

@@ -23,13 +23,13 @@ def trow(status, rid, pri):
 class VerifyLedgerTest(unittest.TestCase):
     def make_repo(self, ledger_rows, trace_rows, totals=None, files=None):
         d = Path(tempfile.mkdtemp())
-        (d / "docs").mkdir()
+        (d / "docs" / "brief").mkdir(parents=True)
         if totals is None:
             pr = [r.split("|")[3].strip() for r in ledger_rows]
             totals = (len(ledger_rows), pr.count("M"), pr.count("S"), pr.count("C"))
         t, m, s, c = totals
-        (d / "docs" / "BRD_REQUIREMENTS.md").write_text(HEADER_L.format(t=t, m=m, s=s, c=c) + "".join(ledger_rows), encoding="utf-8")
-        (d / "docs" / "TRACEABILITY.md").write_text(HEADER_T + "".join(trace_rows), encoding="utf-8")
+        (d / "docs" / "brief" / "01_PROJECT_REQUIREMENTS.md").write_text(HEADER_L.format(t=t, m=m, s=s, c=c) + "".join(ledger_rows), encoding="utf-8")
+        (d / "docs" / "brief" / "06_STATUS_BRIEF.md").write_text(HEADER_T + "".join(trace_rows), encoding="utf-8")
         for rel, content in (files or {}).items():
             f = d / rel
             f.parent.mkdir(parents=True, exist_ok=True)

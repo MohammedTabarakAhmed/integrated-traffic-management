@@ -21,7 +21,7 @@
   <name>ITMS parent</name>
 
   <modules>
-    <!-- Modules are added per increment (see docs/PROGRESS.md) -->
+    <!-- Modules are added per increment (see docs/brief/06_STATUS_BRIEF.md (progress log part)) -->
     <module>platform/itms-platform</module>
     <module>services/reference-data-service</module>
     <module>services/iam-service</module>

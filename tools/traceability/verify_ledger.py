@@ -2,8 +2,8 @@
 """ITMS requirement-ledger verifier (DLV-001, the project guide §8-9).
 
 Checks:
-  1. docs/BRD_REQUIREMENTS.md: IDs well-formed, unique, totals match the header line.
-  2. docs/TRACEABILITY.md mirrors the ledger (same IDs, order, priority, status).
+  1. docs/brief/01_PROJECT_REQUIREMENTS.md (ledger part): IDs well-formed, unique, totals match the header line.
+  2. docs/brief/06_STATUS_BRIEF.md (traceability part) mirrors the ledger (same IDs, order, priority, status).
   3. Status markers are valid.
   4. A requirement marked [x] has implementation, test and evidence filled in, and at
      least one test in the repository is tagged with its ID (e.g. @Tag("VF-032")).
@@ -82,8 +82,8 @@ def docx_requirements(docx: Path) -> dict[str, tuple[str, str]]:
 
 def verify(repo: Path, docx: Path | None = None) -> tuple[list[str], dict]:
     errors: list[str] = []
-    ledger_path = repo / "docs" / "BRD_REQUIREMENTS.md"
-    trace_path = repo / "docs" / "TRACEABILITY.md"
+    ledger_path = repo / "docs" / "brief" / "01_PROJECT_REQUIREMENTS.md"
+    trace_path = repo / "docs" / "brief" / "06_STATUS_BRIEF.md"
     ledger = parse_table(ledger_path)
     trace = parse_table(trace_path)
 

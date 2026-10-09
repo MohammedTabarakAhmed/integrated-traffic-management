@@ -23,6 +23,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import org.springframework.jdbc.core.RowCallbackHandler;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -172,13 +173,8 @@ class JdbcAppointmentRepository implements AppointmentRepository {
                         where centre_code = :c and status = 'BOOKED' and start_at >= :from and start_at < :to
                         group by resource_code, start_at""")
                 .param("c", centreCode).param("from", Timestamp.from(from)).param("to", Timestamp.from(to))
-                .query((ResultSet rs) -> {
-                    while (rs.next()) {
-                        counts.put(AppointmentRepository.slotKey(rs.getString("resource_code"),
-                                rs.getTimestamp("start_at").toInstant()), rs.getInt("n"));
-                    }
-                    return null;
-                });
+                .query((RowCallbackHandler) rs -> counts.put(AppointmentRepository.slotKey(
+                        rs.getString("resource_code"), rs.getTimestamp("start_at").toInstant()), rs.getInt("n")));
         return counts;
     }
 

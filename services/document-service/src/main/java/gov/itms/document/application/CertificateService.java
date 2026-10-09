@@ -121,8 +121,8 @@ public class CertificateService {
         String key = "certificates/" + number;
         store.put(key, rendered.content(), rendered.mediaType(), sha);
         Document doc = Document.create(documentId, subject, caller.actor(), now);
-        doc.available(rendered.mediaType(), rendered.content().length, sha, key, "GENERATED", now);
         repo.insert(doc);
+        doc.available(rendered.mediaType(), rendered.content().length, sha, key, "GENERATED", now);
         repo.saveContent(doc);
         repo.insertCertificate(issued);
         Map<String, Object> snapshot = snapshot(issued);

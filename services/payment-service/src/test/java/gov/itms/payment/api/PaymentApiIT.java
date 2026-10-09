@@ -287,7 +287,7 @@ class PaymentApiIT {
         String payment = body(postAs("/v1/baskets/" + basket + "/payments", Map.of("method", "GATEWAY_CARD"),
                 customer("c-f"), "PORTAL")).get("payment").get("id").asString();
         MvcResult forged = callback(payment, "gw-x", "SUCCESS", 100, "not-the-key");
-        assertThat(forged.getResponse().getStatus()).isEqualTo(403);
+        assertThat(forged.getResponse().getStatus()).isEqualTo(401);
         assertThat(code(forged)).isEqualTo("SIGNATURE_INVALID");
         assertThat(body(getAs("/v1/payments/" + payment, customer("c-f"))).get("status").asString())
                 .isEqualTo("PENDING");

@@ -84,7 +84,10 @@ public class PaymentServiceConfiguration {
     PaymentService paymentService(JdbcClient jdbc, ObjectMapper json, RestClient.Builder builder,
                                   PaymentProperties properties, AuditRecorder audit, DomainEventRecorder events,
                                   Clock clock) {
-        HttpClient http = HttpClient.newBuilder().connectTimeout(properties.gateway().timeout()).build();
+        // HTTP/1.1: over plain HTTP the JDK client's default h2c upgrade on a POST with a streamed body gets no usable
+        // answer from some gateways (the local WireMock mock never completes it); TLS gateways are unaffected.
+        HttpClient http = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1)
+                .connectTimeout(properties.gateway().timeout()).build();
         JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(http);
         factory.setReadTimeout(properties.gateway().timeout());
         RestClient client = builder.clone().baseUrl(properties.gateway().baseUrl().toString()).requestFactory(factory)

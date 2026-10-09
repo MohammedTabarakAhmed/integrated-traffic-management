@@ -6,13 +6,22 @@
 #                            OpenBao issuing each service a short-lived, rotated database login (SEC-004, ADR-039),
 #                            then grant the development roles through iam-service
 #   tools/dev/up.sh down     stop the stack (data volumes kept)
+#   ITMS_LOCAL_PROFILE=lite  light profile for 16 GB machines (infra/local/compose.lite.yaml, ADR-057): no Tempo,
+#                            Loki or Grafana, a clamd stand-in instead of ClamAV, small JVM heaps. Use the same
+#                            value for up.sh, up.sh down and smoke.sh.
 # First run generates infra/local/.env with random development secrets (git-ignored; SEC-004). Missing keys are
 # added to an existing .env.
 # Keycloak only authenticates; roles and permissions are held and granted by iam-service (ADR-022).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 ENV_FILE=infra/local/.env
-COMPOSE=(docker compose -f infra/local/compose.yaml --env-file "$ENV_FILE")
+COMPOSE_FILES=(-f infra/local/compose.yaml)
+case "${ITMS_LOCAL_PROFILE:-full}" in
+  full) ;;
+  lite) COMPOSE_FILES+=(-f infra/local/compose.lite.yaml) ;;
+  *) echo "ITMS_LOCAL_PROFILE must be full or lite, got: $ITMS_LOCAL_PROFILE" >&2; exit 2 ;;
+esac
+COMPOSE=(docker compose "${COMPOSE_FILES[@]}" --env-file "$ENV_FILE")
 PY=${PYTHON:-python3}; command -v "$PY" >/dev/null || PY=python
 
 echo "== Ensuring $ENV_FILE has every development secret"
@@ -128,7 +137,7 @@ echo "== Starting stack (this waits until every container is healthy)"
 
 echo "== Setting development user passwords in Keycloak"
 # MSYS_NO_PATHCONV stops Git Bash on Windows from rewriting the container path /opt/... (scoped to this call only).
-KC=(env MSYS_NO_PATHCONV=1 docker compose -f infra/local/compose.yaml --env-file "$ENV_FILE" exec -T keycloak /opt/keycloak/bin/kcadm.sh)
+KC=(env MSYS_NO_PATHCONV=1 docker compose "${COMPOSE_FILES[@]}" --env-file "$ENV_FILE" exec -T keycloak /opt/keycloak/bin/kcadm.sh)
 "${KC[@]}" config credentials --server http://localhost:8080 --realm master \
   --user "$KC_ADMIN_USER" --password "$KC_ADMIN_PASSWORD" >/dev/null
 "${KC[@]}" set-password -r itms --username dev.iam-admin --new-password "$DEV_IAM_ADMIN_PASSWORD"
@@ -256,6 +265,7 @@ ITMS local stack is up:
   Grafana                 http://localhost:3000   (user admin; password GRAFANA_ADMIN_PASSWORD in $ENV_FILE;
                                                    metrics, logs and traces of every service)
   Prometheus              http://localhost:9090
+Profile:                  ${ITMS_LOCAL_PROFILE:-full} (lite: no Grafana, Tempo or Loki; clamd stand-in, not ClamAV)
 Smoke test:               tools/dev/smoke.sh
 Stop:                     tools/dev/up.sh down
 EOF

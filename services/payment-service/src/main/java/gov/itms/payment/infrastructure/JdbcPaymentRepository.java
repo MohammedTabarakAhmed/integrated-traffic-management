@@ -2,6 +2,7 @@ package gov.itms.payment.infrastructure;
 
 import gov.itms.payment.application.Ports;
 import gov.itms.payment.domain.Basket;
+import gov.itms.payment.domain.DomainException;
 import gov.itms.payment.domain.Payable;
 import gov.itms.payment.domain.Payment;
 import gov.itms.payment.domain.Receipt;
@@ -17,6 +18,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -162,14 +164,20 @@ class JdbcPaymentRepository implements Ports.PaymentRepository {
 
     @Override
     public void updatePayment(Payment p) {
-        jdbc.sql("""
-                        update payment set status = :status, gateway_session_id = :session, gateway_txn_id = :txn,
-                            confirmed_at = :confirmedAt, exception_reason = :exception, last_inquiry_at = :inquiry
-                        where id = :id""")
-                .param("status", p.status().name()).param("session", p.gatewaySessionId())
-                .param("txn", p.gatewayTxnId()).param("confirmedAt", ts(p.confirmedAt()))
-                .param("exception", p.exceptionReason()).param("inquiry", ts(p.lastInquiryAt()))
-                .param("id", p.id()).update();
+        try {
+            jdbc.sql("""
+                            update payment set status = :status, gateway_session_id = :session, gateway_txn_id = :txn,
+                                confirmed_at = :confirmedAt, exception_reason = :exception, last_inquiry_at = :inquiry
+                            where id = :id""")
+                    .param("status", p.status().name()).param("session", p.gatewaySessionId())
+                    .param("txn", p.gatewayTxnId()).param("confirmedAt", ts(p.confirmedAt()))
+                    .param("exception", p.exceptionReason()).param("inquiry", ts(p.lastInquiryAt()))
+                    .param("id", p.id()).update();
+        } catch (DuplicateKeyException e) {
+            // uq_payment_txn: the gateway transaction id or counter reference is already on another payment (Q-073).
+            throw DomainException.conflict("TRANSACTION_REFERENCE_USED",
+                    "the reference is already recorded on another payment", List.of("FN-001", "FN-004"));
+        }
     }
 
     @Override

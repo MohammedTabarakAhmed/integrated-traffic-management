@@ -19,6 +19,10 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 set -a; source infra/local/.env; set +a
 PY=${PYTHON:-python3}; command -v "$PY" >/dev/null || PY=python
+# Same value as for up.sh. The light profile (ADR-057) has no Tempo, Loki or Grafana and a clamd stand-in.
+LOCAL_PROFILE=${ITMS_LOCAL_PROFILE:-full}
+COMPOSE_FILES=(-f infra/local/compose.yaml)
+[[ "$LOCAL_PROFILE" == lite ]] && COMPOSE_FILES+=(-f infra/local/compose.lite.yaml)
 API=http://localhost:8081
 TOKEN_URL=http://localhost:8180/realms/itms/protocol/openid-connect/token
 
@@ -320,8 +324,12 @@ grafana() { # data-source-uid/path [curl options...]: a data source's API throug
 }
 up=$(curl -sf --get "http://localhost:9090/api/v1/query" --data-urlencode 'query=up{job="itms-services"}' \
   | "$PY" -c "import json,sys; r=json.load(sys.stdin)['data']['result']; print(sorted(x['metric']['instance'].split(':')[0] for x in r if x['value'][1]=='1'))")
-[[ "$up" == "['hold-eligibility-service', 'iam-service', 'reference-data-service', 'transaction-service']" ]] \
-  || { echo "FAIL: Prometheus should scrape all four services, up: $up"; exit 1; }
+expected_up=$(sed -n '/job_name: itms-services/,/job_name:/s/^ *- \([a-z-]*\):8090$/\1/p' infra/local/observability/prometheus.yaml \
+  | "$PY" -c "import sys; print(sorted(l.strip() for l in sys.stdin if l.strip()))")
+[[ "$up" == "$expected_up" ]] || { echo "FAIL: Prometheus should scrape every service $expected_up, up: $up"; exit 1; }
+if [[ "$LOCAL_PROFILE" == lite ]]; then
+  echo "   every service scraped; traces and logs SKIPPED (the light profile has no Tempo or Loki, ADR-057)"
+else
 trace_id=$("$PY" -c "import secrets; print(secrets.token_hex(16))")
 res=$(post_txn "$CHECKER" /v1/transactions "{\"serviceCode\":\"$SVC\",\"subject\":{\"type\":\"VEHICLE\",\"id\":\"SMKOBS-$(date +%s)\"},\"applicantFileNumber\":\"TF-SMOKE-OBS\",\"homeRegion\":\"R1\"}")
 [[ "$(status_of "$res")" == 201 ]] || { echo "FAIL: opening returned $(status_of "$res"): $(body_of "$res")"; exit 1; }
@@ -350,23 +358,25 @@ for svc in iam-service reference-data-service transaction-service hold-eligibili
   [[ "$logged" == *"'$svc'"* ]] || { echo "FAIL: no logs from $svc in Loki: $logged"; exit 1; }
 done
 echo "   trace $trace_id: $services; logs from $logged"
+fi
 
 echo "20. Secrets (SEC-004): no service or database container has a password or secret in its environment"
 for c in iam-service reference-data-service transaction-service hold-eligibility-service postgres iam-postgres \
          transaction-postgres hold-postgres grafana bao-agent; do
-  id=$(docker compose -f infra/local/compose.yaml --env-file infra/local/.env ps -q "$c")
+  [[ "$c" == grafana && "$LOCAL_PROFILE" == lite ]] && continue # not started in the light profile
+  id=$(docker compose "${COMPOSE_FILES[@]}" --env-file infra/local/.env ps -q "$c")
   leaked=$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$id" \
     | grep -iE '^[^=]*(PASSWORD|SECRET)[^=]*=' | grep -vE '^[^=]*_FILE=' | cut -d= -f1 || true)
   [[ -z "$leaked" ]] || { echo "FAIL: $c has secrets in its environment: $leaked"; exit 1; }
 done
 # The client secret is a compose secret; the database login comes from OpenBao (spring/datasource/, ADR-039).
-MSYS_NO_PATHCONV=1 docker compose -f infra/local/compose.yaml --env-file infra/local/.env exec -T transaction-service \
+MSYS_NO_PATHCONV=1 docker compose "${COMPOSE_FILES[@]}" --env-file infra/local/.env exec -T transaction-service \
   sh -c 'test -s /run/secrets/itms.clients.eligibility.client-secret && test -s /run/secrets/spring/datasource/username \
          && test -s /run/secrets/spring/datasource/password' || { echo "FAIL: transaction-service secret files missing"; exit 1; }
-echo "   10 containers checked; services read their secrets from /run/secrets"
+echo "   containers checked; services read their secrets from /run/secrets"
 
 echo "21. Rotated database logins (SEC-004, ADR-039): short-lived, not superuser; a new login is used without a restart"
-DC=(docker compose -f infra/local/compose.yaml --env-file infra/local/.env)
+DC=(docker compose "${COMPOSE_FILES[@]}" --env-file infra/local/.env)
 iam_sql() { "${DC[@]}" exec -T iam-postgres psql -qtA -U "$IAM_DB_USER" -d iam -c "$1"; }
 service_logins() { iam_sql "select string_agg(distinct usename, ',') from pg_stat_activity where usename like 'v-%'"; }
 svc_users=$(iam_sql "select count(*) from pg_stat_activity where usename = '$IAM_DB_USER' and backend_type = 'client backend' and pid <> pg_backend_pid() and application_name <> 'vault'") # OpenBao's own admin session is expected
@@ -401,7 +411,7 @@ status=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer not-a-
 [[ "$status" == 401 ]] || { echo "FAIL: gateway with a forged token returned $status, expected 401"; exit 1; }
 # Routed to the owning service: the administrator may read roles; for the other services the service itself answers
 # (200, or 403 from its own authorisation), never the gateway's 404.
-for path in /v1/roles /v1/me/assignments /v1/reference-lists /v1/services /v1/holds; do
+for path in /v1/roles /v1/me/assignments /v1/reference-lists /v1/services "/v1/holds?subjectType=VEHICLE&subjectId=SMKGW1"; do
   status=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $GW_TOKEN" "$GW$path")
   [[ "$status" == 200 || ( "$status" == 403 && "$path" != /v1/roles && "$path" != /v1/me/* ) ]] \
     || { echo "FAIL: gateway $path returned $status"; exit 1; }
@@ -711,10 +721,11 @@ basket_of() { # payable ids as a JSON list -> basket id
   post_to "$PAY" "$S_MAKER" /v1/baskets "{\"payableIds\":$1}" PORTAL | body_of_pipe | json_field "['id']"
 }
 payable=$(pay_general "SMK-PAY-$SMK" 1500)
-res=$(post_to "$PAY" "$S_MAKER" "/v1/baskets/$(basket_of "[\"$payable\"]")/payments" '{"method":"CASH","counterReference":"TILL-SMK"}')
+res=$(post_to "$PAY" "$S_MAKER" "/v1/baskets/$(basket_of "[\"$payable\"]")/payments" "{\"method\":\"CASH\",\"counterReference\":\"TILL-SMK-$SMK\"}")
 expect "$res" 201
 receipt=$(body_of "$res" | json_field "['receipt']['number']")
 [[ "$receipt" =~ ^R-DXB-BACKOFFICE-[0-9]{4}-[0-9]{8}$ ]] || { echo "FAIL: receipt number $receipt"; exit 1; }
+expect "$(post_to "$PAY" "$S_MAKER" "/v1/baskets/$(basket_of "[\"$(pay_general "SMK-PAY2-$SMK" 700)\"]")/payments" "{\"method\":\"CASH\",\"counterReference\":\"TILL-SMK-$SMK\"}")" 409 TRANSACTION_REFERENCE_USED
 expect "$(post_to "$PAY" "$S_MAKER" "/v1/receipts/$receipt/cancellations" '{"reason":"smoke test"}')" 403
 res=$(post_to "$PAY" "$S_CHECKER" "/v1/receipts/$receipt/cancellations" '{"reason":"smoke test cancellation"}')
 [[ "$(body_of "$res" | json_field "['status']")" == CANCELLED ]] || { echo "FAIL: cancellation $(body_of "$res")"; exit 1; }
@@ -725,8 +736,8 @@ expect "$res" 201
 gpayment=$(body_of "$res" | json_field "['payment']['id']")
 first=$(body_of "$(callback "$gpayment" "gw-smk-$SMK" 2500)" | json_field "['receiptNumber']")
 [[ -n "$first" && "$first" != None ]] || { echo "FAIL: the gateway callback gave no receipt"; exit 1; }
-expect "$(post_to "$PAY" "$S_MAKER" "/v1/payments/$gpayment/callbacks" "{\"gatewayTxnId\":\"x\",\"merchantRef\":\"$gpayment\",\"status\":\"SUCCESS\",\"amountMinor\":2500,\"currency\":\"XTS\",\"signature\":\"$(printf '0%.0s' $(seq 1 64))\"}" PARTNER)" 403 SIGNATURE_INVALID
-echo "   receipt $receipt cancelled by the supervisor (payable open again); gateway payment confirmed by a signed callback, receipt $first; forged signature 403"
+expect "$(post_to "$PAY" "$S_MAKER" "/v1/payments/$gpayment/callbacks" "{\"gatewayTxnId\":\"x\",\"merchantRef\":\"$gpayment\",\"status\":\"SUCCESS\",\"amountMinor\":2500,\"currency\":\"XTS\",\"signature\":\"$(printf '0%.0s' $(seq 1 64))\"}" PARTNER)" 401 SIGNATURE_INVALID
+echo "   receipt $receipt cancelled by the supervisor (payable open again); gateway payment confirmed by a signed callback, receipt $first; forged signature 401"
 
 echo "36. Vehicles (VL-010, VL-024, VL-032; UAT-3 rule): insurance stops registration before payment; a paid registration assigns a plate"
 # The insurer mock has no "expired yesterday" policy and an expired VIN cannot be registered first, so the smoke shows
@@ -762,7 +773,7 @@ expect "$res" 201
 item_ref="VR-$(body_of "$res" | json_field "['id']" | tr '[:lower:]' '[:upper:]')"
 reg_payable=$(pay_sql "select id from payable where item_ref = '$item_ref'")
 [[ -n "$reg_payable" ]] || { echo "FAIL: no payable $item_ref at payment-service"; exit 1; }
-expect "$(post_to "$PAY" "$S_MAKER" "/v1/baskets/$(basket_of "[\"$reg_payable\"]")/payments" '{"method":"CASH","counterReference":"TILL-VEH"}')" 201
+expect "$(post_to "$PAY" "$S_MAKER" "/v1/baskets/$(basket_of "[\"$reg_payable\"]")/payments" "{\"method\":\"CASH\",\"counterReference\":\"TILL-VEH-$SMK\"}")" 201
 registered() { [[ "$(get_from "$VEH" "$S_MAKER" "/v1/vehicles/$vin" | json_field "['status']")" == REGISTERED ]]; }
 wait_until 60 registered || { echo "FAIL: vehicle $vin not registered after its payment"; exit 1; }
 plate=$(get_from "$VEH" "$S_MAKER" "/v1/vehicles/$vin" | json_field "['plateNumber']")

@@ -366,4 +366,22 @@ class PaymentApiIT {
         assertThat(db.sql("select count(*) from event_outbox where event_type = 'itms.payment.receipt-cancelled' "
                 + "and subject = :n").param("n", number).query(Long.class).single()).isEqualTo(1);
     }
+
+    @Test
+    @Tag("FN-001")
+    @DisplayName("FN-001: a counter reference already on another payment is refused with 409, nothing is paid")
+    void counterReferenceReused() throws Exception {
+        String region = newRegion();
+        String reference = "TILL-R" + REGIONS.get();
+        String first = basket(List.of(payable(region, "VF-R1-" + REGIONS.get(), 400)), cashier());
+        assertThat(postAs("/v1/baskets/" + first + "/payments", Map.of("method", "CASH",
+                "counterReference", reference), cashier()).getResponse().getStatus()).isEqualTo(201);
+        String fine = payable(region, "VF-R2-" + REGIONS.get(), 500);
+        String second = basket(List.of(fine), cashier());
+        MvcResult reused = postAs("/v1/baskets/" + second + "/payments", Map.of("method", "CASH",
+                "counterReference", reference), cashier());
+        assertThat(reused.getResponse().getStatus()).isEqualTo(409);
+        assertThat(code(reused)).isEqualTo("TRANSACTION_REFERENCE_USED");
+        assertThat(body(getAs("/v1/payables/" + fine, registrar())).get("status").asString()).isEqualTo("OPEN");
+    }
 }

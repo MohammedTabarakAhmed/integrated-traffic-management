@@ -1,0 +1,20 @@
+# OpenTelemetry Collector, light local profile (infra/local/compose.lite.yaml, ADR-057).
+# Same receiver as otel-collector.yaml, so services are configured identically; Tempo and Loki are not started in
+# this profile, so traces and logs are accepted and dropped. Metrics still go to Prometheus (it scrapes services).
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+exporters:
+  nop: {}
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [nop]
+    logs:
+      receivers: [otlp]
+      exporters: [nop]

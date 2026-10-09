@@ -168,7 +168,8 @@ paths:
         Online: 201 with `redirectUrl` to the gateway's page; the payment stays PENDING until the callback. Counter
         (`payment.collect` in the basket's region): 201 with the receipt. Refused when the method is not accepted (422
         `METHOD_NOT_ACCEPTED`), a payment is already in progress (409 `PAYMENT_IN_PROGRESS`), the basket or an item is
-        already paid (409), or the gateway is down (503 `GATEWAY_UNAVAILABLE`).
+        already paid (409), the counter reference is already on another payment (409 `TRANSACTION_REFERENCE_USED`),
+        or the gateway is down (503 `GATEWAY_UNAVAILABLE`).
       x-itms-permission: payment.collect
       x-itms-scope: [own, region]
       parameters:

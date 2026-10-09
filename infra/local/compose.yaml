@@ -6,6 +6,9 @@ name: itms
 # Observability settings shared by every ITMS service (NFR-040, ADR-037): traces and logs to the collector, every
 # trace sampled locally; probes and metrics on the management port 8090 (not published; Prometheus scrapes it).
 # Event relay settings shared by every ITMS service (INT-005, ADR-040): outbox rows go to the local broker.
+# Each ITMS service container is capped (ITMS_SERVICE_MEM_LIMIT, default 512m). The images start the JVM with
+# MaxRAMPercentage=75, so without a cap every JVM could size its heap from the whole Docker VM and 15 of them
+# exhaust a developer machine.
 x-itms-events: &itms-events
   ITMS_EVENTS_ENABLED: "true"
   ITMS_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
@@ -278,6 +281,7 @@ services:
 
   iam-service:
     build: ../../services/iam-service
+    mem_limit: ${ITMS_SERVICE_MEM_LIMIT:-512m}
     environment:
       <<: [*itms-observability, *itms-events]
       IAM_DB_URL: jdbc:postgresql://iam-postgres:5432/iam
@@ -316,6 +320,7 @@ services:
 
   reference-data-service:
     build: ../../services/reference-data-service
+    mem_limit: ${ITMS_SERVICE_MEM_LIMIT:-512m}
     environment:
       <<: [*itms-observability, *itms-events]
       REFDATA_DB_URL: jdbc:postgresql://postgres:5432/refdata
@@ -355,6 +360,7 @@ services:
 
   transaction-service:
     build: ../../services/transaction-service
+    mem_limit: ${ITMS_SERVICE_MEM_LIMIT:-512m}
     environment:
       <<: [*itms-observability, *itms-events]
       TXN_DB_URL: jdbc:postgresql://transaction-postgres:5432/transaction
@@ -402,6 +408,7 @@ services:
 
   hold-eligibility-service:
     build: ../../services/hold-eligibility-service
+    mem_limit: ${ITMS_SERVICE_MEM_LIMIT:-512m}
     environment:
       <<: [*itms-observability, *itms-events]
       HOLD_DB_URL: jdbc:postgresql://hold-postgres:5432/hold
@@ -441,6 +448,7 @@ services:
 
   traffic-file-service:
     build: ../../services/traffic-file-service
+    mem_limit: ${ITMS_SERVICE_MEM_LIMIT:-512m}
     environment:
       <<: [*itms-observability, *itms-events]
       TRAFFIC_FILE_DB_URL: jdbc:postgresql://traffic-file-postgres:5432/trafficfile
@@ -489,6 +497,7 @@ services:
 
   fees-service:
     build: ../../services/fees-service
+    mem_limit: ${ITMS_SERVICE_MEM_LIMIT:-512m}
     environment:
       <<: [*itms-observability, *itms-events]
       FEES_DB_URL: jdbc:postgresql://fees-postgres:5432/fees
@@ -528,6 +537,7 @@ services:
 
   rules-service:
     build: ../../services/rules-service
+    mem_limit: ${ITMS_SERVICE_MEM_LIMIT:-512m}
     environment:
       <<: [*itms-observability, *itms-events]
       RULES_DB_URL: jdbc:postgresql://rules-postgres:5432/rules
@@ -567,6 +577,7 @@ services:
 
   workflow-service:
     build: ../../services/workflow-service
+    mem_limit: ${ITMS_SERVICE_MEM_LIMIT:-512m}
     environment:
       <<: [*itms-observability, *itms-events]
       WORKFLOW_DB_URL: jdbc:postgresql://workflow-postgres:5432/workflow
@@ -606,6 +617,7 @@ services:
 
   notification-service:
     build: ../../services/notification-service
+    mem_limit: ${ITMS_SERVICE_MEM_LIMIT:-512m}
     environment:
       <<: [*itms-observability, *itms-events]
       NOTIF_DB_URL: jdbc:postgresql://notification-postgres:5432/notification
@@ -651,6 +663,7 @@ services:
 
   document-service:
     build: ../../services/document-service
+    mem_limit: ${ITMS_SERVICE_MEM_LIMIT:-512m}
     environment:
       <<: [*itms-observability, *itms-events]
       DOC_DB_URL: jdbc:postgresql://document-postgres:5432/document
@@ -745,6 +758,7 @@ services:
 
   appointment-service:
     build: ../../services/appointment-service
+    mem_limit: ${ITMS_SERVICE_MEM_LIMIT:-512m}
     environment:
       <<: [*itms-observability, *itms-events]
       APPT_DB_URL: jdbc:postgresql://appointment-postgres:5432/appointment
@@ -784,6 +798,7 @@ services:
 
   audit-service:
     build: ../../services/audit-service
+    mem_limit: ${ITMS_SERVICE_MEM_LIMIT:-512m}
     environment:
       <<: [*itms-observability, *itms-events]
       AUDIT_DB_URL: jdbc:postgresql://audit-postgres:5432/audit
@@ -825,6 +840,7 @@ services:
 
   payment-service:
     build: ../../services/payment-service
+    mem_limit: ${ITMS_SERVICE_MEM_LIMIT:-512m}
     environment:
       <<: [*itms-observability, *itms-events]
       PAY_DB_URL: jdbc:postgresql://payment-postgres:5432/payment
@@ -870,6 +886,7 @@ services:
 
   vehicle-service:
     build: ../../services/vehicle-service
+    mem_limit: ${ITMS_SERVICE_MEM_LIMIT:-512m}
     environment:
       <<: [*itms-observability, *itms-events]
       VEH_DB_URL: jdbc:postgresql://vehicle-postgres:5432/vehicle
@@ -922,6 +939,7 @@ services:
 
   violation-service:
     build: ../../services/violation-service
+    mem_limit: ${ITMS_SERVICE_MEM_LIMIT:-512m}
     environment:
       <<: [*itms-observability, *itms-events]
       VIO_DB_URL: jdbc:postgresql://violation-postgres:5432/violation

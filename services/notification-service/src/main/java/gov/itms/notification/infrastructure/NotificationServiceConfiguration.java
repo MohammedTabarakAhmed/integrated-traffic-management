@@ -31,7 +31,10 @@ public class NotificationServiceConfiguration {
     ChannelGateway channelGateway(RestClient.Builder builder, NotificationProperties properties) {
         Map<DeliveryChannel, RestClient> clients = new EnumMap<>(DeliveryChannel.class);
         properties.gateways().forEach((channel, url) -> {
-            HttpClient http = HttpClient.newBuilder().connectTimeout(properties.gatewayTimeout()).build();
+            // HTTP/1.1: over plain HTTP the JDK client's default h2c upgrade on a POST with a streamed body gets no
+            // usable answer from some gateways (the local WireMock mock never completes it); TLS gateways are unaffected.
+            HttpClient http = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1)
+                    .connectTimeout(properties.gatewayTimeout()).build();
             JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(http);
             factory.setReadTimeout(properties.gatewayTimeout());
             clients.put(DeliveryChannel.valueOf(channel),

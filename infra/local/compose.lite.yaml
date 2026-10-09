@@ -1,0 +1,91 @@
+# Light local profile (ADR-057): an override of compose.yaml for developer machines with 16 GB that cannot hold the
+# full stack. Start with: ITMS_LOCAL_PROFILE=lite tools/dev/up.sh   (smoke.sh reads the same variable)
+# NOT a production topology, and not the Increment acceptance environment: Gate E/F evidence comes from the full
+# profile. Every service, database, login, gateway route, broker and partner mock is the same as in the full stack.
+# What differs:
+#   - Tempo, Loki and Grafana are not started; the collector accepts traces and logs and drops them. Prometheus
+#     still scrapes every service (NFR-040 metrics); smoke step 19 checks only metrics in this profile.
+#   - ClamAV is replaced by a clamd stand-in that answers PING and INSTREAM and flags only the EICAR test file
+#     (CC-081 is not evidenced by this profile).
+#   - JVMs (services, Keycloak, Kafka, WireMock) get small heaps; ITMS_LITE_SERVICE_HEAP sets the services' heap.
+
+x-lite-service-jvm: &lite-service-jvm
+  JAVA_TOOL_OPTIONS: -Xmx${ITMS_LITE_SERVICE_HEAP:-192m} -Xss512k -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -XX:ReservedCodeCacheSize=48m
+
+x-lite-mock-jvm: &lite-mock-jvm
+  JAVA_OPTS: -Xmx64m -Xss512k -XX:+UseSerialGC -XX:TieredStopAtLevel=1
+
+services:
+  tempo:
+    profiles: [full-observability]
+  loki:
+    profiles: [full-observability]
+  grafana:
+    profiles: [full-observability]
+
+  otel-collector:
+    volumes: !override
+      - ./observability/otel-collector.lite.yaml:/etc/otelcol/config.yaml:ro
+    depends_on: !reset []
+
+  clamav:
+    image: python:3.13-alpine
+    command: ["python", "-u", "/opt/clamd_stub.py"]
+    volumes: !override
+      - ./mocks/malware-scanner/clamd_stub.py:/opt/clamd_stub.py:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.create_connection(('127.0.0.1',3310),2); s.sendall(b'zPING\\0'); assert s.recv(16).startswith(b'PONG')"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 0s
+
+  keycloak:
+    environment:
+      JAVA_OPTS_KC_HEAP: -Xms64m -Xmx384m
+
+  kafka:
+    environment:
+      KAFKA_HEAP_OPTS: -Xms128m -Xmx256m
+
+  identity-register-mock:
+    environment: *lite-mock-jvm
+  licensing-authority-mock:
+    environment: *lite-mock-jvm
+  payment-gateway-mock:
+    environment: *lite-mock-jvm
+  insurance-hub-mock:
+    environment: *lite-mock-jvm
+  messaging-gateway-mock:
+    environment: *lite-mock-jvm
+
+  iam-service:
+    environment: *lite-service-jvm
+  reference-data-service:
+    environment: *lite-service-jvm
+  transaction-service:
+    environment: *lite-service-jvm
+  hold-eligibility-service:
+    environment: *lite-service-jvm
+  traffic-file-service:
+    environment: *lite-service-jvm
+  fees-service:
+    environment: *lite-service-jvm
+  rules-service:
+    environment: *lite-service-jvm
+  workflow-service:
+    environment: *lite-service-jvm
+  notification-service:
+    environment: *lite-service-jvm
+  document-service:
+    environment: *lite-service-jvm
+  appointment-service:
+    environment: *lite-service-jvm
+  audit-service:
+    environment: *lite-service-jvm
+  payment-service:
+    environment: *lite-service-jvm
+  vehicle-service:
+    environment: *lite-service-jvm
+  violation-service:
+    environment: *lite-service-jvm

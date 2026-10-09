@@ -35,7 +35,8 @@ class NameSimilarityTest {
         PersonName a = new PersonName("أحمد", "المنصوري", "Ahmed", "Al-Mansoori");
         PersonName b = new PersonName(null, null, "Ahmad", "Al Mansouri");
         PersonName c = new PersonName("أحمد", "المنصوري", null, null);
-        assertThat(NameSimilarity.of(a, b)).isGreaterThan(0.9);
+        assertThat(NameSimilarity.of(a, b)).as("flagged at the default threshold 0.88 (application.yml)")
+                .isGreaterThanOrEqualTo(0.88);
         assertThat(NameSimilarity.of(a, c)).isEqualTo(1.0);
         assertThat(NameSimilarity.of(b, c)).isZero();
         assertThat(NameSimilarity.of(a, new PersonName(null, null, "Maria", "Santos"))).isLessThan(0.7);

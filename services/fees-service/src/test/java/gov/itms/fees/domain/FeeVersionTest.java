@@ -45,7 +45,7 @@ class FeeVersionTest {
                 .hasFieldOrPropertyWithValue("code", "SAME_MAKER_CHECKER");
         assertThatThrownBy(() -> v.approve(CHECKER, Channel.BACKOFFICE, null, NOW, TODAY.plusDays(1)))
                 .as("its start date has passed").hasFieldOrPropertyWithValue("code", "FEE_START_IN_PAST");
-        v.approve(CHECKER, Channel.BACKOFFICE, "ok", NOW, TODAY);
+        v.approve(CHECKER, Channel.BACKOFFICE, "checked", NOW, TODAY);
         assertThat(v.inForce(TODAY)).isTrue();
         assertThatThrownBy(() -> v.reject(CHECKER, Channel.BACKOFFICE, "late", NOW))
                 .hasFieldOrPropertyWithValue("code", "FEE_VERSION_DECIDED");

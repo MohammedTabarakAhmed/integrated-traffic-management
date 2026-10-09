@@ -131,7 +131,7 @@ class FeesApiIT {
     }
 
     private MvcResult postAs(String path, Object body, RequestPostProcessor who) throws Exception {
-        boolean idempotent = path.startsWith("/v1/fee-versions");
+        boolean idempotent = path.startsWith("/v1/fee-versions") || path.startsWith("/v1/fee-adjustments");
         return call(post(path), Request.Method.POST, path, body, who, idempotent ? "it-" + UUID.randomUUID() : null);
     }
 

@@ -183,17 +183,18 @@ class RuleServiceTest {
     void successorAndOverlap() {
         RuleVersion first = approved(null, 18, TODAY);
         approved(null, 17, TODAY.plusDays(30));
-        assertThat(first.effectiveTo()).isEqualTo(TODAY.plusDays(29));
+        assertThat(rules.stored.get(first.id()).effectiveTo()).isEqualTo(TODAY.plusDays(29));
         assertThat(audit).contains("RULE_VERSION_ENDED " + first.id());
         assertThat(events).contains("itms.rule.version-approved " + RULE_SET);
 
+        // A regional version never overlaps the national ones.
+        approved("NORTH", 21, TODAY.plusDays(10));
+        assertThat(rules.stored.get(first.id()).effectiveTo()).isEqualTo(TODAY.plusDays(29));
+
+        // Last: a refused approval rolls back in the database, which this in-memory store does not.
         RuleVersion earlier = service.submit(spec(null, 16, TODAY.plusDays(10)), "earlier change", MAKER);
         assertThatThrownBy(() -> service.approve(earlier.id(), null, CHECKER))
                 .isInstanceOf(DomainException.class).extracting("code").isEqualTo("RULE_VERSION_OVERLAP");
-
-        // A regional version never overlaps the national ones.
-        approved("NORTH", 21, TODAY.plusDays(10));
-        assertThat(first.effectiveTo()).isEqualTo(TODAY.plusDays(29));
     }
 
     @Test
@@ -246,7 +247,9 @@ class RuleServiceTest {
 
     /** In-memory repository; versions are kept as the same mutable objects the service changes. */
     private static final class Rules implements RuleRepository {
+        /** What the service last handed in (its objects) and what is stored (copies, as rows). */
         final Map<UUID, RuleVersion> versions = new LinkedHashMap<>();
+        final Map<UUID, RuleVersion> stored = new LinkedHashMap<>();
         final Map<UUID, DecisionRecord> decisions = new LinkedHashMap<>();
 
         @Override
@@ -261,12 +264,12 @@ class RuleServiceTest {
 
         @Override
         public void insert(RuleVersion version) {
-            versions.put(version.id(), version);
+            store(version);
         }
 
         @Override
         public Optional<RuleVersion> find(UUID id) {
-            return Optional.ofNullable(versions.get(id));
+            return Optional.ofNullable(stored.get(id)).map(Rules::copy);
         }
 
         @Override
@@ -276,16 +279,28 @@ class RuleServiceTest {
 
         @Override
         public List<RuleVersion> byRuleSet(String ruleSetCode) {
-            return versions.values().stream().filter(v -> v.spec().ruleSetCode().equals(ruleSetCode))
-                    .sorted(Comparator.comparingInt(RuleVersion::versionNo)).toList();
+            return stored.values().stream().filter(v -> v.spec().ruleSetCode().equals(ruleSetCode))
+                    .sorted(Comparator.comparingInt(RuleVersion::versionNo)).map(Rules::copy).toList();
+        }
+
+        private static RuleVersion copy(RuleVersion v) {
+            return RuleVersion.restore(v.id(), v.versionNo(), v.spec(), v.submitted(), v.status(), v.decided(),
+                    v.effectiveTo());
+        }
+
+        private void store(RuleVersion v) {
+            stored.put(v.id(), copy(v));
+            versions.put(v.id(), v);
         }
 
         @Override
         public void saveDecision(RuleVersion version) {
+            store(version);
         }
 
         @Override
         public void saveEnd(RuleVersion version) {
+            store(version);
         }
 
         @Override

@@ -118,7 +118,7 @@ class ViolationServiceTest {
     }
 
     private Violation record(String code, String region, String driver) {
-        return service.record(new Violation.Report(code, NOW.minus(Duration.ofHours(1)), region, "Main road",
+        return service.record(new Violation.Report(code, clock.instant().minus(Duration.ofHours(1)), region, "Main road",
                 "A 1", null, "TF-OWNER", driver, null, null, Violation.Source.OFFICER, null, List.of()), OFFICER);
     }
 

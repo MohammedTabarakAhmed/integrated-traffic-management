@@ -45,26 +45,26 @@ public class WorkflowDefinitionTest {
     @DisplayName("CC-060: duplicate steps, an unknown first step, unknown targets and no end are refused")
     void inconsistent() {
         Map<String, String> toEnd = Map.of("DONE", WorkflowDefinition.END);
-        WorkflowDefinition.Step a = step("A", "CASE_OFFICER", WorkflowDefinition.Assignment.MANUAL,
+        WorkflowDefinition.Step a = step("STEP_A", "CASE_OFFICER", WorkflowDefinition.Assignment.MANUAL,
                 Duration.ofHours(1), toEnd);
-        assertThatThrownBy(() -> new WorkflowDefinition("WF", 1, "SVC", "x", "x", "A", List.of(a, a), ADMIN, NOW,
+        assertThatThrownBy(() -> new WorkflowDefinition("WF", 1, "SVC", "x", "x", "STEP_A", List.of(a, a), ADMIN, NOW,
                 "r")).isInstanceOf(DomainException.class).extracting("code").isEqualTo("WORKFLOW_INVALID");
-        assertThatThrownBy(() -> new WorkflowDefinition("WF", 1, "SVC", "x", "x", "B", List.of(a), ADMIN, NOW, "r"))
+        assertThatThrownBy(() -> new WorkflowDefinition("WF", 1, "SVC", "x", "x", "STEP_B", List.of(a), ADMIN, NOW, "r"))
                 .isInstanceOf(DomainException.class).extracting("code").isEqualTo("WORKFLOW_INVALID");
-        WorkflowDefinition.Step dangling = step("A", "CASE_OFFICER", WorkflowDefinition.Assignment.MANUAL,
+        WorkflowDefinition.Step dangling = step("STEP_A", "CASE_OFFICER", WorkflowDefinition.Assignment.MANUAL,
                 Duration.ofHours(1), Map.of("DONE", "NOWHERE"));
-        assertThatThrownBy(() -> new WorkflowDefinition("WF", 1, "SVC", "x", "x", "A", List.of(dangling), ADMIN,
+        assertThatThrownBy(() -> new WorkflowDefinition("WF", 1, "SVC", "x", "x", "STEP_A", List.of(dangling), ADMIN,
                 NOW, "r")).isInstanceOf(DomainException.class).extracting("code").isEqualTo("WORKFLOW_INVALID");
-        WorkflowDefinition.Step loop = step("A", "CASE_OFFICER", WorkflowDefinition.Assignment.MANUAL,
-                Duration.ofHours(1), Map.of("AGAIN", "A"));
-        assertThatThrownBy(() -> new WorkflowDefinition("WF", 1, "SVC", "x", "x", "A", List.of(loop), ADMIN, NOW,
+        WorkflowDefinition.Step loop = step("STEP_A", "CASE_OFFICER", WorkflowDefinition.Assignment.MANUAL,
+                Duration.ofHours(1), Map.of("AGAIN", "STEP_A"));
+        assertThatThrownBy(() -> new WorkflowDefinition("WF", 1, "SVC", "x", "x", "STEP_A", List.of(loop), ADMIN, NOW,
                 "r")).isInstanceOf(DomainException.class).extracting("code").isEqualTo("WORKFLOW_INVALID");
         assertThatThrownBy(() -> step("END", "CASE_OFFICER", WorkflowDefinition.Assignment.MANUAL,
                 Duration.ofHours(1), toEnd)).isInstanceOf(DomainException.class).extracting("code")
                 .isEqualTo("FIELD_INVALID");
-        assertThatThrownBy(() -> step("A", "officer", WorkflowDefinition.Assignment.MANUAL, Duration.ofHours(1),
+        assertThatThrownBy(() -> step("STEP_A", "officer", WorkflowDefinition.Assignment.MANUAL, Duration.ofHours(1),
                 toEnd)).isInstanceOf(DomainException.class).extracting("code").isEqualTo("FIELD_INVALID");
-        assertThatThrownBy(() -> step("A", "CASE_OFFICER", WorkflowDefinition.Assignment.MANUAL, Duration.ofHours(1),
+        assertThatThrownBy(() -> step("STEP_A", "CASE_OFFICER", WorkflowDefinition.Assignment.MANUAL, Duration.ofHours(1),
                 Map.of())).isInstanceOf(DomainException.class).extracting("code").isEqualTo("FIELD_INVALID");
     }
 
@@ -73,17 +73,17 @@ public class WorkflowDefinitionTest {
     @DisplayName("CC-062: a step SLA is 15 minutes to 365 days")
     void slaRange() {
         Map<String, String> toEnd = Map.of("DONE", WorkflowDefinition.END);
-        assertThat(step("A", "CASE_OFFICER", WorkflowDefinition.Assignment.MANUAL, Duration.ofMinutes(15), toEnd)
+        assertThat(step("STEP_A", "CASE_OFFICER", WorkflowDefinition.Assignment.MANUAL, Duration.ofMinutes(15), toEnd)
                 .sla()).isEqualTo(Duration.ofMinutes(15));
-        assertThat(step("A", "CASE_OFFICER", WorkflowDefinition.Assignment.MANUAL, Duration.ofDays(365), toEnd)
+        assertThat(step("STEP_A", "CASE_OFFICER", WorkflowDefinition.Assignment.MANUAL, Duration.ofDays(365), toEnd)
                 .sla()).isEqualTo(Duration.ofDays(365));
-        assertThatThrownBy(() -> step("A", "CASE_OFFICER", WorkflowDefinition.Assignment.MANUAL,
+        assertThatThrownBy(() -> step("STEP_A", "CASE_OFFICER", WorkflowDefinition.Assignment.MANUAL,
                 Duration.ofMinutes(14), toEnd)).isInstanceOf(DomainException.class).extracting("code")
                 .isEqualTo("SLA_INVALID");
-        assertThatThrownBy(() -> step("A", "CASE_OFFICER", WorkflowDefinition.Assignment.MANUAL,
+        assertThatThrownBy(() -> step("STEP_A", "CASE_OFFICER", WorkflowDefinition.Assignment.MANUAL,
                 Duration.ofDays(366), toEnd)).isInstanceOf(DomainException.class).extracting("code")
                 .isEqualTo("SLA_INVALID");
-        assertThatThrownBy(() -> step("A", "CASE_OFFICER", WorkflowDefinition.Assignment.MANUAL, null, toEnd))
+        assertThatThrownBy(() -> step("STEP_A", "CASE_OFFICER", WorkflowDefinition.Assignment.MANUAL, null, toEnd))
                 .isInstanceOf(DomainException.class).extracting("code").isEqualTo("SLA_INVALID");
     }
 }

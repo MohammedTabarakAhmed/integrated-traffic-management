@@ -82,7 +82,9 @@ class DocumentApiIT {
     static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:17-alpine");
 
     @Container
-    static final GenericContainer<?> MINIO = new GenericContainer<>("minio/minio:RELEASE.2025-09-07T16-13-09Z")
+    static final GenericContainer<?> MINIO = new GenericContainer<>(
+            // the image of the local stack (infra/local/compose.yaml): MinIO publishes no community images any more
+            "chainguard/minio@sha256:e7ca559d9f7c0b5f24f5f669bb92f40f3ca88d56273b808bf3a7c116c17d2ffa")
             .withCommand("server", "/data")
             .withEnv("MINIO_ROOT_USER", MINIO_USER)
             .withEnv("MINIO_ROOT_PASSWORD", MINIO_PASSWORD)

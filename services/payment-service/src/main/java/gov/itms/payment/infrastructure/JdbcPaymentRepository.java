@@ -174,7 +174,8 @@ class JdbcPaymentRepository implements Ports.PaymentRepository {
                     .param("exception", p.exceptionReason()).param("inquiry", ts(p.lastInquiryAt()))
                     .param("id", p.id()).update();
         } catch (DuplicateKeyException e) {
-            // uq_payment_txn: the gateway transaction id or counter reference is already on another payment (Q-073).
+            // uq_payment_txn: the gateway transaction id is already on another payment; uq_payment_counter_ref: the
+            // counter reference is already used in this region for this method (Q-073).
             throw DomainException.conflict("TRANSACTION_REFERENCE_USED",
                     "the reference is already recorded on another payment", List.of("FN-001", "FN-004"));
         }

@@ -369,19 +369,29 @@ class PaymentApiIT {
 
     @Test
     @Tag("FN-001")
-    @DisplayName("FN-001: a counter reference already on another payment is refused with 409, nothing is paid")
+    @DisplayName("FN-001, Q-073: a counter reference is unique per region and method; a repeat there is refused with "
+            + "409 and nothing is paid")
     void counterReferenceReused() throws Exception {
         String region = newRegion();
         String reference = "TILL-R" + REGIONS.get();
-        String first = basket(List.of(payable(region, "VF-R1-" + REGIONS.get(), 400)), cashier());
-        assertThat(postAs("/v1/baskets/" + first + "/payments", Map.of("method", "CASH",
-                "counterReference", reference), cashier()).getResponse().getStatus()).isEqualTo(201);
-        String fine = payable(region, "VF-R2-" + REGIONS.get(), 500);
-        String second = basket(List.of(fine), cashier());
-        MvcResult reused = postAs("/v1/baskets/" + second + "/payments", Map.of("method", "CASH",
-                "counterReference", reference), cashier());
+        assertThat(counterPayment(region, "VF-R1-", "CASH", reference).getResponse().getStatus()).isEqualTo(201);
+        // the same slip number in another region, or for another method in this region, is a different reference
+        assertThat(counterPayment(newRegion(), "VF-R2-", "CASH", reference).getResponse().getStatus())
+                .isEqualTo(201);
+        assertThat(counterPayment(region, "VF-R3-", "CARD_TERMINAL", reference).getResponse().getStatus())
+                .isEqualTo(201);
+        String fine = payable(region, "VF-R4-" + REGIONS.get(), 500);
+        MvcResult reused = postAs("/v1/baskets/" + basket(List.of(fine), cashier()) + "/payments",
+                Map.of("method", "CASH", "counterReference", reference), cashier());
         assertThat(reused.getResponse().getStatus()).isEqualTo(409);
         assertThat(code(reused)).isEqualTo("TRANSACTION_REFERENCE_USED");
         assertThat(body(getAs("/v1/payables/" + fine, registrar())).get("status").asString()).isEqualTo("OPEN");
+    }
+
+    private MvcResult counterPayment(String region, String refPrefix, String method, String reference)
+            throws Exception {
+        String basket = basket(List.of(payable(region, refPrefix + REGIONS.get(), 400)), cashier());
+        return postAs("/v1/baskets/" + basket + "/payments", Map.of("method", method,
+                "counterReference", reference), cashier());
     }
 }

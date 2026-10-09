@@ -65,7 +65,7 @@ itms:
     consumer:
       enabled: ${ITMS_NOTIFICATIONS_CONSUMER_ENABLED:false}
       group-id: notification-service
-      topics: ${ITMS_NOTIFICATIONS_CONSUMER_TOPICS:itms.transaction-service.events.v1,itms.workflow-service.events.v1,itms.hold-eligibility-service.events.v1}
+      topics: ${ITMS_NOTIFICATIONS_CONSUMER_TOPICS:itms.transaction-service.events.v1,itms.workflow-service.events.v1,itms.hold-eligibility-service.events.v1,itms.violation-service.events.v1}
   # API_SPECIFICATION §2, ADR-032: publishing templates and sending need an Idempotency-Key.
   idempotency:
     enabled: true

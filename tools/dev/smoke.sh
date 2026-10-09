@@ -824,6 +824,12 @@ r2=$(body_of "$(callback "$vpayment" "gw-uat4-$SMK" 30000)")
 all_paid() { for n in "$v1" "$v2" "$v3"; do [[ "$(get_from "$VIO" "$S_MAKER" "/v1/violations/$n" | json_field "['status']")" == PAID ]] || return 1; done; }
 wait_until 60 all_paid || { echo "FAIL: UAT-4 violations not all PAID"; exit 1; }
 echo "   UAT-1 (points at recording, Q-072): $driver 26 points -> suspended until $until_expected, LICENCE_SUSPENSION hold active"
+# VF-015, UAT-1: the events reach notification-service through Kafka and the seeded templates notify the driver
+notices() { "${DC[@]}" exec -T notification-postgres psql -qtA -U "$NOTIF_DB_USER" -d notification -c \
+  "select string_agg(distinct template_code, ',' order by template_code) from notification where recipient_id = '$driver' and channel = 'INBOX'"; }
+notified() { [[ "$(notices)" == *LICENCE_SUSPENDED* && "$(notices)" == *VIOLATION_RECORDED* ]]; }
+wait_until 120 notified || { echo "FAIL: violation notices for $driver: '$(notices)'"; exit 1; }
+echo "   VF-015: $driver notified in the inbox: $(notices)"
 echo "   UAT-4: $v1 $v2 $v3 in one basket; two identical callbacks -> one receipt, second DUPLICATE; all three PAID"
 
 echo "SMOKE OK"

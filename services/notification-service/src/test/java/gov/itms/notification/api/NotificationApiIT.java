@@ -313,6 +313,30 @@ class NotificationApiIT {
     }
 
     @Test
+    @Tag("VF-015")
+    @Tag("VF-031")
+    @Tag("UAT-1")
+    @DisplayName("VF-015, VF-031, UAT-1: the seeded violation notices are sent to the responsible party's inbox")
+    void violationNotices() {
+        String file = "TF-VIO-" + CODES.incrementAndGet();
+        Map<String, Map<String, Object>> events = Map.of(
+                "itms.violation.recorded", Map.of("violationNumber", "V-2026-000000901", "plate", "S 1",
+                        "occurredAt", "2026-10-09T08:00:00Z", "points", 6, "fine", 50000, "recipientId", file),
+                "itms.violation.points-warning", Map.of("violationNumber", "V-2026-000000901", "points", 6,
+                        "activePoints", 18, "warningThreshold", 18, "suspensionThreshold", 24, "recipientId", file),
+                "itms.violation.licence-suspended", Map.of("violationNumber", "V-2026-000000901", "months", 3,
+                        "from", "2026-10-09", "until", "2027-01-08", "activePoints", 26, "recipientId", file));
+        events.forEach((type, data) -> {
+            String eventId = UUID.randomUUID().toString();
+            assertThat(notifications.onEvent(eventId, type, new HashMap<>(data))).as(type).isEqualTo(1);
+            assertThat(db.sql("select count(*) from notification where recipient_id = :r and source_event_id = :e "
+                            + "and channel = 'INBOX' and mandatory and reference = 'V-2026-000000901' "
+                            + "and body like '%V-2026-000000901%'")
+                    .param("r", file).param("e", eventId).query(Long.class).single()).as(type).isEqualTo(1);
+        });
+    }
+
+    @Test
     @DisplayName("ADR-032: a repeated send with the same Idempotency-Key replays and queues nothing new")
     void idempotentSend() throws Exception {
         String template = published(false);

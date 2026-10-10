@@ -1,0 +1,415 @@
+openapi: 3.1.0
+info:
+  title: ITMS Licensing Service
+  version: 1.0.0
+  description: |
+    Driving licences (DL-020..DL-023, DL-050..DL-065). This version covers the licence class catalogue (slice 3.1).
+
+    Licence classes (DL-020, DL-062; BRD §6.2): a class (for example `LIGHT`) has rules per customer category —
+    minimum age, optional maximum age, the required tests in order (test type codes of examination-service, DL-043),
+    minimum training hours, whether medical fitness is needed, the validity in months and whether, for residents, the
+    licence never outlives the residency. A rule without `customerCategory` applies to every category not listed. A
+    class may record the gearbox of the test vehicle (`gearboxRecorded`, DL-022).
+
+    Versions: a class version is submitted PENDING (`licensing.class.submit`) and approved or rejected once by someone
+    else (`licensing.class.approve`); the maker may withdraw their own pending version. A version never starts in the
+    past. Approving a version ends the previous approved version of the class the day before; an approved version that
+    starts on or after the new start date is an overlap (409). Versions never change otherwise and are never deleted.
+
+    Classes are national configuration, so every operation is `national` in scope.
+    The channel is the `X-Channel` header. Submitting and deciding need an `Idempotency-Key` (ADR-032).
+    Only GET/POST are used (INT-003). Request input (SEC-022) is hardened once in itms-platform.
+servers:
+  - url: /
+security:
+  - bearerAuth: []
+tags:
+  - name: Licence classes
+
+paths:
+  /v1/licence-class-versions:
+    post:
+      tags: [Licence classes]
+      operationId: submitLicenceClassVersion
+      summary: Submit a licence class version for approval (DL-020, DL-062)
+      description: |
+        Refused when: no known `X-Channel` (422 `CHANNEL_REQUIRED`); a field is malformed (422 `FIELD_INVALID`);
+        rules are missing, too many or repeat a category or a test (422 `LIST_SIZE_INVALID`, `LIST_DUPLICATES`); the
+        maximum age is below the minimum (422 `CLASS_AGES_INVALID`); the end date is before the start
+        (422 `CLASS_DATES_INVALID`) or the start is in the past (422 `CLASS_START_IN_PAST`).
+      x-itms-permission: licensing.class.submit
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SubmitClassRequest' }
+      responses:
+        '201':
+          description: Submitted (or, on a retry with the same Idempotency-Key, the stored response)
+          headers:
+            Location: { schema: { type: string } }
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClassVersion' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [Licence classes]
+      operationId: listLicenceClassVersions
+      summary: Versions of a licence class, oldest first, optionally of one status
+      x-itms-permission: licensing.class.read
+      x-itms-scope: national
+      parameters:
+        - name: classCode
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/ClassCode' }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/VersionStatus' }
+      responses:
+        '200':
+          description: Versions
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClassVersionCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/licence-class-versions/{versionId}:
+    get:
+      tags: [Licence classes]
+      operationId: getLicenceClassVersion
+      summary: A licence class version
+      x-itms-permission: licensing.class.read
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/VersionId'
+      responses:
+        '200':
+          description: Licence class version
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClassVersion' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/licence-class-versions/{versionId}/approvals:
+    post:
+      tags: [Licence classes]
+      operationId: approveLicenceClassVersion
+      summary: Approve a pending licence class version (DL-020, CC-002)
+      description: |
+        Refused when the approver submitted it (403 `SAME_MAKER_CHECKER`), it is already decided (409
+        `CLASS_VERSION_DECIDED`), it would overlap a later-starting approved version (409 `CLASS_VERSION_OVERLAP`) or
+        its start date has passed (422 `CLASS_START_IN_PAST`).
+      x-itms-permission: licensing.class.approve
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/VersionId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DecisionRequest' }
+      responses:
+        '200':
+          description: Approved
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClassVersion' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/licence-class-versions/{versionId}/rejections:
+    post:
+      tags: [Licence classes]
+      operationId: rejectLicenceClassVersion
+      summary: Reject a pending licence class version, or withdraw one's own
+      description: |
+        A checker (`licensing.class.approve`) rejects; the maker may withdraw their own pending version. Refused when
+        it is already decided (409 `CLASS_VERSION_DECIDED`).
+      x-itms-permission: licensing.class.approve
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/VersionId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RejectRequest' }
+      responses:
+        '200':
+          description: Rejected or withdrawn
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClassVersion' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/licence-classes:
+    get:
+      tags: [Licence classes]
+      operationId: listLicenceClassesInForce
+      summary: The version of every licence class in force on a date (today by default)
+      x-itms-permission: licensing.class.read
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/OnDate'
+      responses:
+        '200':
+          description: Classes in force, by class code
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClassVersionCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+
+  /v1/licence-classes/{classCode}:
+    get:
+      tags: [Licence classes]
+      operationId: getLicenceClassInForce
+      summary: The version of a licence class in force on a date (today by default)
+      description: 404 `CLASS_NOT_IN_FORCE` when no approved version covers the date.
+      x-itms-permission: licensing.class.read
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/ClassCodePath'
+        - $ref: '#/components/parameters/OnDate'
+      responses:
+        '200':
+          description: Class version in force
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClassVersion' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/licence-classes/{classCode}/rules/{customerCategory}:
+    get:
+      tags: [Licence classes]
+      operationId: getLicenceClassRule
+      summary: The rule of a licence class for one customer category on a date (DL-020, DL-062)
+      description: |
+        The category's own rule, otherwise the rule for every other category. 404 `CLASS_NOT_IN_FORCE` when no
+        approved version covers the date; 404 `CLASS_RULE_NOT_FOUND` when the class has no rule for the category.
+      x-itms-permission: licensing.class.read
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/ClassCodePath'
+        - name: customerCategory
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/CustomerCategory' }
+        - $ref: '#/components/parameters/OnDate'
+      responses:
+        '200':
+          description: The resolved rule
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ResolvedRule' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    VersionId:
+      name: versionId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ClassCodePath:
+      name: classCode
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/ClassCode' }
+    OnDate:
+      name: on
+      in: query
+      description: The date to read for (YYYY-MM-DD); today when absent
+      schema: { type: string, format: date }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Chosen by the client, new for every intended action, and sent again unchanged on a retry (API_SPECIFICATION
+        §2, ADR-032). A retry with the same key and request gets the stored response, marked `Idempotent-Replayed`.
+      schema: { type: string, pattern: '^[A-Za-z0-9._:-]{8,128}$' }
+
+  headers:
+    IdempotentReplayed:
+      description: '`true` when the response is the stored response of an earlier request with the same Idempotency-Key'
+      schema: { type: string, enum: ['true'] }
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid bearer token
+    Problem:
+      description: Problem details (RFC 9457, API_SPECIFICATION §3)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+
+  schemas:
+    ClassCode:
+      type: string
+      pattern: '^[A-Z][A-Z0-9_]{0,19}$'
+    CustomerCategory:
+      type: string
+      pattern: '^[A-Z][A-Z0-9_]{0,39}$'
+    TestType:
+      type: string
+      pattern: '^[A-Z][A-Z0-9_]{0,29}$'
+    Channel:
+      type: string
+      enum: [PORTAL, APP, BACKOFFICE, PARTNER, KIOSK, CALLCENTRE, FIELD, ASSISTANT, AGENT]
+    VersionStatus:
+      type: string
+      enum: [PENDING, APPROVED, REJECTED]
+    CategoryRule:
+      type: object
+      additionalProperties: false
+      required: [minAgeYears, minTrainingHours, medicalRequired, validityMonths, residencyLinked]
+      properties:
+        customerCategory:
+          description: The customer category; absent or null = every category not listed
+          oneOf: [ { $ref: '#/components/schemas/CustomerCategory' }, { type: 'null' } ]
+        minAgeYears: { type: integer, minimum: 10, maximum: 120 }
+        maxAgeYears: { oneOf: [ { type: integer, minimum: 10, maximum: 120 }, { type: 'null' } ] }
+        requiredTests:
+          type: array
+          maxItems: 10
+          description: Test type codes of examination-service (DL-043), in the order they are taken
+          items: { $ref: '#/components/schemas/TestType' }
+        minTrainingHours: { type: integer, minimum: 0, maximum: 1000 }
+        medicalRequired: { type: boolean }
+        validityMonths: { type: integer, minimum: 1, maximum: 240 }
+        residencyLinked:
+          type: boolean
+          description: For residents, the licence never outlives the residency (DL-062)
+    SubmitClassRequest:
+      type: object
+      additionalProperties: false
+      required: [classCode, nameNl, nameEn, vehicleTypeNl, vehicleTypeEn, gearboxRecorded, rules, effectiveFrom,
+                 reason]
+      properties:
+        classCode: { $ref: '#/components/schemas/ClassCode' }
+        nameNl: { type: string, maxLength: 200 }
+        nameEn: { type: string, maxLength: 200 }
+        vehicleTypeNl: { type: string, maxLength: 200 }
+        vehicleTypeEn: { type: string, maxLength: 200 }
+        gearboxRecorded:
+          type: boolean
+          description: The gearbox of the test vehicle is recorded; automatic restricts the class (DL-022)
+        rules: { type: array, minItems: 1, maxItems: 50, items: { $ref: '#/components/schemas/CategoryRule' } }
+        effectiveFrom: { type: string, format: date }
+        effectiveTo: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
+        reason: { type: string, minLength: 3, maxLength: 500 }
+    DecisionRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        reason: { oneOf: [ { type: string, minLength: 3, maxLength: 500 }, { type: 'null' } ] }
+    RejectRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 3, maxLength: 500 }
+    Decision:
+      type: object
+      additionalProperties: false
+      required: [actorId, channel, at]
+      properties:
+        actorId: { type: string }
+        actorUsername: { oneOf: [ { type: string }, { type: 'null' } ] }
+        channel: { $ref: '#/components/schemas/Channel' }
+        at: { type: string, format: date-time }
+        reason: { oneOf: [ { type: string }, { type: 'null' } ] }
+    ClassVersion:
+      type: object
+      additionalProperties: false
+      required: [id, classCode, versionNo, nameNl, nameEn, vehicleTypeNl, vehicleTypeEn, gearboxRecorded, rules,
+                 effectiveFrom, status, submitted]
+      properties:
+        id: { type: string, format: uuid }
+        classCode: { type: string }
+        versionNo: { type: integer, minimum: 1 }
+        nameNl: { type: string }
+        nameEn: { type: string }
+        vehicleTypeNl: { type: string }
+        vehicleTypeEn: { type: string }
+        gearboxRecorded: { type: boolean }
+        rules: { type: array, items: { $ref: '#/components/schemas/CategoryRule' } }
+        effectiveFrom: { type: string, format: date }
+        effectiveTo: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
+        status: { $ref: '#/components/schemas/VersionStatus' }
+        submitted: { $ref: '#/components/schemas/Decision' }
+        decided: { oneOf: [ { $ref: '#/components/schemas/Decision' }, { type: 'null' } ] }
+    ClassVersionCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/ClassVersion' } }
+    ResolvedRule:
+      type: object
+      additionalProperties: false
+      required: [classCode, versionId, versionNo, customerCategory, gearboxRecorded, rule]
+      properties:
+        classCode: { type: string }
+        versionId: { type: string, format: uuid }
+        versionNo: { type: integer, minimum: 1 }
+        customerCategory: { type: string }
+        gearboxRecorded: { type: boolean }
+        rule: { $ref: '#/components/schemas/CategoryRule' }
+    Problem:
+      type: object
+      required: [status, code]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        code: { type: string }
+        detail: { type: string }
+        instance: { type: string }
+        correlationId: { type: string }
+        requirementRefs: { type: array, items: { type: string } }
+        errors: { type: array, items: { type: object } }

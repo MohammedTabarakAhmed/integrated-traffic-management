@@ -47,6 +47,7 @@
       <And><Class name="gov.itms.payment.infrastructure.PaymentServiceConfiguration$PendingJob"/><Field name="payments"/></And>
       <And><Class name="gov.itms.vehicle.application.VehicleService"/><Field name="repo"/></And>
       <And><Class name="gov.itms.violation.application.ViolationService"/><Field name="repo"/></And>
+      <And><Class name="gov.itms.licensing.application.LicenceClassService"/><Field name="classes"/></And>
     </Or>
   </Match>
 

@@ -12,6 +12,7 @@ import gov.itms.violation.domain.CatalogueEntry;
 import gov.itms.violation.domain.CatalogueEntryTest;
 import gov.itms.violation.domain.Channel;
 import gov.itms.violation.domain.DomainException;
+import gov.itms.violation.domain.UnpaidHold;
 import gov.itms.violation.domain.Violation;
 import java.time.Clock;
 import java.time.Duration;
@@ -50,6 +51,9 @@ class ViolationServiceTest {
     private final List<String> payablesRegistered = new ArrayList<>();
     private final List<UUID> payablesCancelled = new ArrayList<>();
     private final List<String> holds = new ArrayList<>();
+    private final List<String> unpaidPlaced = new ArrayList<>();
+    private final List<String> unpaidLifted = new ArrayList<>();
+    private boolean holdsDown;
     private final ViolationService service = new ViolationService(repo, new Ports.Payables() {
         @Override
         public UUID register(String number, String file, String region, String currency, long amount,
@@ -65,6 +69,23 @@ class ViolationServiceTest {
     }, (file, from, until, sourceRef, reason) -> {
         holds.add(file + " " + from + ".." + until);
         return "HOLD-" + holds.size();
+    }, new Ports.UnpaidFineHolds() {
+        @Override
+        public String place(UnpaidHold.Subject subject, String sourceRef, String reason) {
+            if (holdsDown) {
+                throw new Ports.UnavailableException("HOLDS_UNAVAILABLE", "down", null);
+            }
+            unpaidPlaced.add(subject.type() + " " + subject.id());
+            return "UNPAID-HOLD-" + unpaidPlaced.size();
+        }
+
+        @Override
+        public void lift(String holdId, String reason) {
+            if (holdsDown) {
+                throw new Ports.UnavailableException("HOLDS_UNAVAILABLE", "down", null);
+            }
+            unpaidLifted.add(holdId);
+        }
     }, new AuditRecorder() {
         @Override
         public void record(String action, String entityType, String entityId, Object oldValue, Object newValue,
@@ -88,7 +109,8 @@ class ViolationServiceTest {
             record(eventType, subject, data);
         }
     }, new ViolationService.Settings(new BlackPoints.Policy(12, 24, List.of(3, 6, 12), List.of(12, 18)),
-            Set.of("DUPLICATE", "WRONG_PLATE"), "XTS", ZoneOffset.UTC, Duration.ofDays(30)), clock);
+            Set.of("DUPLICATE", "WRONG_PLATE"), "XTS", ZoneOffset.UTC, Duration.ofDays(30),
+            new UnpaidHold.Policy(true, Duration.ofDays(60), 100)), clock);
 
     private static Caller caller(String id, Set<String> regions, String... permissions) {
         Set<String> held = Set.of(permissions);
@@ -269,6 +291,50 @@ class ViolationServiceTest {
                 .extracting("code").isEqualTo("SCOPE_EXCEEDED");
     }
 
+    @Test
+    @Tag("VF-023")
+    @DisplayName("VF-023 (Q-012, Q-074): unpaid after the period, the vehicle or the driver's file is held; paying or "
+            + "cancelling lifts it, a reopened violation is held again")
+    void unpaidHolds() {
+        publish("PARKING", null, 20_000, 0, null, null);
+        Violation owners = service.record(new Violation.Report("PARKING", clock.instant().minus(Duration.ofHours(1)),
+                "NORTH", "Main road", "A 1", "1HGCM82633A004352", "TF-OWNER", null, null, null,
+                Violation.Source.OFFICER, null, List.of()), OFFICER);
+        Violation drivers = record("PARKING", "NORTH", "TF-DRIVER");
+        Violation noVin = record("PARKING", "NORTH", null);
+        assertThat(service.overdueForHold()).as("not yet overdue").isEmpty();
+
+        clock.set(NOW.plus(Duration.ofDays(60)).plus(Duration.ofHours(1)));
+        assertThat(service.overdueForHold()).containsExactly(owners.number(), drivers.number(), noVin.number());
+        service.overdueForHold().forEach(service::holdIfOverdue);
+        assertThat(unpaidPlaced).containsExactly("VEHICLE 1HGCM82633A004352", "TRAFFIC_FILE TF-DRIVER",
+                "TRAFFIC_FILE TF-OWNER");
+        assertThat(service.holdIfOverdue(owners.number())).as("one active hold per violation").isFalse();
+        assertThat(audit).contains("UNPAID_HOLD_PLACED " + owners.number());
+        assertThat(events).contains("itms.violation.unpaid-hold-placed " + owners.number());
+
+        assertThat(service.onPaid(owners.number())).isTrue();
+        assertThat(unpaidLifted).as("paying lifts at once").containsExactly("UNPAID-HOLD-1");
+        service.cancel(drivers.number(), "DUPLICATE", null, SUPERVISOR);
+        assertThat(unpaidLifted).containsExactly("UNPAID-HOLD-1", "UNPAID-HOLD-2");
+
+        // hold-eligibility-service down: the payment still counts and the job lifts the hold later
+        holdsDown = true;
+        assertThat(service.onPaid(noVin.number())).isTrue();
+        assertThat(service.settledWithHold()).containsExactly(noVin.number());
+        assertThatThrownBy(() -> service.liftIfSettled(noVin.number()))
+                .isInstanceOf(Ports.UnavailableException.class);
+        holdsDown = false;
+        assertThat(service.liftIfSettled(noVin.number())).isTrue();
+        assertThat(service.settledWithHold()).isEmpty();
+
+        // a cancelled receipt reopens the violation; it is overdue at once, so it is held again
+        assertThat(service.onReceiptCancelled(owners.number())).isTrue();
+        assertThat(service.overdueForHold()).containsExactly(owners.number());
+        assertThat(service.holdIfOverdue(owners.number())).isTrue();
+        assertThat(repo.unpaid.stream().filter(h -> h.violationNumber().equals(owners.number()))).hasSize(2);
+    }
+
     private static final class MutableClock extends Clock {
         private Instant now;
 
@@ -400,6 +466,38 @@ class ViolationServiceTest {
         @Override
         public void insertSuspension(BlackPoints.Suspension suspension) {
             suspensions.add(suspension);
+        }
+
+        final List<UnpaidHold> unpaid = new ArrayList<>();
+
+        @Override
+        public List<Violation> overdueWithoutHold(Instant recordedBefore, int limit) {
+            return violations.values().stream().filter(v -> v.status() == Violation.Status.OPEN)
+                    .filter(v -> v.recordedAt().isBefore(recordedBefore))
+                    .filter(v -> activeUnpaidHold(v.id()).isEmpty()).limit(limit).toList();
+        }
+
+        @Override
+        public List<UnpaidHold> settledWithActiveHold(int limit) {
+            return unpaid.stream().filter(UnpaidHold::active)
+                    .filter(h -> violations.get(h.violationNumber()).status() != Violation.Status.OPEN)
+                    .limit(limit).toList();
+        }
+
+        @Override
+        public Optional<UnpaidHold> activeUnpaidHold(UUID violationId) {
+            return unpaid.stream().filter(h -> h.violationId().equals(violationId) && h.active()).findFirst();
+        }
+
+        @Override
+        public void insertUnpaidHold(UnpaidHold hold) {
+            unpaid.add(hold);
+        }
+
+        @Override
+        public void unpaidHoldLifted(UUID id, Instant at) {
+            unpaid.replaceAll(h -> h.id().equals(id) ? new UnpaidHold(h.id(), h.violationId(), h.violationNumber(),
+                    h.subject(), h.holdId(), h.placedAt(), at) : h);
         }
     }
 }

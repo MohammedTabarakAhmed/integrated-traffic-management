@@ -47,18 +47,20 @@ public class VehicleService {
     private final Ports.InsuranceRegister insurance;
     private final Ports.FeeQuotes fees;
     private final Ports.Payables payables;
+    private final Ports.Eligibility eligibility;
     private final VehicleRules rules;
     private final AuditRecorder audit;
     private final DomainEventRecorder events;
     private final Clock clock;
 
     public VehicleService(Ports.VehicleRepository repo, Ports.InsuranceRegister insurance, Ports.FeeQuotes fees,
-                          Ports.Payables payables, VehicleRules rules, AuditRecorder audit, DomainEventRecorder events,
-                          Clock clock) {
+                          Ports.Payables payables, Ports.Eligibility eligibility, VehicleRules rules,
+                          AuditRecorder audit, DomainEventRecorder events, Clock clock) {
         this.repo = repo;
         this.insurance = insurance;
         this.fees = fees;
         this.payables = payables;
+        this.eligibility = eligibility;
         this.rules = rules;
         this.audit = audit;
         this.events = events;
@@ -173,10 +175,25 @@ public class VehicleService {
         }
         checkInsurance(v, today);
         checkInspection(v, today);
+        checkHolds(v, rules.renewalFee(), channel);
         LocalDate base = v.registrationExpiry().isBefore(today) ? today.minusDays(1) : v.registrationExpiry();
         LocalDate expiry = base.plusMonths(rules.validityMonths(v.spec().category(), v.ageYears(today)));
         return request(v, Registration.Kind.RENEWAL, rules.renewalFee(), customerCategory, v.registrationExpiry(),
                 expiry, null, channel, caller);
+    }
+
+    /**
+     * No hold in force may block the renewal for the vehicle or its owner's traffic file (VL-011, VF-023): otherwise
+     * 422 {@code ELIGIBILITY_BLOCKED} with the customer's reasons and next steps, before any fee is quoted. When the
+     * check cannot be made the renewal is refused with 503 {@code ELIGIBILITY_UNAVAILABLE} (fail closed).
+     */
+    private void checkHolds(Vehicle v, String serviceCode, String channel) {
+        List<Ports.Eligibility.Block> blocks = eligibility.blocks(serviceCode, List.of(
+                new Ports.Eligibility.Subject("VEHICLE", v.vin()),
+                new Ports.Eligibility.Subject("TRAFFIC_FILE", v.ownerFileNumber())), channel);
+        if (!blocks.isEmpty()) {
+            throw new EligibilityBlockedException(serviceCode, blocks);
+        }
     }
 
     private Registration.Request request(Vehicle v, Registration.Kind kind, String feeService, String customerCategory,

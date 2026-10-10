@@ -3,6 +3,7 @@ package gov.itms.violation.infrastructure;
 import gov.itms.violation.application.Ports;
 import gov.itms.violation.domain.BlackPoints;
 import gov.itms.violation.domain.CatalogueEntry;
+import gov.itms.violation.domain.UnpaidHold;
 import gov.itms.violation.domain.Violation;
 import java.sql.Array;
 import java.sql.Date;
@@ -36,6 +37,11 @@ class JdbcViolationRepository implements Ports.ViolationRepository {
                 evidence_ids, fine_minor, black_points, repeat, recorded_by, recorded_at, status, payable_id,
                 cancel_reason, closed_at
             from violation""";
+
+    private static final String UNPAID_HOLD_SELECT = """
+            select h.id, h.violation_id, h.violation_number, h.subject_type, h.subject_id, h.hold_id, h.placed_at,
+                h.lifted_at
+            from unpaid_hold h""";
 
     private final JdbcClient jdbc;
     private final ObjectMapper json;
@@ -239,6 +245,58 @@ class JdbcViolationRepository implements Ports.ViolationRepository {
                 .param("id", s.id()).param("f", s.fileNumber()).param("o", s.ordinal())
                 .param("from", Date.valueOf(s.from())).param("until", Date.valueOf(s.until()))
                 .param("p", s.pointsAtOrder()).param("hold", s.holdId()).param("t", s.triggeredBy()).update();
+    }
+
+    @Override
+    public List<Violation> overdueWithoutHold(Instant recordedBefore, int limit) {
+        return jdbc.sql(VIOLATION_SELECT + """
+                          where status = 'OPEN' and recorded_at < :c
+                           and not exists (select 1 from unpaid_hold h
+                                           where h.violation_id = violation.id and h.lifted_at is null)
+                         order by recorded_at limit :l""")
+                .param("c", ts(recordedBefore)).param("l", limit)
+                .query(JdbcViolationRepository::mapViolation).list();
+    }
+
+    @Override
+    public List<UnpaidHold> settledWithActiveHold(int limit) {
+        return jdbc.sql(UNPAID_HOLD_SELECT + """
+                          join violation v on v.id = h.violation_id
+                         where h.lifted_at is null and v.status <> 'OPEN'
+                         order by h.placed_at limit :l""")
+                .param("l", limit).query(JdbcViolationRepository::mapUnpaidHold).list();
+    }
+
+    @Override
+    public Optional<UnpaidHold> activeUnpaidHold(UUID violationId) {
+        return jdbc.sql(UNPAID_HOLD_SELECT + " where h.violation_id = :v and h.lifted_at is null")
+                .param("v", violationId).query(JdbcViolationRepository::mapUnpaidHold).optional();
+    }
+
+    @Override
+    public void insertUnpaidHold(UnpaidHold h) {
+        jdbc.sql("""
+                        insert into unpaid_hold (id, violation_id, violation_number, subject_type, subject_id, hold_id,
+                            placed_at)
+                        values (:id, :v, :n, :type, :subject, :hold, :at)""")
+                .param("id", h.id()).param("v", h.violationId()).param("n", h.violationNumber())
+                .param("type", h.subject().type().name()).param("subject", h.subject().id())
+                .param("hold", h.holdId()).param("at", ts(h.placedAt())).update();
+    }
+
+    @Override
+    public void unpaidHoldLifted(UUID id, Instant at) {
+        jdbc.sql("update unpaid_hold set lifted_at = :at where id = :id").param("at", ts(at)).param("id", id)
+                .update();
+    }
+
+    private static UnpaidHold mapUnpaidHold(ResultSet rs, int row) throws SQLException {
+        Timestamp lifted = rs.getTimestamp("lifted_at");
+        return new UnpaidHold(rs.getObject("id", UUID.class), rs.getObject("violation_id", UUID.class),
+                rs.getString("violation_number"), new UnpaidHold.Subject(
+                        UnpaidHold.SubjectType.valueOf(rs.getString("subject_type")), rs.getString("subject_id")),
+                rs.getString("hold_id"), rs.getTimestamp("placed_at").toInstant(),
+                lifted == null ? null : lifted.toInstant());
     }
 
     private CatalogueEntry mapCatalogue(ResultSet rs, int row) throws SQLException {

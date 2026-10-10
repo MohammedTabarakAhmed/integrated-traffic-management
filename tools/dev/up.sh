@@ -238,6 +238,10 @@ grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000012 service-account-itms-vehicle-service 
 # violation-service registers fines as payables and places licence suspension holds (VF-015, VF-032; ADR-056).
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000013 service-account-itms-violation-service PAYABLE_REGISTRAR
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000013 service-account-itms-violation-service SUSPENSION_HOLD_PLACER
+# violation-service places and lifts UNPAID_FINES holds on violations left unpaid (VF-023; ADR-058).
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000013 service-account-itms-violation-service UNPAID_FINE_HOLD_MANAGER
+# vehicle-service asks hold-eligibility-service whether a renewal is blocked (VL-011, VF-023; ADR-058).
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000012 service-account-itms-vehicle-service ELIGIBILITY_CHECKER
 
 cat <<EOF
 

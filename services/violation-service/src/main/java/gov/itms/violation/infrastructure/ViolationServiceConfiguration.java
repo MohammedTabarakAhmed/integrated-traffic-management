@@ -6,12 +6,15 @@ import gov.itms.platform.client.ServiceClients;
 import gov.itms.platform.events.DomainEventRecorder;
 import gov.itms.violation.application.ViolationService;
 import gov.itms.violation.domain.BlackPoints;
+import gov.itms.violation.domain.UnpaidHold;
 import io.micrometer.observation.ObservationRegistry;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -22,6 +25,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.scheduling.annotation.Scheduled;
 import tools.jackson.databind.ObjectMapper;
 
 /** Wires violations to PostgreSQL, payment-service, hold-eligibility-service and the payment events. */
@@ -32,7 +37,8 @@ public class ViolationServiceConfiguration {
     /**
      * {@code itms.violations.*} (NFR-042): black point rules (VF-031..VF-033; BRD defaults 12 months, 24 points,
      * 3/6/12 months, warnings at 12 and 18), cancellation reasons (VF-021), currency, business zone, how old a reported
-     * violation may be, and what a suspension hold blocks.
+     * violation may be, what a suspension hold blocks, and when an unpaid violation places a hold (VF-023; interim
+     * 60 days after recording, blocking vehicle renewal, Q-074).
      */
     @ConfigurationProperties("itms.violations")
     public record ViolationProperties(@DefaultValue("12") int pointsExpiryMonths,
@@ -44,7 +50,13 @@ public class ViolationServiceConfiguration {
                                       @DefaultValue("UTC") String zone,
                                       @DefaultValue("30d") Duration maxReportDelay,
                                       List<String> suspensionBlockedServices,
-                                      List<String> suspensionLiftableByRoles) {
+                                      List<String> suspensionLiftableByRoles,
+                                      @DefaultValue("true") boolean unpaidHoldEnabled,
+                                      @DefaultValue("60d") Duration unpaidHoldAfter,
+                                      @DefaultValue("1h") Duration unpaidHoldInterval,
+                                      @DefaultValue("100") int unpaidHoldBatchSize,
+                                      List<String> unpaidHoldBlockedServices,
+                                      List<String> unpaidHoldLiftableByRoles) {
         public ViolationProperties {
             suspensionMonths = List.copyOf(suspensionMonths);
             warningThresholds = List.copyOf(warningThresholds);
@@ -55,6 +67,15 @@ public class ViolationServiceConfiguration {
                     ? List.of("*") : List.copyOf(suspensionBlockedServices);
             suspensionLiftableByRoles = suspensionLiftableByRoles == null || suspensionLiftableByRoles.isEmpty()
                     ? List.of("HOLD_SUPERVISOR") : List.copyOf(suspensionLiftableByRoles);
+            unpaidHoldBlockedServices = unpaidHoldBlockedServices == null || unpaidHoldBlockedServices.isEmpty()
+                    ? List.of("VEH_RENEWAL") : List.copyOf(unpaidHoldBlockedServices);
+            unpaidHoldLiftableByRoles = unpaidHoldLiftableByRoles == null || unpaidHoldLiftableByRoles.isEmpty()
+                    ? List.of("UNPAID_FINE_HOLD_MANAGER", "HOLD_SUPERVISOR") : List.copyOf(unpaidHoldLiftableByRoles);
+            if (unpaidHoldInterval.compareTo(Duration.ofMinutes(1)) < 0
+                    || unpaidHoldInterval.compareTo(Duration.ofDays(1)) > 0) {
+                throw new IllegalArgumentException("itms.violations.unpaid-hold-interval must be 1 minute to 1 day");
+            }
+            unpaidPolicy(unpaidHoldEnabled, unpaidHoldAfter, unpaidHoldBatchSize);
             if (!currency.matches("^[A-Z]{3}$")) {
                 throw new IllegalArgumentException("itms.violations.currency must be an ISO 4217 code");
             }
@@ -75,16 +96,74 @@ public class ViolationServiceConfiguration {
                 new Adapters.RemotePayables(ServiceClients.create(client(environment, "payments"), clock, registry)),
                 new Adapters.RemoteHolds(ServiceClients.create(client(environment, "holds"), clock, registry),
                         p.suspensionBlockedServices(), p.suspensionLiftableByRoles()),
+                new Adapters.RemoteUnpaidFineHolds(ServiceClients.create(client(environment, "holds"), clock,
+                        registry), p.unpaidHoldBlockedServices(), p.unpaidHoldLiftableByRoles()),
                 audit, events,
                 new ViolationService.Settings(new BlackPoints.Policy(p.pointsExpiryMonths(), p.suspensionThreshold(),
                         p.suspensionMonths(), p.warningThresholds()), Set.copyOf(p.cancelReasons()), p.currency(),
-                        ZoneId.of(p.zone()), p.maxReportDelay()), clock);
+                        ZoneId.of(p.zone()), p.maxReportDelay(),
+                        unpaidPolicy(p.unpaidHoldEnabled(), p.unpaidHoldAfter(), p.unpaidHoldBatchSize())), clock);
+    }
+
+    private static UnpaidHold.Policy unpaidPolicy(boolean enabled, Duration after, int batchSize) {
+        try {
+            return new UnpaidHold.Policy(enabled, after, batchSize);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("itms.violations.unpaid-hold-*: " + e.getMessage(), e);
+        }
     }
 
     private static ServiceClientProperties client(Environment environment, String name) {
         return Binder.get(environment).bind("itms.clients." + name, ServiceClientProperties.class)
                 .orElseThrow(() -> new IllegalStateException("itms.clients." + name + " is not configured"))
                 .validate("itms.clients." + name);
+    }
+
+    /** Runs the unpaid-violation holds (VF-023) when switched on; safe on every instance (rows are locked). */
+    @Configuration(proxyBeanMethods = false)
+    @EnableScheduling
+    @ConditionalOnProperty(name = "itms.violations.unpaid-hold-enabled", havingValue = "true", matchIfMissing = true)
+    static class UnpaidHoldJobConfiguration {
+
+        @Bean
+        UnpaidHoldJob unpaidHoldJob(ViolationService violations) {
+            return new UnpaidHoldJob(violations);
+        }
+    }
+
+    /** Places holds on overdue violations and lifts those of paid or cancelled ones; a failure is retried next run. */
+    public static class UnpaidHoldJob {
+
+        private static final Logger LOG = LoggerFactory.getLogger(UnpaidHoldJob.class);
+        private final ViolationService violations;
+
+        public UnpaidHoldJob(ViolationService violations) {
+            this.violations = violations;
+        }
+
+        @Scheduled(fixedDelayString = "${itms.violations.unpaid-hold-interval:PT1H}",
+                initialDelayString = "${itms.violations.unpaid-hold-initial-delay:PT1M}")
+        public void run() {
+            int placed = 0;
+            int lifted = 0;
+            for (String number : violations.overdueForHold()) {
+                try {
+                    placed += violations.holdIfOverdue(number) ? 1 : 0;
+                } catch (RuntimeException e) {
+                    LOG.warn("Unpaid hold for {} not placed: {}", number, e.getClass().getSimpleName());
+                }
+            }
+            for (String number : violations.settledWithHold()) {
+                try {
+                    lifted += violations.liftIfSettled(number) ? 1 : 0;
+                } catch (RuntimeException e) {
+                    LOG.warn("Unpaid hold of {} not lifted: {}", number, e.getClass().getSimpleName());
+                }
+            }
+            if (placed + lifted > 0) {
+                LOG.info("Unpaid violation holds: {} placed, {} lifted (VF-023)", placed, lifted);
+            }
+        }
     }
 
     @Configuration(proxyBeanMethods = false)

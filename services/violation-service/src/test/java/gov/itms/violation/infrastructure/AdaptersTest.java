@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import gov.itms.violation.application.Ports;
+import gov.itms.violation.domain.UnpaidHold;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
@@ -67,5 +68,31 @@ class AdaptersTest {
                 .placeSuspensionHold("TF-1", LocalDate.of(2026, 10, 6), LocalDate.of(2027, 1, 5), "SUSPENSION:x",
                         "r")).isInstanceOf(Ports.UnavailableException.class).extracting("code")
                 .isEqualTo("HOLDS_UNAVAILABLE");
+    }
+
+    @Test
+    @Tag("VF-023")
+    @Tag("CC-030")
+    @DisplayName("VF-023: an unpaid violation places an open-ended UNPAID_FINES hold; lifting a gone hold is not an error")
+    void unpaidHolds() {
+        Adapters.RemoteUnpaidFineHolds unpaid = new Adapters.RemoteUnpaidFineHolds(client, List.of("VEH_RENEWAL"),
+                List.of("UNPAID_FINE_HOLD_MANAGER", "HOLD_SUPERVISOR"));
+        String id = unpaid.place(new UnpaidHold.Subject(UnpaidHold.SubjectType.VEHICLE, "1HGCM82633A004352"),
+                "UNPAID-ABC", "Violation V-1 unpaid for more than 60 days (VF-023)");
+        assertThat(id).isNotBlank();
+        var body = stub.holds.getFirst();
+        assertThat(body.get("subject").get("type").asString()).isEqualTo("VEHICLE");
+        assertThat(body.get("holdType").asString()).isEqualTo("UNPAID_FINES");
+        assertThat(body.has("endDate")).as("open-ended").isFalse();
+        assertThat(body.get("blockedServices").get(0).asString()).isEqualTo("VEH_RENEWAL");
+        assertThat(stub.holdKeys).containsExactly("hold-unpaid-abc");
+        unpaid.lift(id, "Violation V-1 paid (VF-023)");
+        unpaid.lift("GONE-1", "already lifted by a supervisor");
+        assertThat(stub.lifts).containsExactly(id + " Violation V-1 paid (VF-023)");
+        stub.holdsDown = true;
+        assertThatThrownBy(() -> unpaid.lift(id, "again")).isInstanceOf(Ports.UnavailableException.class);
+        assertThatThrownBy(() -> new Adapters.RemoteUnpaidFineHolds(nobody, List.of("*"), List.of("X"))
+                .place(new UnpaidHold.Subject(UnpaidHold.SubjectType.TRAFFIC_FILE, "TF-1"), "UNPAID-X", "r"))
+                .isInstanceOf(Ports.UnavailableException.class);
     }
 }

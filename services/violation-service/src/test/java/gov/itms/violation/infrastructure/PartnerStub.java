@@ -29,6 +29,8 @@ public final class PartnerStub implements AutoCloseable {
     public final List<JsonNode> holds = new CopyOnWriteArrayList<>();
     public final List<String> holdKeys = new CopyOnWriteArrayList<>();
     public volatile boolean holdsDown;
+    /** Lifted hold ids; a hold id starting with {@code GONE} answers 409 HOLD_NOT_ACTIVE. */
+    public final List<String> lifts = new CopyOnWriteArrayList<>();
     private final ObjectMapper json = new ObjectMapper();
     private final HttpServer server;
 
@@ -45,6 +47,17 @@ public final class PartnerStub implements AutoCloseable {
             JsonNode body = json.readTree(ex.getRequestBody().readAllBytes());
             if (holdsDown) {
                 respond(ex, 503, "{}");
+                return;
+            }
+            String path = ex.getRequestURI().getPath();
+            if (path.endsWith("/lifts")) {
+                String id = path.substring("/v1/holds/".length(), path.length() - "/lifts".length());
+                if (id.startsWith("GONE")) {
+                    respond(ex, 409, "{\"code\":\"HOLD_NOT_ACTIVE\"}");
+                    return;
+                }
+                lifts.add(id + " " + body.get("reason").asString());
+                respond(ex, 200, "{\"id\":\"" + id + "\",\"status\":\"LIFTED\"}");
                 return;
             }
             holds.add(body);

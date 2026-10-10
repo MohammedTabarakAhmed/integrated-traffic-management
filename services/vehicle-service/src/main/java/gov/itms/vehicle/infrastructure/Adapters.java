@@ -164,6 +164,52 @@ final class Adapters {
     }
 
     /** Completes registrations when payment-service confirms their payables ({@code itms.payment.confirmed}). */
+    /**
+     * {@code POST /v1/eligibility-checks} of hold-eligibility-service (CC-032) with this service's own account
+     * (role ELIGIBILITY_CHECKER). Anything but a complete 200 answer for the service asked about is "unavailable", so
+     * a renewal is never let through unchecked (VL-011, VF-023).
+     */
+    static class RemoteEligibility implements Ports.Eligibility {
+
+        private final RestClient client;
+
+        RemoteEligibility(RestClient client) {
+            this.client = client;
+        }
+
+        /** The answer of hold-eligibility-service ({@code Eligibility} in its OpenAPI). */
+        record Answer(String serviceCode, Boolean eligible, List<Block> blocks) {
+        }
+
+        @Override
+        public List<Block> blocks(String serviceCode, List<Subject> subjects, String channel) {
+            Answer answer;
+            try {
+                answer = client.post().uri("/v1/eligibility-checks").header("X-Channel", channel)
+                        .contentType(MediaType.APPLICATION_JSON).accept(MediaType.APPLICATION_JSON)
+                        .body(Map.of("serviceCode", serviceCode, "subjects", subjects.stream()
+                                .map(s -> Map.of("type", s.type(), "id", s.id())).toList()))
+                        .retrieve().body(Answer.class);
+            } catch (RestClientException | ServiceCallException e) {
+                LOG.warn("Eligibility check for {} failed: {}", serviceCode, e.getClass().getSimpleName());
+                throw unavailable(e);
+            }
+            if (answer == null || !serviceCode.equals(answer.serviceCode()) || answer.eligible() == null
+                    || answer.blocks() == null || answer.eligible() != answer.blocks().isEmpty()
+                    || answer.blocks().stream().anyMatch(b -> b == null || b.reasonCode() == null
+                            || b.nextStep() == null || b.message() == null || b.message().isBlank())) {
+                LOG.warn("Eligibility check for {}: incomplete answer", serviceCode);
+                throw unavailable(null);
+            }
+            return List.copyOf(answer.blocks());
+        }
+
+        private static Ports.UnavailableException unavailable(Throwable cause) {
+            return new Ports.UnavailableException("ELIGIBILITY_UNAVAILABLE", "eligibility cannot be checked right now",
+                    cause);
+        }
+    }
+
     static class PaymentEventListener {
 
         private final VehicleService vehicles;

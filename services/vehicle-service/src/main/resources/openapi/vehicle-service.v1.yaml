@@ -178,6 +178,10 @@ paths:
       description: |
         409 `RENEWAL_NOT_OPEN` before the window; 409 `INSURANCE_EXPIRED` (UAT-3) without a valid policy today; 409
         `INSPECTION_REQUIRED` or `INSPECTION_FAILED`; 503 `INSURANCE_UNAVAILABLE` when the insurer does not answer.
+        Holds (VL-011, VF-023; ADR-058): hold-eligibility-service is asked whether a hold in force blocks the renewal
+        service for the vehicle or its owner's traffic file (an unpaid violation's UNPAID_FINES hold, for example);
+        if so 422 `ELIGIBILITY_BLOCKED`, with every reason and next step in `detail` and `blocks`, before any fee is
+        quoted. 503 `ELIGIBILITY_UNAVAILABLE` when that cannot be checked (fail closed).
       x-itms-permission: vehicle.register
       x-itms-scope: [region]
       parameters:
@@ -391,3 +395,17 @@ components:
         correlationId: { type: string }
         requirementRefs: { type: array, items: { type: string } }
         errors: { type: array, items: { type: object } }
+        nextStep:
+          type: string
+          description: '`ELIGIBILITY_BLOCKED` only (VL-011): the next step of the first reason, as a code'
+        blocks:
+          type: array
+          description: '`ELIGIBILITY_BLOCKED` only (VL-011): every reason the renewal is blocked, as the customer may see it'
+          items:
+            type: object
+            additionalProperties: false
+            required: [reasonCode, nextStep, message]
+            properties:
+              reasonCode: { type: string, description: 'A disclosed hold type code, or `RESTRICTED`' }
+              nextStep: { type: string }
+              message: { type: string }

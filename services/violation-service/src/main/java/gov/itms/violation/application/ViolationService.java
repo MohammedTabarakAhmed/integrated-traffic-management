@@ -6,6 +6,7 @@ import gov.itms.platform.security.CurrentActor;
 import gov.itms.violation.domain.BlackPoints;
 import gov.itms.violation.domain.CatalogueEntry;
 import gov.itms.violation.domain.DomainException;
+import gov.itms.violation.domain.UnpaidHold;
 import gov.itms.violation.domain.Violation;
 import java.time.Clock;
 import java.time.Duration;
@@ -15,10 +16,13 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -34,10 +38,14 @@ import org.springframework.transaction.annotation.Transactional;
  *       warning threshold notifies the driver (VF-033); reaching the suspension threshold suspends the licence for
  *       the configured period of that ordinal and places a hold on licence services (VF-032, UAT-1);</li>
  *   <li>payment-service's confirmation marks violations PAID (UAT-4); a supervisor cancels an open violation with a
- *       reason code from the configured list ({@value #CANCEL}; VF-021); every status change is audited (VF-020).</li>
+ *       reason code from the configured list ({@value #CANCEL}; VF-021); every status change is audited (VF-020);</li>
+ *   <li>a violation still open after the configured period places an UNPAID_FINES hold on the vehicle or the
+ *       driver's file, lifted once it is paid or cancelled (VF-023; ADR-058).</li>
  * </ul>
  */
 public class ViolationService {
+
+    private static final Logger LOG = LoggerFactory.getLogger(ViolationService.class);
 
     public static final String CATALOGUE_MANAGE = "violation.catalogue.manage";
     public static final String RECORD = "violation.record";
@@ -47,7 +55,7 @@ public class ViolationService {
 
     /** Settings (configuration). */
     public record Settings(BlackPoints.Policy points, Set<String> cancelReasons, String currency, ZoneId zone,
-                           Duration maxReportDelay) {
+                           Duration maxReportDelay, UnpaidHold.Policy unpaid) {
         public Settings {
             cancelReasons = Set.copyOf(cancelReasons);
         }
@@ -65,16 +73,19 @@ public class ViolationService {
     private final Ports.ViolationRepository repo;
     private final Ports.Payables payables;
     private final Ports.Holds holds;
+    private final Ports.UnpaidFineHolds unpaidHolds;
     private final AuditRecorder audit;
     private final DomainEventRecorder events;
     private final Settings settings;
     private final Clock clock;
 
     public ViolationService(Ports.ViolationRepository repo, Ports.Payables payables, Ports.Holds holds,
-                            AuditRecorder audit, DomainEventRecorder events, Settings settings, Clock clock) {
+                            Ports.UnpaidFineHolds unpaidHolds, AuditRecorder audit, DomainEventRecorder events,
+                            Settings settings, Clock clock) {
         this.repo = repo;
         this.payables = payables;
         this.holds = holds;
+        this.unpaidHolds = unpaidHolds;
         this.audit = audit;
         this.events = events;
         this.settings = settings;
@@ -270,6 +281,7 @@ public class ViolationService {
                 Map.of("status", "CANCELLED", "reasonCode", reasonCode), note);
         events.record("itms.violation.cancelled", number, Map.of("violationNumber", number, "reasonCode", reasonCode,
                 "recipientId", v.report().responsibleFileNumber()));
+        tryLiftUnpaidHold(v, CurrentActor.system("violation-unpaid-holds"));
         return v;
     }
 
@@ -289,6 +301,7 @@ public class ViolationService {
                 null);
         events.recordAs(system, "itms.violation.paid", number, Map.of("violationNumber", number, "recipientId",
                 v.report().responsibleFileNumber()));
+        tryLiftUnpaidHold(v, system);
         return true;
     }
 
@@ -304,6 +317,99 @@ public class ViolationService {
         audit.recordAs(CurrentActor.system("violation-payment-consumer"), "VIOLATION_REOPENED", ENTITY, number,
                 Map.of("status", "PAID"), Map.of("status", "OPEN"), "receipt cancelled");
         return true;
+    }
+
+    // ---- unpaid violations (VF-023)
+
+    /** Open violations overdue for an unpaid hold, oldest first; none when the policy is switched off (VF-023). */
+    @Transactional(readOnly = true)
+    public List<String> overdueForHold() {
+        UnpaidHold.Policy policy = settings.unpaid();
+        if (!policy.enabled()) {
+            return List.of();
+        }
+        return repo.overdueWithoutHold(clock.instant().minus(policy.after()), policy.batchSize()).stream()
+                .map(Violation::number).toList();
+    }
+
+    /**
+     * Places an UNPAID_FINES hold for the violation if it is still open, overdue and not held (VF-023, Q-012). The
+     * violation row stays locked while the hold is placed, so a second instance or a payment waits for it.
+     */
+    @Transactional
+    public boolean holdIfOverdue(String number) {
+        UnpaidHold.Policy policy = settings.unpaid();
+        Violation v = repo.findForUpdate(number).orElse(null);
+        Instant now = clock.instant();
+        if (!policy.enabled() || v == null || v.status() != Violation.Status.OPEN
+                || v.recordedAt().isAfter(now.minus(policy.after())) || repo.activeUnpaidHold(v.id()).isPresent()) {
+            return false;
+        }
+        UnpaidHold.Subject subject = UnpaidHold.subjectOf(v);
+        UUID id = UUID.randomUUID();
+        String holdId = unpaidHolds.place(subject, "UNPAID-" + id,
+                "Violation " + number + " unpaid for more than " + period(policy.after()) + " (VF-023)");
+        UnpaidHold hold = new UnpaidHold(id, v.id(), number, subject, holdId, now, null);
+        repo.insertUnpaidHold(hold);
+        CurrentActor system = CurrentActor.system("violation-unpaid-holds");
+        Map<String, Object> detail = unpaidSnapshot(hold, v);
+        audit.recordAs(system, "UNPAID_HOLD_PLACED", ENTITY, number, null, detail, "VF-023");
+        events.recordAs(system, "itms.violation.unpaid-hold-placed", number, detail);
+        return true;
+    }
+
+    /** Violations paid or cancelled whose unpaid hold is still active, oldest first (VF-023). */
+    @Transactional(readOnly = true)
+    public List<String> settledWithHold() {
+        return repo.settledWithActiveHold(settings.unpaid().batchSize()).stream()
+                .map(UnpaidHold::violationNumber).toList();
+    }
+
+    /** Lifts the unpaid hold of a paid or cancelled violation (VF-023); hold-eligibility-service errors propagate. */
+    @Transactional
+    public boolean liftIfSettled(String number) {
+        Violation v = repo.findForUpdate(number).orElse(null);
+        if (v == null || v.status() == Violation.Status.OPEN) {
+            return false;
+        }
+        return liftUnpaidHold(v, CurrentActor.system("violation-unpaid-holds"));
+    }
+
+    /** Lifts at once when a violation is paid or cancelled; if that fails the job lifts it on its next run. */
+    private void tryLiftUnpaidHold(Violation v, CurrentActor actor) {
+        try {
+            liftUnpaidHold(v, actor);
+        } catch (Ports.UnavailableException e) {
+            LOG.warn("Unpaid hold of {} not lifted now ({}); the job retries", v.number(), e.code());
+        }
+    }
+
+    private boolean liftUnpaidHold(Violation v, CurrentActor actor) {
+        UnpaidHold hold = repo.activeUnpaidHold(v.id()).orElse(null);
+        if (hold == null) {
+            return false;
+        }
+        unpaidHolds.lift(hold.holdId(), "Violation " + v.number() + " "
+                + v.status().name().toLowerCase(Locale.ROOT) + " (VF-023)");
+        Instant now = clock.instant();
+        repo.unpaidHoldLifted(hold.id(), now);
+        audit.recordAs(actor, "UNPAID_HOLD_LIFTED", ENTITY, v.number(), unpaidSnapshot(hold, v),
+                Map.of("liftedAt", now.toString(), "violationStatus", v.status().name()), "VF-023");
+        return true;
+    }
+
+    private static Map<String, Object> unpaidSnapshot(UnpaidHold hold, Violation v) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("violationNumber", v.number());
+        m.put("holdId", hold.holdId());
+        m.put("subjectType", hold.subject().type().name());
+        m.put("subjectId", hold.subject().id());
+        m.put("recipientId", v.report().responsibleFileNumber());
+        return m;
+    }
+
+    private static String period(Duration d) {
+        return d.toDays() >= 1 && d.toHours() % 24 == 0 ? d.toDays() + " days" : d.toMinutes() + " minutes";
     }
 
     // ---- helpers

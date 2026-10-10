@@ -3,9 +3,11 @@ package gov.itms.violation.infrastructure;
 import gov.itms.platform.client.ServiceCallException;
 import gov.itms.violation.application.Ports;
 import gov.itms.violation.application.ViolationService;
+import gov.itms.violation.domain.UnpaidHold;
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -14,6 +16,7 @@ import org.springframework.http.MediaType;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestClientResponseException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -122,6 +125,69 @@ final class Adapters {
             } catch (RestClientException | ServiceCallException e) {
                 LOG.warn("Suspension hold for a file could not be placed: {}", e.getClass().getSimpleName());
                 throw new Ports.UnavailableException("HOLDS_UNAVAILABLE", "the suspension hold was not placed", e);
+            }
+        }
+    }
+
+    /**
+     * {@code POST /v1/holds} and {@code /v1/holds/{id}/lifts} of hold-eligibility-service (CC-030) for violations
+     * left unpaid (VF-023): an open-ended UNPAID_FINES hold in module VIOLATIONS, lifted by this service once the
+     * violation is paid or cancelled. A hold that is no longer active (409) counts as lifted.
+     */
+    static class RemoteUnpaidFineHolds implements Ports.UnpaidFineHolds {
+
+        private final RestClient client;
+        private final List<String> blockedServices;
+        private final List<String> liftableByRoles;
+
+        RemoteUnpaidFineHolds(RestClient client, List<String> blockedServices, List<String> liftableByRoles) {
+            this.client = client;
+            this.blockedServices = List.copyOf(blockedServices);
+            this.liftableByRoles = List.copyOf(liftableByRoles);
+        }
+
+        @Override
+        public String place(UnpaidHold.Subject subject, String sourceRef, String reason) {
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("subject", Map.of("type", subject.type().name(), "id", subject.id()));
+            body.put("holdType", "UNPAID_FINES");
+            body.put("module", "VIOLATIONS");
+            body.put("source", "UNPAID_VIOLATION");
+            body.put("sourceRef", sourceRef);
+            body.put("reason", reason);
+            body.put("blockedServices", blockedServices);
+            body.put("liftableByRoles", liftableByRoles);
+            try {
+                RemoteHolds.HoldBody h = client.post().uri("/v1/holds").header("X-Channel", "BACKOFFICE")
+                        .header("Idempotency-Key", "hold-" + sourceRef.toLowerCase(Locale.ROOT))
+                        .contentType(MediaType.APPLICATION_JSON).body(body).retrieve()
+                        .body(RemoteHolds.HoldBody.class);
+                if (h == null || h.id() == null) {
+                    throw new Ports.UnavailableException("HOLDS_UNAVAILABLE", "the unpaid hold was not placed", null);
+                }
+                return h.id();
+            } catch (RestClientException | ServiceCallException e) {
+                LOG.warn("Unpaid hold could not be placed: {}", e.getClass().getSimpleName());
+                throw new Ports.UnavailableException("HOLDS_UNAVAILABLE", "the unpaid hold was not placed", e);
+            }
+        }
+
+        @Override
+        public void lift(String holdId, String reason) {
+            try {
+                client.post().uri("/v1/holds/{id}/lifts", holdId).header("X-Channel", "BACKOFFICE")
+                        .header("Idempotency-Key", "lift-" + holdId)
+                        .contentType(MediaType.APPLICATION_JSON).body(Map.of("reason", reason)).retrieve()
+                        .toBodilessEntity();
+            } catch (RestClientResponseException e) {
+                if (e.getStatusCode().value() == 409) {
+                    return; // already lifted or expired
+                }
+                LOG.warn("Unpaid hold could not be lifted: HTTP {}", e.getStatusCode().value());
+                throw new Ports.UnavailableException("HOLDS_UNAVAILABLE", "the unpaid hold was not lifted", e);
+            } catch (RestClientException | ServiceCallException e) {
+                LOG.warn("Unpaid hold could not be lifted: {}", e.getClass().getSimpleName());
+                throw new Ports.UnavailableException("HOLDS_UNAVAILABLE", "the unpaid hold was not lifted", e);
             }
         }
     }

@@ -895,6 +895,7 @@ services:
       ITMS_INSURANCE_HUB_URL: http://insurance-hub-mock:8080
       ITMS_FEES_URL: http://fees-service:8080
       ITMS_PAYMENTS_URL: http://payment-service:8080
+      ITMS_HOLDS_URL: http://hold-eligibility-service:8080
       ITMS_OIDC_TOKEN_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/token
       ITMS_SERVICE_CLIENT_ID: itms-vehicle-service
       ITMS_VEHICLES_CONSUMER_ENABLED: "true"
@@ -909,6 +910,8 @@ services:
         target: itms.clients.fees.client-secret
       - source: vehicle_service_client_secret
         target: itms.clients.payments.client-secret
+      - source: vehicle_service_client_secret
+        target: itms.clients.holds.client-secret
     volumes:
       - type: volume
         source: db-credentials
@@ -950,6 +953,10 @@ services:
       ITMS_OIDC_TOKEN_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/token
       ITMS_SERVICE_CLIENT_ID: itms-violation-service
       ITMS_VIOLATIONS_CONSUMER_ENABLED: "true"
+      # VF-023 locally: one minute instead of the 60-day default (Q-074), so smoke step 38 sees a hold within minutes.
+      ITMS_VIOLATIONS_UNPAID_HOLD_AFTER: PT1M
+      ITMS_VIOLATIONS_UNPAID_HOLD_INTERVAL: PT1M
+      ITMS_VIOLATIONS_UNPAID_HOLD_INITIAL_DELAY: PT30S
       # Short-lived login from OpenBao (ADR-039), files under /run/secrets/spring/datasource; owner role on connect.
       SPRING_DATASOURCE_HIKARI_CONNECTIONINITSQL: SET ROLE itms_owner
       ITMS_OIDC_ISSUER: http://localhost:8180/realms/itms

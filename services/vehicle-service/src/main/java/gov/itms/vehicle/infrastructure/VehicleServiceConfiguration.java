@@ -117,6 +117,7 @@ public class VehicleServiceConfiguration {
         return new VehicleService(new JdbcVehicleRepository(jdbc, json), new Adapters.HttpInsuranceRegister(insurer),
                 new Adapters.RemoteFeeQuotes(ServiceClients.create(client(environment, "fees"), clock, registry)),
                 new Adapters.RemotePayables(ServiceClients.create(client(environment, "payments"), clock, registry)),
+                new Adapters.RemoteEligibility(ServiceClients.create(client(environment, "holds"), clock, registry)),
                 properties.rules(), audit, events, clock);
     }
 

@@ -58,6 +58,15 @@ itms:
     max-report-delay: ${ITMS_VIOLATIONS_MAX_REPORT_DELAY:30d}
     suspension-blocked-services: ${ITMS_VIOLATIONS_SUSPENSION_BLOCKED_SERVICES:*}
     suspension-liftable-by-roles: ${ITMS_VIOLATIONS_SUSPENSION_LIFTABLE_BY:HOLD_SUPERVISOR}
+    # VF-023 (ADR-058, Q-074 interim): an open violation older than unpaid-hold-after places an UNPAID_FINES hold on the
+    # vehicle (or the driver's file), blocking these services; lifted when paid or cancelled. Durations are ISO-8601.
+    unpaid-hold-enabled: ${ITMS_VIOLATIONS_UNPAID_HOLD_ENABLED:true}
+    unpaid-hold-after: ${ITMS_VIOLATIONS_UNPAID_HOLD_AFTER:P60D}
+    unpaid-hold-interval: ${ITMS_VIOLATIONS_UNPAID_HOLD_INTERVAL:PT1H}
+    unpaid-hold-initial-delay: ${ITMS_VIOLATIONS_UNPAID_HOLD_INITIAL_DELAY:PT1M}
+    unpaid-hold-batch-size: ${ITMS_VIOLATIONS_UNPAID_HOLD_BATCH_SIZE:100}
+    unpaid-hold-blocked-services: ${ITMS_VIOLATIONS_UNPAID_HOLD_BLOCKED_SERVICES:VEH_RENEWAL}
+    unpaid-hold-liftable-by-roles: ${ITMS_VIOLATIONS_UNPAID_HOLD_LIFTABLE_BY:UNPAID_FINE_HOLD_MANAGER,HOLD_SUPERVISOR}
     consumer-enabled: ${ITMS_VIOLATIONS_CONSUMER_ENABLED:false}
     payment-topic: ${ITMS_VIOLATIONS_PAYMENT_TOPIC:itms.payment-service.events.v1}
   # Calls to other services with this service's own client-credentials account (ADR-034).

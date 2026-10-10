@@ -85,7 +85,7 @@ class VehicleApiIT {
     @DynamicPropertySource
     static void partners(DynamicPropertyRegistry registry) {
         registry.add("itms.vehicles.insurance.base-url", PARTNERS::baseUrl);
-        for (String client : List.of("fees", "payments")) {
+        for (String client : List.of("fees", "payments", "holds")) {
             registry.add("itms.clients." + client + ".base-url", PARTNERS::baseUrl);
             registry.add("itms.clients." + client + ".token-uri", () -> PARTNERS.baseUrl() + "/token");
             registry.add("itms.clients." + client + ".client-id", () -> PartnerStub.CLIENT_ID);
@@ -286,6 +286,33 @@ class VehicleApiIT {
                 officer());
         assertThat(renewed.getResponse().getStatus()).as(renewed.getResponse().getContentAsString()).isEqualTo(201);
         assertThat(body(renewed).get("kind").asString()).isEqualTo("RENEWAL");
+    }
+
+    @Test
+    @Tag("VL-011")
+    @Tag("VF-023")
+    @DisplayName("VL-011, VF-023: an unpaid-fines hold on the vehicle stops the renewal with the reason and next step")
+    void renewalBlockedByHold() throws Exception {
+        String vin = registeredVehicle("SHORT");
+        PARTNERS.policyEnds.put(vin, TODAY.plusMonths(6));
+        PARTNERS.heldSubjects.add(vin);
+        int quotes = PARTNERS.quotes.size();
+
+        MvcResult blocked = postAs("/v1/vehicles/" + vin + "/renewals", Map.of("customerCategory", "CITIZEN"),
+                officer());
+        assertThat(blocked.getResponse().getStatus()).isEqualTo(422);
+        assertThat(code(blocked)).isEqualTo("ELIGIBILITY_BLOCKED");
+        assertThat(body(blocked).get("nextStep").asString()).isEqualTo("PAY_FINES");
+        assertThat(body(blocked).get("blocks").get(0).get("reasonCode").asString()).isEqualTo("UNPAID_FINES");
+        assertThat(PARTNERS.quotes).as("no fee was asked").hasSize(quotes);
+        JsonNode check = PARTNERS.eligibilityChecks.getLast();
+        assertThat(check.get("serviceCode").asString()).isEqualTo("VEH_RENEWAL");
+        assertThat(check.get("subjects").findValuesAsString("type")).containsExactly("VEHICLE", "TRAFFIC_FILE");
+
+        PARTNERS.heldSubjects.remove(vin);
+        MvcResult renewed = postAs("/v1/vehicles/" + vin + "/renewals", Map.of("customerCategory", "CITIZEN"),
+                officer());
+        assertThat(renewed.getResponse().getStatus()).as(renewed.getResponse().getContentAsString()).isEqualTo(201);
     }
 
     @Test

@@ -83,6 +83,13 @@ itms:
       client-id: ${ITMS_SERVICE_CLIENT_ID:itms-vehicle-service}
       client-secret: ${ITMS_SERVICE_CLIENT_SECRET:}
       timeout: ${ITMS_PAYMENTS_TIMEOUT:3s}
+    # Renewal asks whether holds block it for the vehicle or its owner (VL-011, VF-023; ADR-058).
+    holds:
+      base-url: ${ITMS_HOLDS_URL:http://localhost:8084}
+      token-uri: ${ITMS_OIDC_TOKEN_URI:http://localhost:8180/realms/itms/protocol/openid-connect/token}
+      client-id: ${ITMS_SERVICE_CLIENT_ID:itms-vehicle-service}
+      client-secret: ${ITMS_SERVICE_CLIENT_SECRET:}
+      timeout: ${ITMS_HOLDS_TIMEOUT:3s}
   # API_SPECIFICATION §2, ADR-032: creating vehicles and starting registrations need an Idempotency-Key.
   idempotency:
     enabled: true

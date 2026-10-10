@@ -25,6 +25,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -46,6 +47,8 @@ class VehicleServiceTest {
     private final List<String> quotes = new ArrayList<>();
     private final Map<String, LocalDate> policyEnds = new HashMap<>();
     private boolean insurerDown;
+    private final Map<String, Ports.Eligibility.Block> heldSubjects = new HashMap<>();
+    private final List<String> eligibilityChecks = new ArrayList<>();
 
     private final VehicleService service = new VehicleService(repo, (vin, asOf) -> {
         if (insurerDown) {
@@ -61,6 +64,9 @@ class VehicleServiceTest {
     }, (itemRef, file, region, currency, lines) -> {
         payablesRegistered.add(itemRef);
         return UUID.randomUUID();
+    }, (serviceCode, subjects, channel) -> {
+        eligibilityChecks.add(serviceCode + " " + subjects.stream().map(s -> s.type() + ":" + s.id()).toList());
+        return subjects.stream().map(s -> heldSubjects.get(s.id())).filter(Objects::nonNull).toList();
     }, VehicleRulesTest.rules(), new AuditRecorder() {
         @Override
         public void record(String action, String entityType, String entityId, Object oldValue, Object newValue,
@@ -181,6 +187,25 @@ class VehicleServiceTest {
         assertThat(quotes.getLast()).isEqualTo("VEH_RENEWAL PRIVATE " + v.registrationExpiry());
         service.onPaid(VehicleService.itemRef(renewal.id()));
         assertThat(service.get(VIN, OFFICER).registrationExpiry()).isEqualTo(renewal.newExpiry());
+    }
+
+    @Test
+    @Tag("VL-011")
+    @Tag("VF-023")
+    @DisplayName("VL-011, VF-023: a hold on the vehicle or its owner's file stops the renewal before any fee")
+    void holdsBlockRenewal() {
+        Vehicle v = registered(VIN, 2025);
+        clock.set(v.registrationExpiry().minusDays(10).atStartOfDay(ZoneOffset.UTC).toInstant());
+        policyEnds.put(VIN, today().plusMonths(3));
+        heldSubjects.put(VIN, new Ports.Eligibility.Block("UNPAID_FINES", "PAY_FINES", "Pay your unpaid fines."));
+        int quotesBefore = quotes.size();
+        assertThatThrownBy(() -> service.startRenewal(VIN, "CITIZEN", OFFICER))
+                .isInstanceOf(EligibilityBlockedException.class).extracting("code").isEqualTo("ELIGIBILITY_BLOCKED");
+        assertThat(eligibilityChecks.getLast()).isEqualTo("VEH_RENEWAL [VEHICLE:" + VIN + ", TRAFFIC_FILE:"
+                + v.ownerFileNumber() + "]");
+        assertThat(quotes).as("stopped before any fee").hasSize(quotesBefore);
+        heldSubjects.clear();
+        assertThat(service.startRenewal(VIN, "CITIZEN", OFFICER).kind()).isEqualTo(Registration.Kind.RENEWAL);
     }
 
     @Test

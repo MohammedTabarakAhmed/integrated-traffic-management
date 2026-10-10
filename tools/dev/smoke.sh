@@ -832,4 +832,20 @@ wait_until 120 notified || { echo "FAIL: violation notices for $driver: '$(notic
 echo "   VF-015: $driver notified in the inbox: $(notices)"
 echo "   UAT-4: $v1 $v2 $v3 in one basket; two identical callbacks -> one receipt, second DUPLICATE; all three PAID"
 
+echo "38. Unpaid violations (VF-023; ADR-058): unpaid after the period, the vehicle gets an UNPAID_FINES hold; cancelling lifts it"
+S_MAKER=$(token dev.maker "$DEV_MAKER_PASSWORD"); S_CHECKER=$(token dev.checker "$DEV_CHECKER_PASSWORD") # 5-minute tokens
+uvin=$(printf 'WDB%014d' "$SMK")
+occurred=$(date -u -d '-1 hour' +%FT%TZ 2>/dev/null || "$PY" -c "import datetime; print((datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%SZ'))")
+unpaid=$(post_to "$VIO" "$S_MAKER" /v1/violations "{\"catalogueCode\":\"SMKP_$SMK\",\"occurredAt\":\"$occurred\",\"region\":\"DXB\",\"location\":\"Smoke road km 2\",\"plate\":\"S 2\",\"vin\":\"$uvin\",\"ownerFileNumber\":\"TF-SMKV-$SMK\",\"source\":\"OFFICER\"}" FIELD \
+  | body_of_pipe | json_field "['number']")
+vehicle_holds() { get_from http://localhost:8084 "$S_CHECKER" "/v1/holds?subjectType=VEHICLE&subjectId=$uvin" \
+  | "$PY" -c "import json,sys; print(','.join(h['holdType'] + '/' + h['status'] for h in json.load(sys.stdin)['items']))"; }
+unpaid_held() { [[ "$(vehicle_holds)" == *UNPAID_FINES/ACTIVE* ]]; }
+wait_until 240 unpaid_held || { echo "FAIL: no UNPAID_FINES hold on $uvin for $unpaid: '$(vehicle_holds)'"; exit 1; }
+S_CHECKER=$(token dev.checker "$DEV_CHECKER_PASSWORD") # the wait may have outlived the token
+expect "$(post_to "$VIO" "$S_CHECKER" "/v1/violations/$unpaid/cancellations" '{"reasonCode":"DUPLICATE","note":"smoke test"}')" 200
+unpaid_lifted() { [[ "$(vehicle_holds)" == *UNPAID_FINES/LIFTED* && "$(vehicle_holds)" != *ACTIVE* ]]; }
+wait_until 120 unpaid_lifted || { echo "FAIL: the UNPAID_FINES hold on $uvin was not lifted: '$(vehicle_holds)'"; exit 1; }
+echo "   $unpaid on $uvin: UNPAID_FINES hold placed after the (local, 1 minute) period, lifted when cancelled"
+
 echo "SMOKE OK"

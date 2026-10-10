@@ -2,6 +2,7 @@ package gov.itms.violation.application;
 
 import gov.itms.violation.domain.BlackPoints;
 import gov.itms.violation.domain.CatalogueEntry;
+import gov.itms.violation.domain.UnpaidHold;
 import gov.itms.violation.domain.Violation;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -58,6 +59,18 @@ public final class Ports {
         List<BlackPoints.Suspension> suspensions(String fileNumber);
 
         void insertSuspension(BlackPoints.Suspension suspension);
+
+        /** Open violations recorded before {@code recordedBefore} without an active unpaid hold, oldest first. */
+        List<Violation> overdueWithoutHold(Instant recordedBefore, int limit);
+
+        /** Active unpaid holds whose violation is no longer open (paid or cancelled), oldest first. */
+        List<UnpaidHold> settledWithActiveHold(int limit);
+
+        Optional<UnpaidHold> activeUnpaidHold(UUID violationId);
+
+        void insertUnpaidHold(UnpaidHold hold);
+
+        void unpaidHoldLifted(UUID id, Instant at);
     }
 
     /** payment-service payables (FN-002). */
@@ -75,6 +88,16 @@ public final class Ports {
         /** Places a hold on the file's licence services from {@code from} to {@code until}; returns the hold id. */
         String placeSuspensionHold(String fileNumber, LocalDate from, LocalDate until, String sourceRef,
                                    String reason);
+    }
+
+    /** hold-eligibility-service holds for unpaid violations (VF-023). */
+    public interface UnpaidFineHolds {
+
+        /** Places an UNPAID_FINES hold on the subject with no end date; returns the hold id. */
+        String place(UnpaidHold.Subject subject, String sourceRef, String reason);
+
+        /** Lifts the hold; a hold that is no longer active counts as lifted. */
+        void lift(String holdId, String reason);
     }
 
     public static class UnavailableException extends RuntimeException {

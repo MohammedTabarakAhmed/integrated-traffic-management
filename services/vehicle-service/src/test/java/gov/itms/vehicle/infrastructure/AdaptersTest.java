@@ -75,4 +75,23 @@ class AdaptersTest {
                 q.lines())).isInstanceOf(Ports.UnavailableException.class).extracting("code")
                 .isEqualTo("PAYMENTS_UNAVAILABLE");
     }
+
+    @Test
+    @Tag("VL-011")
+    @Tag("VF-023")
+    @DisplayName("VL-011: blocks come back as worded; no answer from hold-eligibility-service fails closed")
+    void eligibility() {
+        Adapters.RemoteEligibility eligibility = new Adapters.RemoteEligibility(client);
+        List<Ports.Eligibility.Subject> subjects = List.of(new Ports.Eligibility.Subject("VEHICLE", VIN),
+                new Ports.Eligibility.Subject("TRAFFIC_FILE", "TF-1"));
+        assertThat(eligibility.blocks("VEH_RENEWAL", subjects, "PORTAL")).isEmpty();
+        stub.heldSubjects.add("TF-1");
+        List<Ports.Eligibility.Block> blocks = eligibility.blocks("VEH_RENEWAL", subjects, "PORTAL");
+        assertThat(blocks).extracting(Ports.Eligibility.Block::nextStep).containsExactly("PAY_FINES");
+        assertThat(stub.eligibilityChecks.getLast().get("subjects").get(0).get("id").asString()).isEqualTo(VIN);
+        assertThatThrownBy(() -> new Adapters.RemoteEligibility(RestClient.builder()
+                .baseUrl("http://127.0.0.1:1").build()).blocks("VEH_RENEWAL", subjects, "PORTAL"))
+                .isInstanceOf(Ports.UnavailableException.class).extracting("code")
+                .isEqualTo("ELIGIBILITY_UNAVAILABLE");
+    }
 }

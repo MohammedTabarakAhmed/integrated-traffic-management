@@ -20,7 +20,8 @@ import tools.jackson.databind.ObjectMapper;
 
 /**
  * Real HTTP stand-ins for vehicle-service's partners: the identity provider's token endpoint, the insurance hub
- * (ICD-02 {@code GET /v1/policies}), fees-service quotes and payment-service payables. A VIN's policy end date is set
+ * (ICD-02 {@code GET /v1/policies}), fees-service quotes, payment-service payables and hold-eligibility-service
+ * eligibility checks ({@link #heldSubjects} are blocked). A VIN's policy end date is set
  * by the test ({@link #policyEnds}); a VIN in {@link #insurerDown} makes the hub answer 503; a VIN without a policy
  * gets 404.
  */
@@ -36,6 +37,9 @@ public final class PartnerStub implements AutoCloseable {
     public final List<String> payableKeys = new CopyOnWriteArrayList<>();
     public final List<String> authorisations = new CopyOnWriteArrayList<>();
     public volatile long feeAmount = 40000;
+    /** Subject ids with an UNPAID_FINES hold that blocks every service (hold-eligibility-service stand-in). */
+    public final List<String> heldSubjects = new CopyOnWriteArrayList<>();
+    public final List<JsonNode> eligibilityChecks = new CopyOnWriteArrayList<>();
     private final ObjectMapper json = new ObjectMapper();
     private final HttpServer server;
 
@@ -61,6 +65,18 @@ public final class PartnerStub implements AutoCloseable {
             payables.add(json.readTree(ex.getRequestBody().readAllBytes()));
             payableKeys.add(String.valueOf(ex.getRequestHeaders().getFirst("Idempotency-Key")));
             respond(ex, 201, "{\"id\":\"" + UUID.randomUUID() + "\"}");
+        });
+        server.createContext("/v1/eligibility-checks", ex -> {
+            JsonNode body = json.readTree(ex.getRequestBody().readAllBytes());
+            eligibilityChecks.add(body);
+            boolean held = false;
+            for (JsonNode s : body.get("subjects")) {
+                held |= heldSubjects.contains(s.get("id").asString());
+            }
+            respond(ex, 200, "{\"serviceCode\":\"" + body.get("serviceCode").asString() + "\",\"eligible\":"
+                    + !held + ",\"blocks\":" + (held ? "[{\"reasonCode\":\"UNPAID_FINES\",\"nextStep\":"
+                    + "\"PAY_FINES\",\"message\":\"There are unpaid fines. Pay them, then try again.\"}]" : "[]")
+                    + "}");
         });
         server.start();
     }

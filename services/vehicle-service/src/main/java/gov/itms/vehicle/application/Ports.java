@@ -105,6 +105,20 @@ public final class Ports {
                       List<FeeQuotes.Line> lines);
     }
 
+    /** hold-eligibility-service (CC-032): the holds that block a service for a vehicle and its owner (VL-011). */
+    public interface Eligibility {
+
+        record Subject(String type, String id) {
+        }
+
+        /** A hold's reason, next step and customer message, as hold-eligibility-service worded them. */
+        record Block(String reasonCode, String nextStep, String message) {
+        }
+
+        /** Every block of {@code serviceCode} for the subjects; empty when the service may go ahead. */
+        List<Block> blocks(String serviceCode, List<Subject> subjects, String channel);
+    }
+
     public static class UnavailableException extends RuntimeException {
         private final String code;
 

@@ -1,6 +1,7 @@
 package gov.itms.licensing.infrastructure;
 
 import gov.itms.licensing.application.LicenceService;
+import gov.itms.licensing.application.LicenceStatusService;
 import gov.itms.licensing.application.LicenceTransactions;
 import gov.itms.licensing.application.Ports;
 import gov.itms.platform.client.ServiceCallException;
@@ -208,10 +209,12 @@ final class Adapters {
     static class TrafficFileEventListener {
 
         private final LicenceTransactions transactions;
+        private final LicenceStatusService status;
         private final ObjectMapper json;
 
-        TrafficFileEventListener(LicenceTransactions transactions, ObjectMapper json) {
+        TrafficFileEventListener(LicenceTransactions transactions, LicenceStatusService status, ObjectMapper json) {
             this.transactions = transactions;
+            this.status = status;
             this.json = json;
         }
 
@@ -233,6 +236,49 @@ final class Adapters {
             }
             if ("itms.traffic-file.identity-updated".equals(type)) {
                 transactions.onRegisterChange(id, file, event.path("data").path("changeType").asString(""));
+            } else if ("itms.traffic-file.deceased".equals(type)) {
+                status.onDeceased(id, file);
+            }
+        }
+    }
+
+    /**
+     * Mirrors black-point suspensions decided by violation-service ({@code itms.violation.licence-suspended}, VF-032,
+     * UAT-1) on the person's licences. Each CloudEvent id is applied once.
+     */
+    static class ViolationEventListener {
+
+        private final LicenceStatusService status;
+        private final ObjectMapper json;
+
+        ViolationEventListener(LicenceStatusService status, ObjectMapper json) {
+            this.status = status;
+            this.json = json;
+        }
+
+        @KafkaListener(topics = "${itms.licensing.violation-topic:itms.violation-service.events.v1}",
+                groupId = "${itms.licensing.consumer-group:licensing-service}")
+        void onMessage(String message) {
+            JsonNode event;
+            try {
+                event = json.readTree(message);
+            } catch (RuntimeException e) {
+                LOG.warn("Skipping a violation event that is not JSON");
+                return;
+            }
+            if (!"itms.violation.licence-suspended".equals(event.path("type").asString(""))) {
+                return;
+            }
+            JsonNode data = event.path("data");
+            String id = event.path("id").asString("");
+            String file = data.path("fileNumber").asString("");
+            try {
+                status.onBlackPointSuspension(id, file, data.path("suspensionId").asString(""),
+                        data.path("ordinal").asInt(1), java.time.LocalDate.parse(data.path("from").asString()),
+                        java.time.LocalDate.parse(data.path("until").asString()));
+            } catch (RuntimeException e) {
+                LOG.error("Suspension event {} could not be applied: {}", id, e.getMessage());
+                throw e;
             }
         }
     }

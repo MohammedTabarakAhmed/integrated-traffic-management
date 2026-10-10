@@ -455,6 +455,85 @@ class JdbcLicenceRepository implements LicenceRepository {
         return i == null ? null : Timestamp.from(i);
     }
 
+    // ---- suspensions
+
+    @Override
+    public boolean insertSuspension(Records.Suspension s) {
+        return jdbc.sql("""
+                        insert into licence_suspension (id, licence_id, source, source_ref, ordinal, from_date,
+                            until_date, received_at)
+                        values (:id, :l, :source, :ref, :ordinal, :from, :until, :at)
+                        on conflict (licence_id, source, source_ref) do nothing""")
+                .param("id", s.id()).param("l", s.licenceId()).param("source", s.source())
+                .param("ref", s.sourceRef()).param("ordinal", s.ordinal()).param("from", Date.valueOf(s.from()))
+                .param("until", Date.valueOf(s.until())).param("at", Timestamp.from(s.receivedAt())).update() == 1;
+    }
+
+    @Override
+    public List<Records.Suspension> suspensions(UUID licenceId) {
+        return jdbc.sql("""
+                        select id, licence_id, source, source_ref, ordinal, from_date, until_date, received_at
+                        from licence_suspension where licence_id = :l order by from_date""")
+                .param("l", licenceId)
+                .query((rs, n) -> new Records.Suspension(rs.getObject("id", UUID.class),
+                        rs.getObject("licence_id", UUID.class), rs.getString("source"), rs.getString("source_ref"),
+                        rs.getInt("ordinal"), rs.getDate("from_date").toLocalDate(),
+                        rs.getDate("until_date").toLocalDate(), rs.getTimestamp("received_at").toInstant()))
+                .list();
+    }
+
+    @Override
+    public List<UUID> suspensionsEndedBefore(LocalDate day, int limit) {
+        return jdbc.sql("select id from licence where status = 'SUSPENDED' and suspended_until < :d"
+                        + " order by suspended_until limit :n")
+                .param("d", Date.valueOf(day)).param("n", limit).query(UUID.class).list();
+    }
+
+    // ---- no-objection certificates
+
+    private static final String CERTIFICATE = """
+            select id, licence_id, number, purpose, addressee, verification_code, issued_on, valid_until, request_id,
+                issued_at
+            from licence_certificate""";
+
+    @Override
+    public String nextCertificateNumber(int year) {
+        long n = jdbc.sql("select nextval('licence_certificate_seq')").query(Long.class).single();
+        return String.format("NOC-%d-%06d", year, n);
+    }
+
+    @Override
+    public void insertCertificate(Records.Certificate c) {
+        jdbc.sql("""
+                        insert into licence_certificate (id, licence_id, number, purpose, addressee,
+                            verification_code, issued_on, valid_until, request_id, issued_at)
+                        values (:id, :l, :number, :purpose, :addressee, :code, :issued, :valid, :request, :at)""")
+                .param("id", c.id()).param("l", c.licenceId()).param("number", c.number())
+                .param("purpose", c.purpose()).param("addressee", c.addressee()).param("code", c.verificationCode())
+                .param("issued", Date.valueOf(c.issuedOn())).param("valid", Date.valueOf(c.validUntil()))
+                .param("request", c.requestId()).param("at", Timestamp.from(c.issuedAt())).update();
+    }
+
+    @Override
+    public Optional<Records.Certificate> certificate(String number) {
+        return jdbc.sql(CERTIFICATE + " where number = :n").param("n", number).query(this::mapCertificate)
+                .optional();
+    }
+
+    @Override
+    public List<Records.Certificate> certificates(UUID licenceId) {
+        return jdbc.sql(CERTIFICATE + " where licence_id = :l order by issued_at desc").param("l", licenceId)
+                .query(this::mapCertificate).list();
+    }
+
+    private Records.Certificate mapCertificate(ResultSet rs, int n) throws SQLException {
+        return new Records.Certificate(rs.getObject("id", UUID.class), rs.getObject("licence_id", UUID.class),
+                rs.getString("number"), rs.getString("purpose"), rs.getString("addressee"),
+                rs.getString("verification_code"), rs.getDate("issued_on").toLocalDate(),
+                rs.getDate("valid_until").toLocalDate(), rs.getObject("request_id", UUID.class),
+                rs.getTimestamp("issued_at").toInstant());
+    }
+
     @SuppressWarnings("unchecked")
     private LicenceRequest mapRequest(ResultSet rs, int n) throws SQLException {
         Map<String, String> payload = new LinkedHashMap<>();

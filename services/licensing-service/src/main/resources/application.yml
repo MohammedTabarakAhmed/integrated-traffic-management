@@ -56,6 +56,7 @@ itms:
       "[RENEWAL]": LIC_RENEWAL
       "[REPLACEMENT]": LIC_REPLACEMENT
       "[CHANGE]": LIC_CHANGE
+      "[NOC]": LIC_NOC
     condition-codes: ${ITMS_LICENSING_CONDITION_CODES:CORRECTIVE_LENSES,HEARING_AID,ADAPTED_VEHICLE}
     # Renewal (DL-051; BRD default window 90 days). Eye test validity and the auto-renewal notice period are interim
     # answers (Q-077).
@@ -63,6 +64,13 @@ itms:
     eye-test-validity-days: ${ITMS_LICENSING_EYE_TEST_VALIDITY_DAYS:180}
     lenses-condition: ${ITMS_LICENSING_LENSES_CONDITION:CORRECTIVE_LENSES}
     traffic-file-topic: ${ITMS_LICENSING_TRAFFIC_FILE_TOPIC:itms.traffic-file-service.events.v1}
+    violation-topic: ${ITMS_LICENSING_VIOLATION_TOPIC:itms.violation-service.events.v1}
+    # DL-058, CONF-001 interim (a): a black-point event suspends; cancellation after the Nth suspension is off (0).
+    # The no-objection certificate validity is an interim answer (Q-078).
+    status:
+      cancel-after-suspensions: ${ITMS_LICENSING_CANCEL_AFTER_SUSPENSIONS:0}
+      noc-validity-days: ${ITMS_LICENSING_NOC_VALIDITY_DAYS:30}
+      suspension-end-interval: ${ITMS_LICENSING_SUSPENSION_END_INTERVAL:15m}
     auto-renewal:
       enabled: ${ITMS_LICENSING_AUTO_RENEWAL_ENABLED:true}
       notice-days: ${ITMS_LICENSING_AUTO_RENEWAL_NOTICE_DAYS:14}
@@ -110,6 +118,8 @@ itms:
       - /v1/licences/*/auto-renewal
       - /v1/licences/*/auto-renewal/withdrawal
       - /v1/eye-tests
+      - /v1/licences/*/cancellations
+      - /v1/licences/*/no-objection-certificates
     retention: ${ITMS_IDEMPOTENCY_RETENTION:24h}
     lock-timeout: ${ITMS_IDEMPOTENCY_LOCK_TIMEOUT:30s}
     cleanup-interval: ${ITMS_IDEMPOTENCY_CLEANUP_INTERVAL:15m}

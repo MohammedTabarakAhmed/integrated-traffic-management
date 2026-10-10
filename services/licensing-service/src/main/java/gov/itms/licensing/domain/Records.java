@@ -173,6 +173,53 @@ public final class Records {
         }
     }
 
+    // ---- suspensions (DL-058, VF-032, UAT-1)
+
+    /** A suspension of a licence, as decided by violation-service (black points) and mirrored here. */
+    public record Suspension(UUID id, UUID licenceId, String source, String sourceRef, int ordinal, LocalDate from,
+                             LocalDate until, Instant receivedAt) {
+        public Suspension {
+            Objects.requireNonNull(id);
+            Objects.requireNonNull(licenceId);
+            Objects.requireNonNull(source);
+            Objects.requireNonNull(from);
+            Objects.requireNonNull(until);
+            if (until.isBefore(from)) {
+                throw DomainException.validation("SUSPENSION_DATES_INVALID", "a suspension ends before it starts",
+                        List.of("DL-058"));
+            }
+        }
+    }
+
+    // ---- no-objection certificates (DL-059)
+
+    /** A no-objection certificate on a licence, numbered per year and checked with its verification code. */
+    public record Certificate(UUID id, UUID licenceId, String number, String purpose, String addressee,
+                              String verificationCode, LocalDate issuedOn, LocalDate validUntil, UUID requestId,
+                              Instant issuedAt) {
+        public Certificate {
+            Objects.requireNonNull(id);
+            Objects.requireNonNull(licenceId);
+            Objects.requireNonNull(number);
+            Objects.requireNonNull(verificationCode);
+            Objects.requireNonNull(issuedOn);
+            Objects.requireNonNull(validUntil);
+        }
+
+        public boolean validOn(LocalDate day) {
+            return !day.isBefore(issuedOn) && !day.isAfter(validUntil);
+        }
+    }
+
+    /** Free text of 3 to 200 printable characters (purpose, addressee). */
+    public static String text(String field, String value, String ref) {
+        String v = value == null ? "" : value.strip();
+        if (v.length() < 3 || v.length() > 200 || v.chars().anyMatch(Character::isISOControl)) {
+            throw invalid(field, ref);
+        }
+        return v;
+    }
+
     private static DomainException invalid(String field, String ref) {
         return DomainException.validation("FIELD_INVALID", field + " is missing or malformed", List.of(ref), field);
     }

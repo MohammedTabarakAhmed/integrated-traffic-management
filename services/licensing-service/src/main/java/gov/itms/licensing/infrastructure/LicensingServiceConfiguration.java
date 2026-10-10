@@ -3,6 +3,7 @@ package gov.itms.licensing.infrastructure;
 import gov.itms.licensing.application.LicenceClassService;
 import gov.itms.licensing.application.LicenceNumberService;
 import gov.itms.licensing.application.LicenceService;
+import gov.itms.licensing.application.LicenceStatusService;
 import gov.itms.licensing.application.LicenceTransactions;
 import gov.itms.licensing.application.LicensingRules;
 import gov.itms.licensing.domain.LicenceRequest;
@@ -40,7 +41,8 @@ import tools.jackson.databind.ObjectMapper;
  * events, and the automatic renewal job.
  */
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties(LicensingServiceConfiguration.LicensingProperties.class)
+@EnableConfigurationProperties({LicensingServiceConfiguration.LicensingProperties.class,
+        LicensingServiceConfiguration.StatusProperties.class})
 public class LicensingServiceConfiguration {
 
     /**
@@ -84,6 +86,20 @@ public class LicensingServiceConfiguration {
             return new LicensingRules(probationMonths, byKind, Set.copyOf(conditionCodes), renewalWindowDays,
                     eyeTestValidityDays, autoRenewal.noticeDays(),
                     lensesCondition == null || lensesCondition.isBlank() ? null : lensesCondition);
+        }
+    }
+
+    /**
+     * {@code itms.licensing.status.*}: cancellation after the Nth black-point suspension (0 = never, CONF-001), the
+     * no-objection certificate validity (Q-078) and the suspension end job.
+     */
+    @ConfigurationProperties("itms.licensing.status")
+    public record StatusProperties(@DefaultValue("0") int cancelAfterSuspensions,
+                                   @DefaultValue("30") int nocValidityDays,
+                                   @DefaultValue("15m") Duration suspensionEndInterval) {
+
+        LicenceStatusService.StatusRules rules() {
+            return new LicenceStatusService.StatusRules(cancelAfterSuspensions, nocValidityDays);
         }
     }
 
@@ -134,6 +150,16 @@ public class LicensingServiceConfiguration {
         return transactions;
     }
 
+    @Bean
+    LicenceStatusService licenceStatusService(LicenceService licences, StatusProperties properties,
+                                              AuditRecorder audit, DomainEventRecorder events,
+                                              ProcessedEvents processed, Clock clock) {
+        LicenceStatusService status = new LicenceStatusService(licences, properties.rules(), audit, events,
+                processed, clock);
+        licences.addHandler(status);
+        return status;
+    }
+
     private static ServiceClientProperties client(Environment environment, String name) {
         return Binder.get(environment).bind("itms.clients." + name, ServiceClientProperties.class)
                 .orElseThrow(() -> new IllegalStateException("itms.clients." + name + " is not configured"))
@@ -171,6 +197,45 @@ public class LicensingServiceConfiguration {
         }
     }
 
+    /** Puts licences back in force the day after their suspension ends (DL-058, UAT-1). */
+    public static class SuspensionEndJob {
+
+        private static final Logger LOG = LoggerFactory.getLogger(SuspensionEndJob.class);
+        private final LicenceStatusService status;
+
+        public SuspensionEndJob(LicenceStatusService status) {
+            this.status = status;
+        }
+
+        @Scheduled(initialDelayString = "${itms.licensing.status.suspension-end-interval:15m}",
+                fixedDelayString = "${itms.licensing.status.suspension-end-interval:15m}")
+        public void run() {
+            int n = 0;
+            for (UUID licenceId : status.suspensionsEnded(500)) {
+                try {
+                    if (status.endSuspension(licenceId)) {
+                        n++;
+                    }
+                } catch (RuntimeException e) {
+                    LOG.error("Ending the suspension of licence {} failed; retried on the next run", licenceId, e);
+                }
+            }
+            if (n > 0) {
+                LOG.info("Suspensions ended: {} licences in force again", n);
+            }
+        }
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    @EnableScheduling
+    static class SuspensionEndConfiguration {
+
+        @Bean
+        SuspensionEndJob suspensionEndJob(LicenceStatusService status) {
+            return new SuspensionEndJob(status);
+        }
+    }
+
     @Configuration(proxyBeanMethods = false)
     @EnableScheduling
     @ConditionalOnProperty(name = "itms.licensing.auto-renewal.enabled", havingValue = "true", matchIfMissing = true)
@@ -194,8 +259,13 @@ public class LicensingServiceConfiguration {
 
         @Bean
         Adapters.TrafficFileEventListener trafficFileEventListener(LicenceTransactions transactions,
-                                                                   ObjectMapper json) {
-            return new Adapters.TrafficFileEventListener(transactions, json);
+                                                                   LicenceStatusService status, ObjectMapper json) {
+            return new Adapters.TrafficFileEventListener(transactions, status, json);
+        }
+
+        @Bean
+        Adapters.ViolationEventListener violationEventListener(LicenceStatusService status, ObjectMapper json) {
+            return new Adapters.ViolationEventListener(status, json);
         }
     }
 }

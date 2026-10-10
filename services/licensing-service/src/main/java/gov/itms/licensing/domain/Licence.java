@@ -172,6 +172,41 @@ public final class Licence {
         }
     }
 
+    /** Why a licence ended (DL-058): surrendered on the holder's request, or cancelled for the other grounds. */
+    public enum EndGround { REQUEST, DEATH, COURT_ORDER, BLACK_POINTS }
+
+    /**
+     * DL-058, VF-032, UAT-1: suspended from {@code from} to {@code until}; a licence already suspended stays
+     * suspended to the later end. Every class in force is suspended with it.
+     */
+    public void suspend(LocalDate until) {
+        requireNotEnded();
+        if (suspendedUntil == null || until.isAfter(suspendedUntil)) {
+            suspendedUntil = until;
+        }
+        status = Status.SUSPENDED;
+        classes.replaceAll(c -> c.status() == ClassStatus.ACTIVE ? c.withStatus(ClassStatus.SUSPENDED) : c);
+    }
+
+    /** The suspension is over on {@code today}: the licence and its suspended classes are in force again. */
+    public boolean endSuspensionOn(LocalDate today) {
+        if (status != Status.SUSPENDED || suspendedUntil == null || !suspendedUntil.isBefore(today)) {
+            return false;
+        }
+        status = Status.ACTIVE;
+        suspendedUntil = null;
+        classes.replaceAll(c -> c.status() == ClassStatus.SUSPENDED ? c.withStatus(ClassStatus.ACTIVE) : c);
+        return true;
+    }
+
+    /** DL-058: surrendered on request, cancelled on the other grounds; every class ends with it. */
+    public void end(EndGround ground) {
+        requireNotEnded();
+        status = ground == EndGround.REQUEST ? Status.SURRENDERED : Status.CANCELLED;
+        suspendedUntil = null;
+        classes.replaceAll(c -> c.status() == ClassStatus.CANCELLED ? c : c.withStatus(ClassStatus.CANCELLED));
+    }
+
     /** Renewal and similar changes need a licence in force, not suspended or ended. */
     public void requireActive() {
         requireNotEnded();

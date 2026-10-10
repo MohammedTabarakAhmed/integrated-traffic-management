@@ -3,7 +3,7 @@ info:
   title: ITMS Licensing Service
   version: 1.0.0
   description: |
-    Driving licences (DL-020..DL-023, DL-050..DL-065). This version covers the licence class catalogue (slice 3.1), licence number ranges (slice 3.2), licences issued from passed examination files (slice 3.3) and renewal, automatic renewal, replacement, change of details, cards and eye tests (slice 3.4).
+    Driving licences (DL-020..DL-023, DL-050..DL-065). This version covers the licence class catalogue (slice 3.1), licence number ranges (slice 3.2), licences issued from passed examination files (slice 3.3) and renewal, automatic renewal, replacement, change of details, cards and eye tests (slice 3.4), cancellation, suspension, status enquiry and no-objection certificates (slice 3.5).
 
     Licence classes (DL-020, DL-062; BRD §6.2): a class (for example `LIGHT`) has rules per customer category —
     minimum age, optional maximum age, the required tests in order (test type codes of examination-service, DL-043),
@@ -31,6 +31,7 @@ servers:
 security:
   - bearerAuth: []
 tags:
+  - name: Licence status
   - name: Licence transactions
   - name: Licence classes
   - name: Licence numbers
@@ -1023,6 +1024,171 @@ paths:
         '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
 
+  /v1/licences/{licenceId}/cancellations:
+    post:
+      tags: [Licence status]
+      operationId: endLicence
+      summary: Cancel a licence or record its surrender (DL-058)
+      description: |
+        `REQUEST` surrenders the licence; `DEATH` and `COURT_ORDER` cancel it and need the reference of the death record or
+        order (422 `REFERENCE_REQUIRED`). Every class and live card is cancelled; `itms.licence.surrendered` or
+        `itms.licence.cancelled` is published. A cancelled or surrendered licence never changes (409 `LICENCE_ENDED`).
+        Deaths reported by the identity register (`itms.traffic-file.deceased`) cancel the person's licences automatically.
+        Black-point suspensions come from violation-service (`itms.violation.licence-suspended`, VF-032, UAT-1): the licence
+        and its classes are suspended to the end date and in force again the day after; with
+        `itms.licensing.status.cancel-after-suspensions` set, that suspension cancels the licence instead (CONF-001, off by
+        default).
+      x-itms-permission: licensing.licence.cancel
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/LicenceId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EndRequest' }
+      responses:
+        '200':
+          description: OK
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Licence' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/licences/{licenceId}/suspensions:
+    get:
+      tags: [Licence status]
+      operationId: listLicenceSuspensions
+      summary: The black-point suspensions of a licence
+      x-itms-permission: licensing.licence.read
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/LicenceId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuspensionCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/licence-status/{licenceNumber}:
+    get:
+      tags: [Licence status]
+      operationId: getLicenceStatus
+      summary: Licence status enquiry for the holder and authorised partners (DL-059)
+      description: |
+        Number, status (an active licence past expiry reads EXPIRED), expiry, suspension end, probation and classes; no
+        conditions or personal details. Every enquiry is audited.
+      x-itms-permission: licensing.licence.status
+      x-itms-scope: national
+      parameters:
+        - name: licenceNumber
+          in: path
+          required: true
+          schema: { type: string, maxLength: 20 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LicenceStatus' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/licences/{licenceId}/no-objection-certificates:
+    post:
+      tags: [Licence status]
+      operationId: requestNoObjectionCertificate
+      summary: Ask for a no-objection certificate (DL-059)
+      description: |
+        Holds are checked for service `LIC_NOC`; the fee is quoted and the payable registered. On payment a certificate
+        `NOC-<year>-<sequence>` with a verification code, valid `itms.licensing.status.noc-validity-days`, is issued and
+        `itms.licence.noc-issued` published.
+      x-itms-permission: licensing.noc.request
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/LicenceId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CertificateRequest' }
+      responses:
+        '201':
+          description: Request opened; waits for payment
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LicenceRequest' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [Licence status]
+      operationId: listNoObjectionCertificates
+      summary: A licence's no-objection certificates
+      x-itms-permission: licensing.licence.read
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/LicenceId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CertificateCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/no-objection-certificates/{number}:
+    get:
+      tags: [Licence status]
+      operationId: verifyNoObjectionCertificate
+      summary: Verify a no-objection certificate with its code (DL-059)
+      x-itms-permission: licensing.licence.status
+      x-itms-scope: national
+      parameters:
+        - name: number
+          in: path
+          required: true
+          schema: { type: string, maxLength: 30 }
+        - name: code
+          in: query
+          required: true
+          schema: { type: string, maxLength: 20 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CertificateCheck' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1352,7 +1518,7 @@ components:
         reason: { type: string, minLength: 3, maxLength: 500 }
     RequestKind:
       type: string
-      enum: [ISSUE, RENEWAL, REPLACEMENT, CHANGE]
+      enum: [ISSUE, RENEWAL, REPLACEMENT, CHANGE, NOC]
     LicenceRequest:
       type: object
       additionalProperties: false
@@ -1544,6 +1710,80 @@ components:
         noticeAt: { oneOf: [ { type: string, format: date-time }, { type: 'null' } ] }
         attemptForExpiry: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
         withdrawnAt: { oneOf: [ { type: string, format: date-time }, { type: 'null' } ] }
+    EndRequest:
+      type: object
+      additionalProperties: false
+      required: [ground, reason]
+      properties:
+        ground: { type: string, enum: [REQUEST, DEATH, COURT_ORDER] }
+        reference: { oneOf: [ { type: string, minLength: 3, maxLength: 200 }, { type: 'null' } ] }
+        reason: { type: string, minLength: 3, maxLength: 500 }
+    Suspension:
+      type: object
+      additionalProperties: false
+      required: [id, source, sourceRef, ordinal, from, until, receivedAt]
+      properties:
+        id: { type: string, format: uuid }
+        source: { type: string }
+        sourceRef: { type: string }
+        ordinal: { type: integer }
+        from: { type: string, format: date }
+        until: { type: string, format: date }
+        receivedAt: { type: string, format: date-time }
+    SuspensionCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Suspension' } }
+    LicenceStatus:
+      type: object
+      additionalProperties: false
+      required: [licenceNumber, status, expiresOn, probationary, classes]
+      properties:
+        licenceNumber: { type: string }
+        status: { type: string, enum: [ACTIVE, EXPIRED, SUSPENDED, CANCELLED, SURRENDERED] }
+        expiresOn: { type: string, format: date }
+        suspendedUntil: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
+        probationary: { type: boolean }
+        classes: { type: array, items: { $ref: '#/components/schemas/LicenceClass' } }
+    CertificateRequest:
+      type: object
+      additionalProperties: false
+      required: [purpose, addressee]
+      properties:
+        purpose: { type: string, minLength: 3, maxLength: 200 }
+        addressee: { type: string, minLength: 3, maxLength: 200 }
+    Certificate:
+      type: object
+      additionalProperties: false
+      required: [id, number, purpose, addressee, verificationCode, issuedOn, validUntil, issuedAt]
+      properties:
+        id: { type: string, format: uuid }
+        number: { type: string }
+        purpose: { type: string }
+        addressee: { type: string }
+        verificationCode: { type: string }
+        issuedOn: { type: string, format: date }
+        validUntil: { type: string, format: date }
+        issuedAt: { type: string, format: date-time }
+    CertificateCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Certificate' } }
+    CertificateCheck:
+      type: object
+      additionalProperties: false
+      required: [certificateNumber, licenceNumber, issuedOn, validUntil, valid, licenceStatus]
+      properties:
+        certificateNumber: { type: string }
+        licenceNumber: { type: string }
+        issuedOn: { type: string, format: date }
+        validUntil: { type: string, format: date }
+        valid: { type: boolean, description: Genuine and valid today }
+        licenceStatus: { type: string }
     Problem:
       type: object
       required: [status, code]

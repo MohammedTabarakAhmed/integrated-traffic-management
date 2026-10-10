@@ -107,4 +107,22 @@ public interface LicenceRepository {
 
     /** Active consents whose licence is active and expires on or before {@code expiringBy}. */
     List<Records.AutoRenewal> autoRenewalsDue(LocalDate expiringBy, int limit);
+
+    // suspensions (DL-058)
+    /** False when this suspension was already recorded. */
+    boolean insertSuspension(Records.Suspension suspension);
+
+    List<Records.Suspension> suspensions(UUID licenceId);
+
+    /** Suspended licences whose suspension ended before {@code day}. */
+    List<UUID> suspensionsEndedBefore(LocalDate day, int limit);
+
+    // no-objection certificates (DL-059)
+    String nextCertificateNumber(int year);
+
+    void insertCertificate(Records.Certificate certificate);
+
+    Optional<Records.Certificate> certificate(String number);
+
+    List<Records.Certificate> certificates(UUID licenceId);
 }

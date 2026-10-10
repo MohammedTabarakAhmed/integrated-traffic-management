@@ -1,0 +1,208 @@
+openapi: 3.1.0
+info:
+  title: ITMS Rental Service
+  version: 1.0.0
+  description: Rental companies and timestamped contracts (TR-020, TR-021, TR-030, TR-033).
+servers: [{ url: / }]
+security: [{ bearerAuth: [] }]
+tags: [{ name: Rental }]
+paths:
+  /v1/rental-companies:
+    post:
+      tags: [Rental]
+      summary: Register a rental company
+      operationId: registerRentalCompany
+      x-itms-permission: rental.company.manage
+      x-itms-scope: [region]
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [trafficFileNumber, commercialLicence, region]
+              properties:
+                trafficFileNumber: { type: string, maxLength: 40 }
+                commercialLicence: { type: string, maxLength: 100 }
+                region: { type: string, maxLength: 40, pattern: '^[A-Z0-9_-]{1,40}$' }
+      responses:
+        '201': { description: Registered rental company }
+        '401': { description: Unauthorized }
+        '403': { description: Outside the caller's regional scope }
+        '409': { description: Company file or commercial licence already exists }
+  /v1/rental-companies/{companyFile}/branches:
+    post:
+      tags: [Rental]
+      summary: Register a company branch
+      operationId: registerRentalBranch
+      x-itms-permission: rental.company.manage
+      x-itms-scope: [region]
+      parameters:
+        - {name: companyFile, in: path, required: true, schema: {type: string, maxLength: 40}}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [code, name, region]
+              properties:
+                code: {type: string, maxLength: 40, pattern: '^[A-Z0-9][A-Z0-9_-]{0,39}$'}
+                name: {type: string, minLength: 1, maxLength: 120}
+                region: {type: string, maxLength: 40}
+      responses:
+        '201': {description: Branch registered}
+        '400': {description: Branch region differs from the company region}
+        '401': {description: Unauthorized}
+        '403': {description: Outside the company's region}
+  /v1/rental-companies/{companyFile}/suspensions:
+    post:
+      tags: [Rental]
+      summary: Suspend a rental company for non-compliance
+      operationId: suspendRentalCompany
+      x-itms-permission: rental.company.manage
+      x-itms-scope: [region]
+      parameters:
+        - {name: companyFile, in: path, required: true, schema: {type: string, maxLength: 40}}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false, required: [reason], properties: {reason: {type: string, minLength: 1, maxLength: 500}}}
+      responses:
+        '200': {description: Company suspended}
+        '401': {description: Unauthorized}
+        '403': {description: Outside the company's region}
+        '409': {description: Company already suspended}
+  /v1/rental-companies/{companyFile}/reinstatements:
+    post:
+      tags: [Rental]
+      summary: Reinstate a suspended rental company
+      operationId: reinstateRentalCompany
+      x-itms-permission: rental.company.manage
+      x-itms-scope: [region]
+      parameters:
+        - {name: companyFile, in: path, required: true, schema: {type: string, maxLength: 40}}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false, required: [reason], properties: {reason: {type: string, minLength: 1, maxLength: 500}}}
+      responses:
+        '200': {description: Company reinstated}
+        '401': {description: Unauthorized}
+        '403': {description: Outside the company's region}
+        '409': {description: Company is already active}
+  /v1/rental-contracts:
+    post:
+      tags: [Rental]
+      summary: Record a rental contract
+      operationId: createRentalContract
+      x-itms-permission: rental.contract.record
+      x-itms-scope: [region]
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [companyFile, vehiclePlate, startsAt, endsAt, pickupBranch, returnBranch, type, bondMinor]
+              properties:
+                companyFile: { type: string, maxLength: 40 }
+                vehiclePlate: { type: string, maxLength: 40 }
+                renterFile: { type: string, maxLength: 40 }
+                visitorPassport: { type: string, maxLength: 100 }
+                foreignLicence: { type: string, maxLength: 100 }
+                additionalDrivers: { type: array, maxItems: 10, items: { type: string, maxLength: 40 } }
+                startsAt: { type: string, format: date-time }
+                endsAt: { type: string, format: date-time }
+                pickupBranch: { type: string, maxLength: 100 }
+                returnBranch: { type: string, maxLength: 100 }
+                type: { type: string, enum: [DAILY, MONTHLY, LONG_TERM_LEASE, LEASE_TO_OWN] }
+                bondMinor: { type: integer, minimum: 0 }
+      responses:
+        '201': { description: Contract recorded }
+        '401': { description: Unauthorized }
+        '403': { description: Outside the company's region }
+        '400': { description: Invalid renter identity or date range }
+        '409': { description: Company not active }
+  /v1/rental-contracts/{id}:
+    get:
+      tags: [Rental]
+      summary: Read a rental contract
+      operationId: getRentalContract
+      x-itms-permission: rental.contract.read
+      x-itms-scope: [region]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: Rental contract }
+        '401': { description: Unauthorized }
+        '403': { description: Outside the company's region }
+        '404': { description: Contract not found }
+  /v1/rental-contracts/{id}/inspections:
+    post:
+      tags: [Rental]
+      summary: Record pickup or return vehicle condition and damage (TR-034)
+      operationId: recordRentalInspection
+      x-itms-permission: rental.contract.record
+      x-itms-scope: [region]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [type, inspectedAt, odometerKm, fuelPercent, damageNotes, evidenceIds]
+              properties:
+                type: { type: string, enum: [PICKUP, RETURN] }
+                inspectedAt: { type: string, format: date-time }
+                odometerKm: { type: integer, minimum: 0 }
+                fuelPercent: { type: integer, minimum: 0, maximum: 100 }
+                damageNotes: { type: array, maxItems: 100, items: { type: string, minLength: 1, maxLength: 500 } }
+                evidenceIds: { type: array, maxItems: 100, items: { type: string, minLength: 1, maxLength: 64 } }
+                notes: { type: string, maxLength: 1000 }
+      responses:
+        '201': { description: Inspection snapshot recorded }
+        '401': { description: Unauthorized }
+        '403': { description: Outside the company's region }
+        '404': { description: Contract not found }
+        '409': { description: Pickup inspection is required before return }
+        '422': { description: Invalid inspection or odometer reading }
+    get:
+      tags: [Rental]
+      summary: Read pickup and return inspections
+      operationId: listRentalInspections
+      x-itms-permission: rental.contract.read
+      x-itms-scope: [region]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Inspection snapshots for the contract }
+        '401': { description: Unauthorized }
+        '403': { description: Outside the company's region }
+        '404': { description: Contract not found }
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, minLength: 16, maxLength: 128 }

@@ -67,8 +67,14 @@ itms:
     unpaid-hold-batch-size: ${ITMS_VIOLATIONS_UNPAID_HOLD_BATCH_SIZE:100}
     unpaid-hold-blocked-services: ${ITMS_VIOLATIONS_UNPAID_HOLD_BLOCKED_SERVICES:VEH_RENEWAL}
     unpaid-hold-liftable-by-roles: ${ITMS_VIOLATIONS_UNPAID_HOLD_LIFTABLE_BY:UNPAID_FINE_HOLD_MANAGER,HOLD_SUPERVISOR}
+    objection-window: ${ITMS_VIOLATIONS_OBJECTION_WINDOW:30d}
     consumer-enabled: ${ITMS_VIOLATIONS_CONSUMER_ENABLED:false}
     payment-topic: ${ITMS_VIOLATIONS_PAYMENT_TOPIC:itms.payment-service.events.v1}
+    # Increment 9: partner-state violations, payments abroad, forwarded objections and decisions (XB-002..XB-005).
+    crossborder-topic: ${ITMS_VIOLATIONS_CROSSBORDER_TOPIC:itms.crossborder-service.events.v1}
+    crossborder:
+      accepted-objection-reason: ${ITMS_VIOLATIONS_XB_ACCEPTED_OBJECTION_REASON:OBJECTION_ACCEPTED}
+      beneficiary: ${ITMS_VIOLATIONS_XB_BENEFICIARY:CROSSBORDER_SETTLEMENT}
   # Calls to other services with this service's own client-credentials account (ADR-034).
   clients:
     payments:
@@ -77,6 +83,12 @@ itms:
       client-id: ${ITMS_SERVICE_CLIENT_ID:itms-violation-service}
       client-secret: ${ITMS_SERVICE_CLIENT_SECRET:}
       timeout: ${ITMS_PAYMENTS_TIMEOUT:3s}
+    vehicles:
+      base-url: ${ITMS_VEHICLES_URL:http://localhost:8095}
+      token-uri: ${ITMS_OIDC_TOKEN_URI:http://localhost:8180/realms/itms/protocol/openid-connect/token}
+      client-id: ${ITMS_SERVICE_CLIENT_ID:itms-violation-service}
+      client-secret: ${ITMS_SERVICE_CLIENT_SECRET:}
+      timeout: ${ITMS_VEHICLES_TIMEOUT:3s}
     holds:
       base-url: ${ITMS_HOLDS_URL:http://localhost:8084}
       token-uri: ${ITMS_OIDC_TOKEN_URI:http://localhost:8180/realms/itms/protocol/openid-connect/token}
@@ -87,9 +99,15 @@ itms:
   idempotency:
     enabled: true
     paths:
+      - /v1/violation-books
+      - /v1/violation-books/*/entries
+      - /v1/violation-books/*/reconciliation
+      - /v1/violation-books/*/losses
       - /v1/violations
       - /v1/violations/*/cancellations
       - /v1/violation-catalogue
+      - /v1/violations/*/objections
+      - /v1/objections/*/decisions
     retention: ${ITMS_IDEMPOTENCY_RETENTION:24h}
     lock-timeout: ${ITMS_IDEMPOTENCY_LOCK_TIMEOUT:30s}
     cleanup-interval: ${ITMS_IDEMPOTENCY_CLEANUP_INTERVAL:15m}

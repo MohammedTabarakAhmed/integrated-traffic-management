@@ -1,0 +1,73 @@
+spring:
+  application:
+    name: crossborder-service
+  config:
+    import: "optional:configtree:${ITMS_SECRETS_DIR:/run/secrets/}"
+  datasource:
+    url: ${XB_DB_URL}
+    username: ${XB_DB_USER:}
+    password: ${XB_DB_PASSWORD:}
+  flyway:
+    locations: classpath:db/platform,classpath:db/migration
+    out-of-order: true
+  kafka:
+    bootstrap-servers: ${ITMS_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+  threads:
+    virtual:
+      enabled: true
+itms:
+  events:
+    enabled: ${ITMS_EVENTS_ENABLED:false}
+    audit-topic: ${ITMS_EVENTS_AUDIT_TOPIC:itms.audit.v1}
+    domain-topic: ${ITMS_EVENTS_DOMAIN_TOPIC:}
+    batch-size: ${ITMS_EVENTS_BATCH_SIZE:100}
+    send-timeout: ${ITMS_EVENTS_SEND_TIMEOUT:10s}
+    relay-interval: ${ITMS_EVENTS_RELAY_INTERVAL:1s}
+  security:
+    issuer: ${ITMS_OIDC_ISSUER}
+    jwk-set-uri: ${ITMS_OIDC_JWKS_URI}
+    audience: itms-api
+    authorisation-source: ${ITMS_AUTHORISATION_SOURCE:iam}
+    iam:
+      base-url: ${ITMS_IAM_URL:}
+      cache-ttl: ${ITMS_IAM_CACHE_TTL:60s}
+  # Partner-state exchange (XB-001..XB-008). local-state is this state's code in envelopes. Real-time partners are
+  # served every delivery-interval (UAT-5: payment notice within 15 minutes); daily-batch partners at batch-cron.
+  # Failed deliveries are retried with exponential back-off from retry-base up to retry-max, max-attempts in all
+  # (at most 8). Statements for the previous month are issued at settlement-cron in the business zone (XB-004).
+  crossborder:
+    local-state: ${ITMS_CROSSBORDER_LOCAL_STATE:LOCAL}
+    consumer-enabled: ${ITMS_CROSSBORDER_CONSUMER_ENABLED:false}
+    jobs-enabled: ${ITMS_CROSSBORDER_JOBS_ENABLED:true}
+    violation-topic: ${ITMS_CROSSBORDER_VIOLATION_TOPIC:itms.violation-service.events.v1}
+    max-attempts: ${ITMS_CROSSBORDER_MAX_ATTEMPTS:8}
+    retry-base: ${ITMS_CROSSBORDER_RETRY_BASE:PT1M}
+    retry-max: ${ITMS_CROSSBORDER_RETRY_MAX:PT1H}
+    delivery-batch-size: ${ITMS_CROSSBORDER_DELIVERY_BATCH_SIZE:100}
+    delivery-interval: ${ITMS_CROSSBORDER_DELIVERY_INTERVAL:PT15S}
+    delivery-initial-delay: ${ITMS_CROSSBORDER_DELIVERY_INITIAL_DELAY:PT30S}
+    partner-timeout: ${ITMS_CROSSBORDER_PARTNER_TIMEOUT:PT10S}
+    batch-cron: ${ITMS_CROSSBORDER_BATCH_CRON:0 0 1 * * *}
+    settlement-cron: ${ITMS_CROSSBORDER_SETTLEMENT_CRON:0 0 3 1 * *}
+    zone: ${ITMS_CROSSBORDER_ZONE:UTC}
+  idempotency:
+    enabled: true
+    paths: [/v1/partner-states, /v1/partner-states/*/mappings, /v1/config-proposals/*/decisions, /v1/partner-states/*/violations, /v1/partner-states/*/inbound-violations, /v1/partner-states/*/payment-notices, /v1/partner-states/*/objections, /v1/partner-states/*/objection-decisions, /v1/partner-states/*/inbound-objections, /v1/partner-states/*/data-exchanges, /v1/partner-states/*/inbound-data, /v1/partner-states/*/batches, /v1/exchange-messages/*/acknowledgements, /v1/partner-states/*/settlement-statements]
+    retention: 24h
+    lock-timeout: 30s
+    cleanup-interval: 15m
+management:
+  server:
+    port: ${ITMS_MANAGEMENT_PORT:8090}
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+server:
+  error:
+    include-stacktrace: never
+    include-message: never

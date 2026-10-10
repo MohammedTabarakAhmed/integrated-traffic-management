@@ -19,6 +19,15 @@
         "headers": { "Content-Type": "application/json" },
         "jsonBody": { "status": "PENDING" }
       }
+    },
+    {
+      "request": { "method": "POST", "url": "/v1/refunds" },
+      "response": {
+        "status": 201,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": { "refundRef": "RF-{{randomValue type='UUID'}}" },
+        "transformers": ["response-template"]
+      }
     }
   ]
 }

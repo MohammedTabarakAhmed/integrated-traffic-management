@@ -151,6 +151,18 @@ public class VehicleService {
         return v;
     }
 
+    /** The vehicle carrying an assigned plate, so a partner-state violation reaches the local owner (XB-002). */
+    @Transactional
+    public Vehicle byPlate(String plate, Caller caller) {
+        String display = plate == null ? "" : plate.strip();
+        if (display.isEmpty() || display.length() > 20) {
+            throw DomainException.validation("PLATE_INVALID", "give the plate as displayed", List.of("XB-002"));
+        }
+        String vin = repo.vinByPlate(display).orElseThrow(() -> new DomainException(DomainException.Kind.NOT_FOUND,
+                "VEHICLE_NOT_FOUND", "no vehicle carries this plate", List.of("XB-002")));
+        return get(vin, caller);
+    }
+
     @Transactional
     public List<Ports.VehicleRepository.HistoryEntry> history(String vin, Caller caller) {
         Vehicle v = find(vin);

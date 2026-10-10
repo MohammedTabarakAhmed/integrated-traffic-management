@@ -80,6 +80,30 @@ final class Adapters {
                 throw new Ports.UnavailableException("PAYMENTS_UNAVAILABLE", "the fine cannot be withdrawn now", e);
             }
         }
+
+        @Override
+        public void hold(UUID payableId, String sourceRef, String reason) {
+            try {
+                client.post().uri("/v1/payables/{id}/holds", payableId).header("X-Channel", "BACKOFFICE")
+                        .header("Idempotency-Key", "payable-hold-" + sourceRef)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body(Map.of("sourceRef", sourceRef, "reason", reason)).retrieve().toBodilessEntity();
+            } catch (RestClientException | ServiceCallException e) {
+                throw new Ports.UnavailableException("PAYMENTS_UNAVAILABLE", "the fine cannot be paused now", e);
+            }
+        }
+
+        @Override
+        public void liftHold(UUID payableId, String sourceRef, String reason) {
+            try {
+                client.post().uri("/v1/payables/{id}/hold-lifts", payableId).header("X-Channel", "BACKOFFICE")
+                        .header("Idempotency-Key", "payable-hold-lift-" + sourceRef)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body(Map.of("sourceRef", sourceRef, "reason", reason)).retrieve().toBodilessEntity();
+            } catch (RestClientException | ServiceCallException e) {
+                throw new Ports.UnavailableException("PAYMENTS_UNAVAILABLE", "the fine cannot be resumed now", e);
+            }
+        }
     }
 
     /** {@code POST /v1/holds} of hold-eligibility-service (CC-030) for licence suspensions (VF-032, UAT-1). */
@@ -227,6 +251,118 @@ final class Adapters {
                         violations.onReceiptCancelled(number);
                     }
                 }
+            }
+        }
+    }
+
+    /** {@code GET /v1/vehicles?plate=} at vehicle-service with this service's own account (XB-002). */
+    static class RemoteVehicles implements Ports.Vehicles {
+
+        private final RestClient client;
+
+        RemoteVehicles(RestClient client) {
+            this.client = client;
+        }
+
+        record VehicleBody(String vin, String ownerFileNumber, String region) {
+        }
+
+        @Override
+        public java.util.Optional<Registered> byPlate(String plate) {
+            try {
+                VehicleBody v = client.get().uri(b -> b.path("/v1/vehicles").queryParam("plate", plate).build())
+                        .header("X-Channel", "BACKOFFICE").retrieve().body(VehicleBody.class);
+                return v == null ? java.util.Optional.empty()
+                        : java.util.Optional.of(new Registered(v.vin(), v.ownerFileNumber(), v.region()));
+            } catch (RestClientResponseException e) {
+                if (e.getStatusCode().value() == 404 || e.getStatusCode().value() == 422) {
+                    return java.util.Optional.empty();
+                }
+                LOG.warn("Vehicle lookup failed: HTTP {}", e.getStatusCode().value());
+                throw new Ports.UnavailableException("VEHICLES_UNAVAILABLE", "the vehicle cannot be found now", e);
+            } catch (RestClientException | ServiceCallException e) {
+                LOG.warn("Vehicle lookup failed: {}", e.getClass().getSimpleName());
+                throw new Ports.UnavailableException("VEHICLES_UNAVAILABLE", "the vehicle cannot be found now", e);
+            }
+        }
+    }
+
+    /**
+     * crossborder-service events (Increment 9): partner violations to load (XB-002), payments made in the partner state
+     * (XB-003), objections forwarded to or received from a partner and the partner's decisions (XB-005). Business
+     * refusals are logged and skipped; an unavailable dependency is rethrown so the message is retried.
+     */
+    static class CrossborderEventListener {
+
+        private final gov.itms.violation.application.CrossborderViolations crossborder;
+        private final gov.itms.violation.application.ObjectionService objections;
+        private final ObjectMapper json;
+
+        CrossborderEventListener(gov.itms.violation.application.CrossborderViolations crossborder,
+                                 gov.itms.violation.application.ObjectionService objections, ObjectMapper json) {
+            this.crossborder = crossborder;
+            this.objections = objections;
+            this.json = json;
+        }
+
+        @KafkaListener(topics = "${itms.violations.crossborder-topic:itms.crossborder-service.events.v1}",
+                groupId = "${itms.violations.consumer-group:violation-service}")
+        void onMessage(String message) {
+            JsonNode event;
+            try {
+                event = json.readTree(message);
+            } catch (RuntimeException e) {
+                LOG.warn("Skipping a cross-border event that is not JSON");
+                return;
+            }
+            JsonNode d = event.path("data");
+            String partner = d.path("partner").asString("");
+            String local = d.path("localReference").asString("");
+            try {
+                switch (event.path("type").asString("")) {
+                    case "itms.crossborder.violation-received" -> crossborder.loadFromPartner(
+                            new gov.itms.violation.application.CrossborderViolations.PartnerViolation(partner,
+                                    d.path("externalId").asString(""), d.path("localCode").asString(""),
+                                    instant(d.path("occurredAt").asString("")), d.path("location").asString(""),
+                                    d.path("plate").asString(""), d.path("currency").asString(""),
+                                    d.path("amountMinor").asLong(-1)));
+                    case "itms.crossborder.payment-applied" -> {
+                        if (!local.isEmpty()) {
+                            crossborder.paidInPartnerState(local, partner, d.path("paymentReference").asString(""));
+                        }
+                    }
+                    case "itms.crossborder.objection-submitted" -> {
+                        if (!local.isEmpty()) {
+                            crossborder.objectionForwarded(local, partner);
+                        }
+                    }
+                    case "itms.crossborder.objection-decided" -> {
+                        if (!local.isEmpty()) {
+                            boolean accepted = "ACCEPTED".equals(d.path("decision").asString(""));
+                            String reason = d.path("reason").asString("");
+                            objections.decidedByPartner(local, partner, accepted, reason);
+                            crossborder.partnerDecided(local, partner, accepted, reason);
+                        }
+                    }
+                    case "itms.crossborder.objection-received" -> {
+                        if (!local.isEmpty()) {
+                            objections.submitFromPartner(local, partner, d.path("reason").asString(""));
+                        }
+                    }
+                    default -> {
+                        // other cross-border events are not for violations
+                    }
+                }
+            } catch (gov.itms.violation.domain.DomainException e) {
+                LOG.warn("Cross-border event {} refused: {}", event.path("id").asString(""), e.code());
+            }
+        }
+
+        private static java.time.Instant instant(String value) {
+            try {
+                return java.time.Instant.parse(value);
+            } catch (java.time.format.DateTimeParseException e) {
+                return null;
             }
         }
     }

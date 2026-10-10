@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -137,6 +138,10 @@ public class ViolationService {
     public Violation record(Violation.Report report, Caller caller) {
         channelOf(caller);
         require(caller.grants().allowsInRegion(RECORD, report.region()));
+        if (report.source() == Violation.Source.PARTNER) {
+            throw DomainException.validation("SOURCE_INVALID", "partner-state violations arrive only by exchange",
+                    List.of("XB-002"));
+        }
         Instant now = clock.instant();
         if (report.occurredAt().isAfter(now.plusSeconds(60))
                 || report.occurredAt().isBefore(now.minus(settings.maxReportDelay()))) {
@@ -149,8 +154,7 @@ public class ViolationService {
         boolean repeat = entry.repeatWithinDays() != null && repo.hadViolationSince(responsible, entry.code(),
                 report.occurredAt().minus(Duration.ofDays(entry.repeatWithinDays())));
         CatalogueEntry.Charge charge = entry.charge(report.overKmh(), repeat);
-        long seq = repo.nextViolationSequence();
-        String number = "V-" + day.getYear() + "-" + String.format("%09d", seq);
+        String number = nextNumber(day);
         Violation v = new Violation(UUID.randomUUID(), number, report, entry.code(), entry.versionNo(),
                 charge.fineMinor(), charge.blackPoints(), charge.repeat(), caller.actor().id(), now,
                 Violation.Status.OPEN, null, null, null);
@@ -239,6 +243,42 @@ public class ViolationService {
         return v;
     }
 
+    /** Loads a violation for an objection using the objection grant's region scope (VF-050). */
+    @Transactional(readOnly = true)
+    public Violation getForObjection(String number, Caller caller) {
+        Violation v = repo.findByNumber(number).orElseThrow(() -> notFound(number));
+        require(caller.grants().allowsInRegion(ObjectionService.SUBMIT, v.report().region()));
+        audit.record("VIOLATION_OBJECTION_VIEWED", ENTITY, number, null, null, null);
+        return v;
+    }
+
+    @Transactional
+    public void pauseForObjection(String number, Caller caller) {
+        Violation v = repo.findForUpdate(number).orElseThrow(() -> notFound(number));
+        require(caller.grants().allowsInRegion(ObjectionService.SUBMIT, v.report().region()));
+        if (v.payableId() != null) {
+            payables.hold(v.payableId(), "OBJECTION:" + number, "objection is awaiting review");
+        }
+    }
+
+    /** For an objection forwarded by a partner state (XB-005): no caller grants; locks the violation. */
+    Optional<Violation> lockForPartnerObjection(String number) {
+        Violation v = repo.findForUpdate(number).orElse(null);
+        if (v != null && v.status() == Violation.Status.OPEN && v.payableId() != null) {
+            payables.hold(v.payableId(), "OBJECTION:" + number, "objection forwarded by a partner state");
+        }
+        return Optional.ofNullable(v);
+    }
+
+    @Transactional
+    public void resumeAfterObjection(String number, String reason, Caller caller) {
+        Violation v = repo.findForUpdate(number).orElseThrow(() -> notFound(number));
+        require(caller.grants().allowsInRegion(ObjectionService.REVIEW, v.report().region()));
+        if (v.payableId() != null) {
+            payables.liftHold(v.payableId(), "OBJECTION:" + number, reason);
+        }
+    }
+
     @Transactional
     public List<Violation> byFile(String fileNumber, Violation.Status status, int limit, Caller caller) {
         require(caller.grants().holds(READ));
@@ -264,9 +304,20 @@ public class ViolationService {
 
     @Transactional
     public Violation cancel(String number, String reasonCode, String note, Caller caller) {
+        return cancelWithPermission(number, reasonCode, note, caller, CANCEL);
+    }
+
+    /** Accepted objections cancel through the reviewer grant without requiring a second cancellation grant. */
+    @Transactional
+    public Violation cancelFromObjection(String number, String reasonCode, String note, Caller caller) {
+        return cancelWithPermission(number, reasonCode, note, caller, ObjectionService.REVIEW);
+    }
+
+    private Violation cancelWithPermission(String number, String reasonCode, String note, Caller caller,
+                                           String permission) {
         channelOf(caller);
         Violation v = repo.findForUpdate(number).orElseThrow(() -> notFound(number));
-        require(caller.grants().allowsInRegion(CANCEL, v.report().region()));
+        require(caller.grants().allowsInRegion(permission, v.report().region()));
         if (reasonCode == null || !settings.cancelReasons().contains(reasonCode)) {
             throw DomainException.validation("CANCEL_REASON_INVALID", "choose a cancellation reason from the list",
                     List.of("VF-021"), String.join(", ", settings.cancelReasons().stream().sorted().toList()));
@@ -414,13 +465,26 @@ public class ViolationService {
 
     // ---- helpers
 
-    private CatalogueEntry inForce(String code, String region, LocalDate day) {
+    CatalogueEntry inForce(String code, String region, LocalDate day) {
         List<CatalogueEntry> versions = repo.catalogueVersions(code);
         return versions.stream().filter(e -> region.equals(e.region()) && e.inForce(day)).findFirst()
                 .or(() -> versions.stream().filter(e -> e.region() == null && e.inForce(day)).findFirst())
                 .orElseThrow(() -> new DomainException(DomainException.Kind.NOT_FOUND, "CATALOGUE_NOT_IN_FORCE",
                         "violation " + code + " is not in the catalogue on " + day, List.of("VF-002"), code,
                         day.toString()));
+    }
+
+    /** The next violation number for a violation that happened on {@code day}. */
+    String nextNumber(LocalDate day) {
+        return "V-" + day.getYear() + "-" + String.format("%09d", repo.nextViolationSequence());
+    }
+
+    LocalDate dayOf(Instant at) {
+        return LocalDate.ofInstant(at, settings.zone());
+    }
+
+    String currency() {
+        return settings.currency();
     }
 
     private LocalDate today() {

@@ -1,0 +1,108 @@
+openapi: 3.1.0
+info: {title: ITMS Marine Registry API, version: 1.0.0}
+paths:
+  /v1/marine-craft:
+    post:
+      operationId: registerMarineCraft
+      summary: Register a marine craft and its owner
+      tags: [Marine]
+      x-itms-permission: marine.craft.manage
+      x-itms-scope: [region]
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Craft'}}}}
+      responses: {'201': {description: Craft registered}, '400': {$ref: '#/components/responses/Problem'}, '401': {description: Authentication required}, '403': {description: Permission denied}}
+  /v1/marine-craft/{hullId}/inspections:
+    post:
+      operationId: recordMarineInspection
+      summary: Record craft inspection purpose, workshop and result
+      tags: [Marine]
+      x-itms-permission: marine.inspection.record
+      x-itms-scope: [region]
+      security: [{bearerAuth: []}]
+      parameters: [{name: hullId, in: path, required: true, schema: {type: string, maxLength: 80}}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Inspection'}}}}
+      responses: {'200': {description: Inspection recorded}, '400': {$ref: '#/components/responses/Problem'}, '401': {description: Authentication required}, '403': {description: Permission denied}}
+  /v1/marine-craft/{hullId}/renewals:
+    post:
+      operationId: renewMarineRegistration
+      summary: Renew registration after a passing renewal inspection
+      tags: [Marine]
+      x-itms-permission: marine.craft.manage
+      x-itms-scope: [region]
+      security: [{bearerAuth: []}]
+      parameters: [{name: hullId, in: path, required: true, schema: {type: string, maxLength: 80}}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Renewal'}}}}
+      responses: {'200': {description: Registration renewed}, '400': {$ref: '#/components/responses/Problem'}, '401': {description: Authentication required}, '403': {description: Permission denied}}
+  /v1/marine-craft/{hullId}/ownership-transfers:
+    post:
+      operationId: transferMarineCraft
+      summary: Record a marine craft ownership transfer
+      tags: [Marine]
+      x-itms-permission: marine.craft.manage
+      x-itms-scope: [region]
+      security: [{bearerAuth: []}]
+      parameters: [{name: hullId, in: path, required: true, schema: {type: string, maxLength: 80}}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Transfer'}}}}
+      responses: {'200': {description: Ownership transferred}, '400': {$ref: '#/components/responses/Problem'}, '401': {description: Authentication required}, '403': {description: Permission denied}}
+  /v1/marine-operator-licences:
+    post:
+      operationId: issueMarineOperatorLicence
+      summary: Issue a time-bounded operator licence for a craft type
+      tags: [Marine]
+      x-itms-permission: marine.operator-licence.issue
+      x-itms-scope: [region]
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Licence'}}}}
+      responses: {'201': {description: Operator licence issued}, '400': {$ref: '#/components/responses/Problem'}, '401': {description: Authentication required}, '403': {description: Permission denied}}
+components:
+  securitySchemes: {bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}}
+  parameters:
+    IdempotencyKey: {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 8, maxLength: 128}}
+  responses:
+    Problem: {description: Invalid request, content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+  schemas:
+    Craft:
+      type: object
+      additionalProperties: false
+      required: [hullId, type, lengthMetres, engines, capacity, homePort, owner]
+      properties:
+        hullId: {type: string, minLength: 1, maxLength: 80}
+        type: {type: string, minLength: 1, maxLength: 40}
+        lengthMetres: {type: number, exclusiveMinimum: 0}
+        engines: {type: integer, minimum: 1, maximum: 10}
+        capacity: {type: integer, minimum: 1}
+        homePort: {type: string, minLength: 1, maxLength: 80}
+        owner: {type: string, minLength: 1, maxLength: 80}
+    Inspection:
+      type: object
+      additionalProperties: false
+      required: [purpose, result, workshop]
+      properties:
+        purpose: {type: string, enum: [REGISTRATION, RENEWAL, SAFETY]}
+        result: {type: string, enum: [PASS, FAIL]}
+        workshop: {type: string, minLength: 1, maxLength: 120}
+        documentId: {type: string, maxLength: 80}
+    Renewal:
+      type: object
+      additionalProperties: false
+      required: [validityDays]
+      properties: {validityDays: {type: integer, minimum: 1, maximum: 3650}}
+    Transfer:
+      type: object
+      additionalProperties: false
+      required: [owner]
+      properties: {owner: {type: string, minLength: 1, maxLength: 80}}
+    Licence:
+      type: object
+      additionalProperties: false
+      required: [trafficFileNumber, craftType, validityDays]
+      properties:
+        trafficFileNumber: {type: string, minLength: 1, maxLength: 80}
+        craftType: {type: string, minLength: 1, maxLength: 40}
+        validityDays: {type: integer, minimum: 1, maximum: 3650}
+    Problem:
+      type: object
+      additionalProperties: true
+      properties: {type: {type: string, format: uri-reference}, title: {type: string, maxLength: 200}, status: {type: integer}, detail: {type: string, maxLength: 1000}}

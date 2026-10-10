@@ -1,0 +1,27 @@
+{
+  "mappings": [
+    {
+      "request": { "method": "POST", "urlPathPattern": "/xb/[A-Z0-9]+/messages" },
+      "response": {
+        "status": 202,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": { "reference": "ACK-{{randomValue length=10 type='ALPHANUMERIC' uppercase=true}}" },
+        "transformers": ["response-template"]
+      }
+    },
+    {
+      "request": { "method": "POST", "urlPathPattern": "/xb/[A-Z0-9]+/batches" },
+      "response": {
+        "status": 202,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": { "reference": "BATCH-{{randomValue length=10 type='ALPHANUMERIC' uppercase=true}}" },
+        "transformers": ["response-template"]
+      }
+    },
+    {
+      "priority": 1,
+      "request": { "method": "POST", "urlPathPattern": "/xb/DOWN/.*" },
+      "response": { "status": 503 }
+    }
+  ]
+}

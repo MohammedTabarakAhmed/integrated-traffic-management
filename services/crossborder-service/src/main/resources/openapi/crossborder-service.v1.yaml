@@ -1,0 +1,802 @@
+openapi: 3.1.0
+info:
+  title: ITMS Cross-border Exchange API
+  version: 1.1.0
+  description: >-
+    Partner-state exchange (XB-001..XB-008; DL-064 licence data). Partner settings and code mappings change through
+    maker-checker proposals. Violations recorded here against partner-registered vehicles are sent automatically from
+    violation-service events; received violations are loaded against the local vehicle and owner. A payment in either
+    state closes the violation in both (UAT-5). Objections go to the issuing state and its decision is applied.
+    Outbound messages are delivered near real time or in a daily batch per partner, acknowledged and retried; every
+    message and status change is kept. Settlement statements state what each state owes after commission.
+paths:
+  /v1/partner-states:
+    post:
+      operationId: proposePartnerState
+      summary: Propose partner settings (mode, commission, endpoint, agreement scope); applied when another user approves
+      tags: [Configuration]
+      x-itms-permission: crossborder.partner.manage
+      x-itms-scope: national
+      security: [{ bearerAuth: [] }]
+      parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PartnerProposal'}
+      responses:
+        '202':
+          description: Proposal awaiting approval
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Proposal'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '409': {$ref: '#/components/responses/Problem'}
+  /v1/partner-states/{code}:
+    get:
+      operationId: getPartnerState
+      summary: A partner state's settings
+      tags: [Configuration]
+      x-itms-permission: crossborder.message.read
+      x-itms-scope: national
+      security: [{ bearerAuth: [] }]
+      parameters: [{$ref: '#/components/parameters/Code'}]
+      responses:
+        '200':
+          description: Partner
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Partner'}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '404': {description: Not configured}
+  /v1/partner-states/{code}/mappings:
+    post:
+      operationId: proposePartnerCodeMapping
+      summary: Propose a mapping from a local code to the partner's code (XB-007)
+      tags: [Configuration]
+      x-itms-permission: crossborder.mapping.manage
+      x-itms-scope: national
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - {$ref: '#/components/parameters/Code'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MappingProposal'}
+      responses:
+        '202':
+          description: Proposal awaiting approval
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Proposal'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /v1/config-proposals:
+    get:
+      operationId: listConfigProposals
+      summary: Proposals awaiting approval, oldest first
+      tags: [Configuration]
+      x-itms-permission: crossborder.proposal.approve
+      x-itms-scope: national
+      security: [{ bearerAuth: [] }]
+      parameters: [{$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200':
+          description: Proposals
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/Proposal'}}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+  /v1/config-proposals/{id}/decisions:
+    post:
+      operationId: decideConfigProposal
+      summary: Approve (applies the change) or reject a proposal; never by its maker
+      tags: [Configuration]
+      x-itms-permission: crossborder.proposal.approve
+      x-itms-scope: national
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - {$ref: '#/components/parameters/Id'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [approve, reason]
+              properties:
+                approve: {type: boolean}
+                reason: {type: string, minLength: 3, maxLength: 500}
+      responses:
+        '200':
+          description: Decided
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Proposal'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /v1/partner-states/{code}/violations:
+    post:
+      operationId: queueOutboundViolation
+      summary: Queue a violation recorded here against a vehicle registered in the partner state (XB-001)
+      description: Usually automatic from itms.violation.crossborder-recorded; a repeat for the same reference returns the first message.
+      tags: [Violations]
+      x-itms-permission: crossborder.exchange
+      x-itms-scope: national
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - {$ref: '#/components/parameters/Code'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Violation'}
+      responses:
+        '201': {$ref: '#/components/responses/Message'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /v1/partner-states/{code}/inbound-violations:
+    post:
+      operationId: receiveInboundViolation
+      summary: A violation committed in the partner state by a vehicle registered here (XB-002)
+      description: violation-service loads it against the local vehicle (by plate) and owner and makes it payable; repeats return the first message.
+      tags: [Violations]
+      x-itms-permission: crossborder.exchange
+      x-itms-scope: national
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - {$ref: '#/components/parameters/Code'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/InboundViolation'}
+      responses:
+        '201': {$ref: '#/components/responses/Message'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /v1/partner-states/{code}/payment-notices:
+    post:
+      operationId: applyPartnerPaymentNotice
+      summary: The partner reports a payment made there; the local violation closes (XB-003)
+      tags: [Payments]
+      x-itms-permission: crossborder.exchange
+      x-itms-scope: national
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - {$ref: '#/components/parameters/Code'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PaymentNotice'}
+      responses:
+        '200': {$ref: '#/components/responses/Message'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /v1/partner-states/{code}/objections:
+    post:
+      operationId: forwardObjection
+      summary: An officer forwards a customer's objection to a partner violation to the issuing state (XB-005)
+      description: Payment pauses until the decision. Customers object online through violation-service (VF-050), which forwards automatically.
+      tags: [Objections]
+      x-itms-permission: crossborder.objection.submit
+      x-itms-scope: national
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - {$ref: '#/components/parameters/Code'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Objection'}
+      responses:
+        '200': {$ref: '#/components/responses/Message'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /v1/partner-states/{code}/objection-decisions:
+    post:
+      operationId: applyPartnerObjectionDecision
+      summary: The issuing state's decision on an objection forwarded to it, applied automatically (XB-005)
+      tags: [Objections]
+      x-itms-permission: crossborder.exchange
+      x-itms-scope: national
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - {$ref: '#/components/parameters/Code'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [externalId, decision]
+              properties:
+                externalId: {type: string, minLength: 1, maxLength: 120}
+                decision: {type: string, enum: [ACCEPTED, REJECTED]}
+                reason: {type: string, maxLength: 500}
+      responses:
+        '200': {$ref: '#/components/responses/Message'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /v1/partner-states/{code}/inbound-objections:
+    post:
+      operationId: receivePartnerObjection
+      summary: A partner forwards its customer's objection to a violation sent from here; it joins the local review queue
+      tags: [Objections]
+      x-itms-permission: crossborder.exchange
+      x-itms-scope: national
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - {$ref: '#/components/parameters/Code'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [externalId, reason]
+              properties:
+                externalId: {type: string, minLength: 1, maxLength: 120}
+                reason: {type: string, minLength: 1, maxLength: 1000}
+      responses:
+        '200': {$ref: '#/components/responses/Message'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /v1/partner-states/{code}/data-exchanges:
+    post:
+      operationId: sendPartnerData
+      summary: Send accident, permit or licence data where the agreement allows (XB-006, DL-064)
+      tags: [Data]
+      x-itms-permission: crossborder.data.exchange
+      x-itms-scope: national
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - {$ref: '#/components/parameters/Code'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Data'}
+      responses:
+        '201': {$ref: '#/components/responses/Message'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /v1/partner-states/{code}/inbound-data:
+    post:
+      operationId: receivePartnerData
+      summary: Accident, permit or licence data received from a partner where the agreement allows (XB-006, DL-064)
+      tags: [Data]
+      x-itms-permission: crossborder.exchange
+      x-itms-scope: national
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - {$ref: '#/components/parameters/Code'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/InboundData'}
+      responses:
+        '201': {$ref: '#/components/responses/Message'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /v1/partner-states/{code}/batches:
+    post:
+      operationId: deliverDueMessages
+      summary: Deliver what is due now for the partner, optionally only messages that occurred in the window (XB-008)
+      tags: [Delivery]
+      x-itms-permission: crossborder.exchange
+      x-itms-scope: national
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - {$ref: '#/components/parameters/Code'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Window'}
+      responses:
+        '200':
+          description: Messages the partner accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accepted: {type: integer, minimum: 0}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '404': {$ref: '#/components/responses/Problem'}
+        '409': {$ref: '#/components/responses/Problem'}
+  /v1/exchange-messages/{id}/acknowledgements:
+    post:
+      operationId: acknowledgeDelivery
+      summary: A partner that answers later confirms or refuses a delivery (XB-008)
+      tags: [Delivery]
+      x-itms-permission: crossborder.exchange
+      x-itms-scope: national
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - {$ref: '#/components/parameters/Id'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [accepted]
+              properties:
+                accepted: {type: boolean}
+                response: {type: string, maxLength: 500}
+                partnerReference: {type: string, maxLength: 120}
+      responses:
+        '200': {$ref: '#/components/responses/Message'}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '404': {$ref: '#/components/responses/Problem'}
+  /v1/partner-states/{code}/settlements:
+    get:
+      operationId: previewSettlement
+      summary: What the next statement would contain, per currency (XB-004)
+      tags: [Settlement]
+      x-itms-permission: crossborder.settlement.read
+      x-itms-scope: national
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - {$ref: '#/components/parameters/Code'}
+        - {name: from, in: query, required: true, schema: {type: string, format: date-time}}
+        - {name: to, in: query, required: true, schema: {type: string, format: date-time}}
+      responses:
+        '200':
+          description: Amounts per currency
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/Settlement'}}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '404': {$ref: '#/components/responses/Problem'}
+  /v1/partner-states/{code}/settlement-statements:
+    post:
+      operationId: issueSettlementStatements
+      summary: Issue statements (one per currency) for unsettled payments in an ended period (XB-004)
+      tags: [Settlement]
+      x-itms-permission: crossborder.settlement.issue
+      x-itms-scope: national
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - {$ref: '#/components/parameters/Code'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Window'}
+      responses:
+        '200':
+          description: Statements issued (none when nothing is unsettled)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/StatementView'}}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '404': {$ref: '#/components/responses/Problem'}
+    get:
+      operationId: listSettlementStatements
+      summary: A partner's statements, newest period first
+      tags: [Settlement]
+      x-itms-permission: crossborder.settlement.read
+      x-itms-scope: national
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - {$ref: '#/components/parameters/Code'}
+        - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: Statements
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/Statement'}}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+  /v1/settlement-statements/{id}:
+    get:
+      operationId: getSettlementStatement
+      summary: A statement with its lines
+      tags: [Settlement]
+      x-itms-permission: crossborder.settlement.read
+      x-itms-scope: national
+      security: [{ bearerAuth: [] }]
+      parameters: [{$ref: '#/components/parameters/Id'}]
+      responses:
+        '200':
+          description: Statement
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatementView'}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '404': {$ref: '#/components/responses/Problem'}
+  /v1/exchange-messages:
+    get:
+      operationId: listExchangeMessages
+      summary: The message log, newest first (XB-007)
+      tags: [Log]
+      x-itms-permission: crossborder.message.read
+      x-itms-scope: national
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - {name: partner, in: query, schema: {type: string, maxLength: 12}}
+        - {name: type, in: query, schema: {$ref: '#/components/schemas/MessageType'}}
+        - {name: status, in: query, schema: {$ref: '#/components/schemas/MessageStatus'}}
+        - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: Messages
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/Message'}}
+        '400': {$ref: '#/components/responses/Problem'}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+  /v1/exchange-messages/{id}:
+    get:
+      operationId: getExchangeMessage
+      summary: One exchange message
+      tags: [Log]
+      x-itms-permission: crossborder.message.read
+      x-itms-scope: national
+      security: [{ bearerAuth: [] }]
+      parameters: [{$ref: '#/components/parameters/Id'}]
+      responses:
+        '200': {$ref: '#/components/responses/Message'}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '404': {$ref: '#/components/responses/Problem'}
+  /v1/exchange-messages/{id}/history:
+    get:
+      operationId: getExchangeMessageHistory
+      summary: Every status change of a message, oldest first (XB-007)
+      tags: [Log]
+      x-itms-permission: crossborder.message.read
+      x-itms-scope: national
+      security: [{ bearerAuth: [] }]
+      parameters: [{$ref: '#/components/parameters/Id'}]
+      responses:
+        '200':
+          description: History
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/History'}}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+        '404': {$ref: '#/components/responses/Problem'}
+components:
+  securitySchemes:
+    bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
+  parameters:
+    Code:
+      name: code
+      in: path
+      required: true
+      schema: {type: string, maxLength: 12, pattern: '^[A-Z0-9]{2,12}$'}
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    Limit:
+      name: limit
+      in: query
+      schema: {type: integer, minimum: 1, maximum: 500, default: 50}
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: {type: string, maxLength: 128, minLength: 8}
+  responses:
+    Problem:
+      description: Invalid request
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    Message:
+      description: Exchange message
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Message'}
+  schemas:
+    PartnerProposal:
+      type: object
+      additionalProperties: false
+      required: [code, name, mode, commissionBasisPoints, reason]
+      properties:
+        code: {type: string, pattern: '^[A-Z0-9]{2,12}$'}
+        name: {type: string, maxLength: 120, minLength: 1}
+        mode: {type: string, enum: [REALTIME, DAILY_BATCH]}
+        commissionBasisPoints: {type: integer, minimum: 0, maximum: 10000, description: Commission the collecting state keeps (XB-004)}
+        endpointUrl: {type: string, maxLength: 500, description: Partner exchange endpoint; messages wait while it is empty}
+        allowsAccident: {type: boolean, default: false}
+        allowsPermit: {type: boolean, default: false}
+        allowsLicence: {type: boolean, default: false}
+        status: {type: string, enum: [ACTIVE, SUSPENDED], default: ACTIVE}
+        reason: {type: string, minLength: 3, maxLength: 500}
+    Partner:
+      type: object
+      properties:
+        code: {type: string}
+        name: {type: string}
+        mode: {type: string, enum: [REALTIME, DAILY_BATCH]}
+        commissionBasisPoints: {type: integer}
+        status: {type: string, enum: [ACTIVE, SUSPENDED]}
+        endpointUrl: {type: [string, 'null']}
+        allowsAccident: {type: boolean}
+        allowsPermit: {type: boolean}
+        allowsLicence: {type: boolean}
+    MappingProposal:
+      type: object
+      additionalProperties: false
+      required: [domain, localCode, externalCode, reason]
+      properties:
+        domain: {type: string, pattern: '^[A-Z][A-Z0-9_]{1,39}$', description: For example VIOLATION}
+        localCode: {type: string, maxLength: 80, minLength: 1}
+        externalCode: {type: string, maxLength: 80, minLength: 1}
+        reason: {type: string, minLength: 3, maxLength: 500}
+    Proposal:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        kind: {type: string, enum: [PARTNER, MAPPING]}
+        subject: {type: string}
+        payload: {type: object}
+        status: {type: string, enum: [PROPOSED, APPROVED, REJECTED]}
+        proposedBy: {type: string}
+        proposedAt: {type: string, format: date-time}
+        reason: {type: string}
+        decidedBy: {type: [string, 'null']}
+        decidedAt: {type: [string, 'null'], format: date-time}
+        decisionReason: {type: [string, 'null']}
+    Violation:
+      type: object
+      additionalProperties: false
+      required: [reference, code, vehiclePlate, currency, amountMinor, occurredAt]
+      properties:
+        reference: {type: string, maxLength: 120, minLength: 1, description: Local violation number}
+        code: {type: string, maxLength: 80, minLength: 1, description: Local catalogue code; mapped to the partner's code}
+        vehiclePlate: {type: string, maxLength: 40, minLength: 1}
+        ownerFile: {type: string, maxLength: 40}
+        currency: {type: string, pattern: '^[A-Z]{3}$'}
+        amountMinor: {type: integer, minimum: 0}
+        occurredAt: {type: string, format: date-time}
+        location: {type: string, maxLength: 300}
+    InboundViolation:
+      type: object
+      additionalProperties: false
+      required: [externalId, code, vehiclePlate, currency, amountMinor, occurredAt]
+      properties:
+        externalId: {type: string, maxLength: 120, minLength: 1, description: The partner's violation id}
+        code: {type: string, maxLength: 80, minLength: 1, description: The partner's code; mapped to the local catalogue}
+        vehiclePlate: {type: string, maxLength: 40, minLength: 1}
+        location: {type: string, maxLength: 300}
+        currency: {type: string, pattern: '^[A-Z]{3}$'}
+        amountMinor: {type: integer, minimum: 0}
+        occurredAt: {type: string, format: date-time}
+    PaymentNotice:
+      type: object
+      additionalProperties: false
+      required: [externalId, paymentReference, amountMinor, currency]
+      properties:
+        externalId: {type: string, maxLength: 120, minLength: 1}
+        paymentReference: {type: string, maxLength: 120, minLength: 1}
+        amountMinor: {type: integer, minimum: 0}
+        currency: {type: string, pattern: '^[A-Z]{3}$'}
+    Objection:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      description: Name the partner violation by externalId or by the local violation number.
+      properties:
+        externalId: {type: string, maxLength: 120}
+        violationNumber: {type: string, maxLength: 30}
+        reason: {type: string, maxLength: 1000, minLength: 1}
+    Data:
+      type: object
+      additionalProperties: false
+      required: [type, reference, content]
+      properties:
+        type: {type: string, enum: [ACCIDENT, PERMIT, LICENCE]}
+        reference: {type: string, minLength: 1, maxLength: 120}
+        content: {$ref: '#/components/schemas/DataContent'}
+    InboundData:
+      type: object
+      additionalProperties: false
+      required: [externalId, type, reference, content]
+      properties:
+        externalId: {type: string, minLength: 1, maxLength: 120}
+        type: {type: string, enum: [ACCIDENT, PERMIT, LICENCE]}
+        reference: {type: string, minLength: 1, maxLength: 120}
+        content: {$ref: '#/components/schemas/DataContent'}
+    DataContent:
+      type: object
+      description: Flat fields the agreement allows, each a text, number or true/false value.
+      minProperties: 1
+      maxProperties: 100
+      propertyNames: {pattern: '^[A-Za-z][A-Za-z0-9_]{0,63}$'}
+      additionalProperties:
+        type: [string, number, boolean]
+        maxLength: 2000
+    Window:
+      type: object
+      additionalProperties: false
+      required: [from, to]
+      properties:
+        from: {type: string, format: date-time}
+        to: {type: string, format: date-time}
+    MessageType:
+      type: string
+      enum: [VIOLATION, PAYMENT, OBJECTION, OBJECTION_DECISION, ACCIDENT, PERMIT, LICENCE]
+    MessageStatus:
+      type: string
+      enum: [PENDING, RECEIVED, LOADED, SENT, PAID, OBJECTED, CANCELLED, REJECTED]
+    Message:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        partner: {type: string}
+        externalId: {type: string}
+        type: {$ref: '#/components/schemas/MessageType'}
+        direction: {type: string, enum: [INBOUND, OUTBOUND]}
+        status: {$ref: '#/components/schemas/MessageStatus'}
+        localReference: {type: [string, 'null']}
+        externalCode: {type: [string, 'null']}
+        mappedCode: {type: [string, 'null']}
+        vehiclePlate: {type: [string, 'null']}
+        ownerFile: {type: [string, 'null']}
+        currency: {type: [string, 'null']}
+        amountMinor: {type: integer}
+        occurredAt: {type: string, format: date-time}
+        receivedAt: {type: string, format: date-time}
+        detail: {type: [string, 'null']}
+        relatedMessageId: {type: [string, 'null'], format: uuid}
+        payload: {type: [object, 'null']}
+        paidAt: {type: [string, 'null'], format: date-time}
+        paidIn: {type: [string, 'null'], enum: [HERE, PARTNER, null]}
+        paymentReference: {type: [string, 'null']}
+        commissionBasisPoints: {type: [integer, 'null']}
+    History:
+      type: object
+      properties:
+        fromStatus: {type: [string, 'null']}
+        toStatus: {type: string}
+        detail: {type: [string, 'null']}
+        changedBy: {type: string}
+        changedAt: {type: string, format: date-time}
+    Settlement:
+      type: object
+      properties:
+        partner: {type: string}
+        from: {type: string, format: date-time}
+        to: {type: string, format: date-time}
+        currency: {type: string}
+        collectedHereMinor: {type: integer}
+        commissionHereMinor: {type: integer}
+        owedToPartnerMinor: {type: integer}
+        collectedByPartnerMinor: {type: integer}
+        commissionPartnerMinor: {type: integer}
+        owedByPartnerMinor: {type: integer}
+        netMinor: {type: integer, description: Positive when the partner owes this state}
+        messageCount: {type: integer}
+    Statement:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        partner: {type: string}
+        from: {type: string, format: date-time}
+        to: {type: string, format: date-time}
+        currency: {type: string}
+        collectedHereMinor: {type: integer}
+        commissionHereMinor: {type: integer}
+        owedToPartnerMinor: {type: integer}
+        collectedByPartnerMinor: {type: integer}
+        commissionPartnerMinor: {type: integer}
+        owedByPartnerMinor: {type: integer}
+        netMinor: {type: integer}
+        lineCount: {type: integer}
+        generatedBy: {type: string}
+        generatedAt: {type: string, format: date-time}
+    StatementView:
+      type: object
+      properties:
+        statement: {$ref: '#/components/schemas/Statement'}
+        lines:
+          type: array
+          items:
+            type: object
+            properties:
+              messageId: {type: string, format: uuid}
+              paidIn: {type: string, enum: [HERE, PARTNER]}
+              amountMinor: {type: integer}
+              commissionBasisPoints: {type: integer}
+              commissionMinor: {type: integer}
+    Problem:
+      type: object
+      additionalProperties: true
+      properties:
+        type: {type: string, format: uri-reference}
+        title: {type: string, maxLength: 200}
+        status: {type: integer}
+        detail: {type: string, maxLength: 1000}

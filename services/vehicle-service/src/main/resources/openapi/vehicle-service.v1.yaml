@@ -43,6 +43,28 @@ tags:
 
 paths:
   /v1/vehicles:
+    get:
+      tags: [Vehicles]
+      operationId: findVehicleByPlate
+      summary: The vehicle carrying an assigned plate, so a partner-state violation reaches its owner (XB-002); audited
+      x-itms-permission: vehicle.read
+      x-itms-scope: [region]
+      parameters:
+        - name: plate
+          in: query
+          required: true
+          schema: { type: string, maxLength: 20 }
+      responses:
+        '200':
+          description: Vehicle
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Vehicle' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
     post:
       tags: [Vehicles]
       operationId: createVehicle

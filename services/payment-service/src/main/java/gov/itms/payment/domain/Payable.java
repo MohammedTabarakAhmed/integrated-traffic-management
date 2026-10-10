@@ -25,10 +25,16 @@ public final class Payable {
     private static final Pattern REF = Pattern.compile("^[A-Z0-9][A-Z0-9-]{0,59}$");
 
     /** One amount for one financial item and beneficiary (FN-003, FN-013). */
-    public record Line(String financialItem, String beneficiary, String description, long amountMinor) {
+    public record Line(String financialItem, String beneficiary, String costCentre, String description,
+                       long amountMinor) {
+        public Line(String financialItem, String beneficiary, String description, long amountMinor) {
+            this(financialItem, beneficiary, beneficiary, description, amountMinor);
+        }
+
         public Line {
             code("financialItem", financialItem);
             code("beneficiary", beneficiary);
+            code("costCentre", costCentre);
             if (description != null && (description.isBlank() || description.length() > 200)) {
                 throw invalid("description");
             }

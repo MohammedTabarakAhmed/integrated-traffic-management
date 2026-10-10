@@ -86,6 +86,15 @@ class JdbcVehicleRepository implements Ports.VehicleRepository {
     }
 
     @Override
+    public Optional<String> vinByPlate(String display) {
+        return jdbc.sql("""
+                select v.vin from plate p join vehicle v on v.id = p.vehicle_id
+                where upper(p.display) = upper(:d) and p.status = 'ASSIGNED'
+                order by p.changed_at desc limit 1
+                """).param("d", display).query(String.class).optional();
+    }
+
+    @Override
     public Optional<Vehicle> findForUpdate(UUID id) {
         return jdbc.sql(VEHICLE_SELECT + " where id = :id for update").param("id", id)
                 .query(JdbcVehicleRepository::mapVehicle).optional();

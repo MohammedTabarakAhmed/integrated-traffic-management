@@ -1,9 +1,12 @@
 package gov.itms.payment.infrastructure;
 
 import gov.itms.payment.application.PaymentService;
+import gov.itms.payment.application.FinanceOperations;
+import gov.itms.payment.application.Ports;
 import gov.itms.payment.domain.Payment;
 import gov.itms.platform.audit.AuditRecorder;
 import gov.itms.platform.events.DomainEventRecorder;
+import gov.itms.platform.security.CurrentActorProvider;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.time.Clock;
@@ -81,24 +84,32 @@ public class PaymentServiceConfiguration {
     }
 
     @Bean
-    PaymentService paymentService(JdbcClient jdbc, ObjectMapper json, RestClient.Builder builder,
-                                  PaymentProperties properties, AuditRecorder audit, DomainEventRecorder events,
-                                  Clock clock) {
-        // HTTP/1.1: over plain HTTP the JDK client's default h2c upgrade on a POST with a streamed body gets no usable
-        // answer from some gateways (the local WireMock mock never completes it); TLS gateways are unaffected.
+    Ports.PaymentGateway paymentGateway(RestClient.Builder builder, PaymentProperties properties) {
         HttpClient http = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1)
                 .connectTimeout(properties.gateway().timeout()).build();
         JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(http);
         factory.setReadTimeout(properties.gateway().timeout());
         RestClient client = builder.clone().baseUrl(properties.gateway().baseUrl().toString()).requestFactory(factory)
                 .build();
+        return new GatewayAdapters.HttpPaymentGateway(client, properties.gateway().callbackBaseUrl());
+    }
+
+    @Bean
+    PaymentService paymentService(JdbcClient jdbc, ObjectMapper json, Ports.PaymentGateway gateway,
+                                  PaymentProperties properties, AuditRecorder audit, DomainEventRecorder events,
+                                  Clock clock) {
         List<String> keys = Arrays.stream(properties.gateway().callbackKeys().split(",")).map(String::strip)
                 .filter(k -> !k.isEmpty()).toList();
         return new PaymentService(new JdbcPaymentRepository(jdbc, json),
-                new GatewayAdapters.HttpPaymentGateway(client, properties.gateway().callbackBaseUrl()),
-                new GatewayAdapters.HmacCallbackVerifier(keys), audit, events,
+                gateway, new GatewayAdapters.HmacCallbackVerifier(keys), audit, events,
                 new PaymentService.Settings(Set.copyOf(properties.acceptedMethods()), properties.inquiryAfter(),
                         properties.resolutionWindow(), ZoneId.of(properties.businessZone())), clock);
+    }
+
+    @Bean
+    FinanceOperations financeOperations(JdbcClient jdbc, CurrentActorProvider actors, AuditRecorder audit,
+                                        DomainEventRecorder events, Clock clock, Ports.PaymentGateway gateway) {
+        return new FinanceOperations(jdbc, actors, audit, events, clock, gateway);
     }
 
     /** Resolves PENDING payments (FN-005); safe on every instance (rows locked, others skip them). */

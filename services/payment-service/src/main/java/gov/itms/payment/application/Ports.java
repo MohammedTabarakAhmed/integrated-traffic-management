@@ -29,6 +29,12 @@ public final class Ports {
 
         void savePayableStatus(Payable payable);
 
+        boolean payableHeld(UUID id);
+
+        void placePayableHold(UUID id, String sourceRef, String reason, String actor, Instant at);
+
+        boolean liftPayableHold(UUID id, String sourceRef, String reason, String actor, Instant at);
+
         void insertBasket(Basket basket);
 
         Optional<Basket> findBasket(UUID id);
@@ -55,6 +61,13 @@ public final class Ports {
         long nextReceiptNumber(String region, String channel, int year);
 
         void insertReceipt(Receipt receipt);
+
+        /** Persists one retryable general-ledger posting per receipt line (FN-013). */
+        void insertLedgerPostings(Receipt receipt);
+
+        Optional<UUID> openTillForUpdate(String cashierId, String region);
+
+        void recordTillPayment(Payment payment, Receipt receipt);
 
         Optional<Receipt> findReceipt(String number);
 
@@ -87,6 +100,11 @@ public final class Ports {
         Session openSession(UUID paymentId, long amountMinor, String currency, String returnUrl, String summary);
 
         StatusAnswer status(UUID paymentId);
+
+        /** Requests an idempotent refund to the original online method (FN-012). */
+        default String refund(UUID paymentId, String gatewayTxnId, String refundId, long amountMinor, String currency) {
+            throw new GatewayUnavailableException("gateway refund is not supported", null);
+        }
     }
 
     public static class GatewayUnavailableException extends RuntimeException {

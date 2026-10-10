@@ -1,0 +1,124 @@
+openapi: 3.1.0
+info: {title: ITMS Training Permit API, version: 1.0.0}
+paths:
+  /v1/permit-types:
+    post:
+      operationId: configurePermitType
+      summary: Configure permit eligibility, tests, validity, renewal window and fee
+      tags: [Permits]
+      x-itms-permission: permit.type.manage
+      x-itms-scope: national
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Type'}}}}
+      responses: {'200': {description: Type saved}, '400': {$ref: '#/components/responses/Problem'}, '401': {description: Authentication required}, '403': {description: Permission denied}}
+  /v1/permits:
+    post:
+      operationId: applyForPermit
+      summary: Submit a training or hire permit application
+      tags: [Permits]
+      x-itms-permission: permit.application.submit
+      x-itms-scope: [own, region]
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Application'}}}}
+      responses: {'201': {description: Application created}, '400': {$ref: '#/components/responses/Problem'}, '401': {description: Authentication required}, '403': {description: Permission denied}}
+  /v1/permits/{id}/tests:
+    post:
+      operationId: bookPermitTest
+      summary: Book a permit test with an examination committee
+      tags: [Permits]
+      x-itms-permission: permit.test.book
+      x-itms-scope: [region]
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/PermitId'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/TestBooking'}}}}
+      responses: {'201': {description: Test booked}, '400': {$ref: '#/components/responses/Problem'}, '401': {description: Authentication required}, '403': {description: Permission denied}}
+  /v1/permits/{id}/test-results:
+    post:
+      operationId: recordPermitTestResult
+      summary: Record an examiner's result for the permit test
+      tags: [Permits]
+      x-itms-permission: permit.test.record
+      x-itms-scope: [region]
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/PermitId'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/TestResult'}}}}
+      responses: {'200': {description: Test result recorded}, '400': {$ref: '#/components/responses/Problem'}, '401': {description: Authentication required}, '403': {description: Permission denied}}
+  /v1/permits/{id}/transitions:
+    post:
+      operationId: transitionPermit
+      summary: Approve, issue, renew, suspend, reinstate, cancel or expire a permit
+      tags: [Permits]
+      x-itms-permission: permit.lifecycle.manage
+      x-itms-scope: [region]
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/PermitId'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Transition'}}}}
+      responses: {'200': {description: Permit transition applied}, '400': {$ref: '#/components/responses/Problem'}, '401': {description: Authentication required}, '403': {description: Permission denied}}
+components:
+  securitySchemes: {bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}}
+  parameters:
+    PermitId: {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    IdempotencyKey: {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 8, maxLength: 128}}
+  responses:
+    Problem: {description: Invalid request, content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+  schemas:
+    Type:
+      type: object
+      additionalProperties: false
+      required: [code, category, minimumDrivingYears, minimumAge, cleanRecordDays, validityDays, renewalWindowDays, feeMinor]
+      properties:
+        code: {type: string, minLength: 1, maxLength: 40}
+        category: {type: string, minLength: 1, maxLength: 40}
+        licenceClass: {type: string, maxLength: 40}
+        minimumDrivingYears: {type: integer, minimum: 0}
+        minimumAge: {type: integer, minimum: 16}
+        cleanRecordDays: {type: integer, minimum: 0}
+        medicalFitRequired: {type: boolean}
+        testRequired: {type: boolean}
+        validityDays: {type: integer, minimum: 1}
+        renewalWindowDays: {type: integer, minimum: 0}
+        feeMinor: {type: integer, minimum: 0}
+    Application:
+      type: object
+      additionalProperties: false
+      required: [typeCode, trafficFileNumber, licenceEligible, drivingYears, age, cleanRecordDays, medicallyFit, dualControls]
+      properties:
+        typeCode: {type: string, minLength: 1, maxLength: 40}
+        trafficFileNumber: {type: string, minLength: 1, maxLength: 40}
+        schoolId: {type: string, maxLength: 80}
+        vehiclePlate: {type: string, maxLength: 40}
+        licenceEligible: {type: boolean}
+        drivingYears: {type: integer, minimum: 0}
+        age: {type: integer, minimum: 0}
+        cleanRecordDays: {type: integer, minimum: 0}
+        medicallyFit: {type: boolean}
+        dualControls: {type: boolean}
+        exceptionReason: {type: string, maxLength: 500}
+    TestBooking:
+      type: object
+      additionalProperties: false
+      required: [committee, scheduledAt]
+      properties:
+        committee: {type: string, minLength: 1, maxLength: 80}
+        scheduledAt: {type: string, format: date-time}
+    TestResult:
+      type: object
+      additionalProperties: false
+      required: [examiner, passed]
+      properties:
+        examiner: {type: string, minLength: 1, maxLength: 80}
+        passed: {type: boolean}
+        reason: {type: string, maxLength: 500}
+    Transition:
+      type: object
+      additionalProperties: false
+      required: [action]
+      properties:
+        action: {type: string, enum: [approve, issue, renew, suspend, reinstate, cancel, expire]}
+        reason: {type: string, maxLength: 500}
+    Problem:
+      type: object
+      additionalProperties: true
+      properties: {type: {type: string, format: uri-reference}, title: {type: string, maxLength: 200}, status: {type: integer}, detail: {type: string, maxLength: 1000}}

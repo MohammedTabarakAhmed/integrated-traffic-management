@@ -1189,6 +1189,151 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
 
+  /v1/exchange-country-rules:
+    post:
+      operationId: submitExchangeCountryRule
+      summary: Propose a foreign-licence exchange rule for a country (maker)
+      tags: [Foreign licences]
+      x-itms-permission: licensing.exchange-country.submit
+      x-itms-scope: national
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      responses: { '201': { description: Rule submitted for approval }, '401': { description: Authentication required }, '403': { description: Permission denied } }
+    get:
+      operationId: listExchangeCountryRules
+      summary: Foreign-licence exchange rules per country
+      tags: [Foreign licences]
+      x-itms-permission: licensing.licence.read
+      x-itms-scope: national
+      responses: { '200': { description: Exchange country rules }, '401': { description: Authentication required }, '403': { description: Permission denied } }
+  /v1/exchange-country-rules/{ruleId}/approvals:
+    post:
+      operationId: approveExchangeCountryRule
+      summary: Approve a proposed exchange rule (checker, never the maker)
+      tags: [Foreign licences]
+      x-itms-permission: licensing.exchange-country.approve
+      x-itms-scope: national
+      parameters:
+        - in: path
+          name: ruleId
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses: { '200': { description: Rule approved }, '401': { description: Authentication required }, '403': { description: Permission denied } }
+  /v1/exchange-country-rules/{ruleId}/rejections:
+    post:
+      operationId: rejectExchangeCountryRule
+      summary: Reject a proposed exchange rule (checker)
+      tags: [Foreign licences]
+      x-itms-permission: licensing.exchange-country.approve
+      x-itms-scope: national
+      parameters:
+        - in: path
+          name: ruleId
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses: { '200': { description: Rule rejected }, '401': { description: Authentication required }, '403': { description: Permission denied } }
+  /v1/foreign-licences:
+    post:
+      operationId: recordForeignLicence
+      summary: Record a foreign licence on a traffic file
+      tags: [Foreign licences]
+      x-itms-permission: licensing.foreign.record
+      x-itms-scope: [region]
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      responses: { '201': { description: Foreign licence recorded }, '401': { description: Authentication required }, '403': { description: Permission denied } }
+    get:
+      operationId: listForeignLicences
+      summary: Foreign licences recorded on a traffic file
+      tags: [Foreign licences]
+      x-itms-permission: licensing.licence.read
+      x-itms-scope: [own, region]
+      responses: { '200': { description: Foreign licence records }, '401': { description: Authentication required }, '403': { description: Permission denied } }
+  /v1/foreign-licences/{foreignLicenceId}/exchanges:
+    post:
+      operationId: requestForeignLicenceExchange
+      summary: Request exchange of a foreign licence for a local one
+      tags: [Foreign licences]
+      x-itms-permission: licensing.licence.exchange
+      x-itms-scope: [own, region]
+      parameters:
+        - in: path
+          name: foreignLicenceId
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses: { '201': { description: Licence exchange requested }, '401': { description: Authentication required }, '403': { description: Permission denied } }
+  /v1/temporary-permits:
+    post:
+      operationId: requestTemporaryPermit
+      summary: Issue a temporary driving permit
+      tags: [Temporary permits]
+      x-itms-permission: licensing.permit.issue
+      x-itms-scope: [own, region]
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      responses: { '201': { description: Temporary permit requested }, '401': { description: Authentication required }, '403': { description: Permission denied } }
+    get:
+      operationId: listTemporaryPermits
+      summary: Temporary driving permits of a traffic file
+      tags: [Temporary permits]
+      x-itms-permission: licensing.licence.read
+      x-itms-scope: [own, region]
+      responses: { '200': { description: Temporary permits }, '401': { description: Authentication required }, '403': { description: Permission denied } }
+  /v1/temporary-permits/{permitId}/cancellation:
+    post:
+      operationId: cancelTemporaryPermit
+      summary: Cancel a temporary driving permit
+      tags: [Temporary permits]
+      x-itms-permission: licensing.permit.issue
+      x-itms-scope: [own, region]
+      parameters:
+        - in: path
+          name: permitId
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses: { '200': { description: Temporary permit cancelled }, '401': { description: Authentication required }, '403': { description: Permission denied } }
+  /v1/licences/{licenceId}/international-permits:
+    post:
+      operationId: requestInternationalPermit
+      summary: Request an international driving permit for a licence
+      tags: [International permits]
+      x-itms-permission: licensing.idp.issue
+      x-itms-scope: [own, region]
+      parameters:
+        - in: path
+          name: licenceId
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses: { '201': { description: International permit requested }, '401': { description: Authentication required }, '403': { description: Permission denied } }
+    get:
+      operationId: listInternationalPermits
+      summary: International driving permits of a licence
+      tags: [International permits]
+      x-itms-permission: licensing.licence.read
+      x-itms-scope: [own, region]
+      parameters:
+        - in: path
+          name: licenceId
+          required: true
+          schema: { type: string, format: uuid }
+      responses: { '200': { description: International permits }, '401': { description: Authentication required }, '403': { description: Permission denied } }
+  /v1/international-permits/{permitId}/printed:
+    post:
+      operationId: recordInternationalPermitPrint
+      summary: Record that an international permit was printed
+      tags: [International permits]
+      x-itms-permission: licensing.idp.print
+      x-itms-scope: [region]
+      parameters:
+        - in: path
+          name: permitId
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses: { '200': { description: Print recorded }, '401': { description: Authentication required }, '403': { description: Permission denied } }
+
 components:
   securitySchemes:
     bearerAuth:

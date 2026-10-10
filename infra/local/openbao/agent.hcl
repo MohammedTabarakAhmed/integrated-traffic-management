@@ -187,3 +187,91 @@ template {
   destination = "/run/db-credentials/violation-service/password"
   perms       = "0444"
 }
+
+template {
+  contents    = "{{ with secret \"database/creds/device-service\" }}{{ .Data.username }}{{ end }}"
+  destination = "/run/db-credentials/device-service/username"
+  perms       = "0444"
+}
+template {
+  contents    = "{{ with secret \"database/creds/device-service\" }}{{ .Data.password }}{{ end }}"
+  destination = "/run/db-credentials/device-service/password"
+  perms       = "0444"
+}
+
+template {
+  contents    = "{{ with secret \"database/creds/accident-service\" }}{{ .Data.username }}{{ end }}"
+  destination = "/run/db-credentials/accident-service/username"
+  perms       = "0444"
+}
+template {
+  contents    = "{{ with secret \"database/creds/accident-service\" }}{{ .Data.password }}{{ end }}"
+  destination = "/run/db-credentials/accident-service/password"
+  perms       = "0444"
+}
+
+template {
+  contents    = "{{ with secret \"database/creds/rental-service\" }}{{ .Data.username }}{{ end }}"
+  destination = "/run/db-credentials/rental-service/username"
+  perms       = "0444"
+}
+template {
+  contents    = "{{ with secret \"database/creds/rental-service\" }}{{ .Data.password }}{{ end }}"
+  destination = "/run/db-credentials/rental-service/password"
+  perms       = "0444"
+}
+
+template {
+  contents    = "{{ with secret \"database/creds/permit-service\" }}{{ .Data.username }}{{ end }}"
+  destination = "/run/db-credentials/permit-service/username"
+  perms       = "0444"
+}
+template {
+  contents    = "{{ with secret \"database/creds/permit-service\" }}{{ .Data.password }}{{ end }}"
+  destination = "/run/db-credentials/permit-service/password"
+  perms       = "0444"
+}
+
+template {
+  contents    = "{{ with secret \"database/creds/geo-service\" }}{{ .Data.username }}{{ end }}"
+  destination = "/run/db-credentials/geo-service/username"
+  perms       = "0444"
+}
+template {
+  contents    = "{{ with secret \"database/creds/geo-service\" }}{{ .Data.password }}{{ end }}"
+  destination = "/run/db-credentials/geo-service/password"
+  perms       = "0444"
+}
+
+template {
+  contents    = "{{ with secret \"database/creds/road-permit-service\" }}{{ .Data.username }}{{ end }}"
+  destination = "/run/db-credentials/road-permit-service/username"
+  perms       = "0444"
+}
+template {
+  contents    = "{{ with secret \"database/creds/road-permit-service\" }}{{ .Data.password }}{{ end }}"
+  destination = "/run/db-credentials/road-permit-service/password"
+  perms       = "0444"
+}
+
+template {
+  contents    = "{{ with secret \"database/creds/marine-service\" }}{{ .Data.username }}{{ end }}"
+  destination = "/run/db-credentials/marine-service/username"
+  perms       = "0444"
+}
+template {
+  contents    = "{{ with secret \"database/creds/marine-service\" }}{{ .Data.password }}{{ end }}"
+  destination = "/run/db-credentials/marine-service/password"
+  perms       = "0444"
+}
+
+template {
+  contents    = "{{ with secret \"database/creds/crossborder-service\" }}{{ .Data.username }}{{ end }}"
+  destination = "/run/db-credentials/crossborder-service/username"
+  perms       = "0444"
+}
+template {
+  contents    = "{{ with secret \"database/creds/crossborder-service\" }}{{ .Data.password }}{{ end }}"
+  destination = "/run/db-credentials/crossborder-service/password"
+  perms       = "0444"
+}

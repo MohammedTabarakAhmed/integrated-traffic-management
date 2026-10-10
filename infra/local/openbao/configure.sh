@@ -34,6 +34,14 @@ configure audit-service audit-postgres audit "$AUDIT_DB_USER" "$AUDIT_DB_PASSWOR
 configure payment-service payment-postgres payment "$PAY_DB_USER" "$PAY_DB_PASSWORD"
 configure vehicle-service vehicle-postgres vehicle "$VEH_DB_USER" "$VEH_DB_PASSWORD"
 configure violation-service violation-postgres violation "$VIO_DB_USER" "$VIO_DB_PASSWORD"
+configure device-service device-postgres device "$DEVICE_DB_USER" "$DEVICE_DB_PASSWORD"
+configure accident-service accident-postgres accident "$ACC_DB_USER" "$ACC_DB_PASSWORD"
+configure rental-service rental-postgres rental "$RENT_DB_USER" "$RENT_DB_PASSWORD"
+configure permit-service permit-postgres permit "$PERMIT_DB_USER" "$PERMIT_DB_PASSWORD"
+configure geo-service geo-postgres geo "$GEO_DB_USER" "$GEO_DB_PASSWORD"
+configure road-permit-service road-permit-postgres roadpermit "$ROAD_PERMIT_DB_USER" "$ROAD_PERMIT_DB_PASSWORD"
+configure marine-service marine-postgres marine "$MARINE_DB_USER" "$MARINE_DB_PASSWORD"
+configure crossborder-service crossborder-postgres crossborder "$XB_DB_USER" "$XB_DB_PASSWORD"
 
 # The agent may only read database logins.
 printf 'path "database/creds/*" {\n  capabilities = ["read"]\n}\n' | bao policy write itms-db-agent - >/dev/null

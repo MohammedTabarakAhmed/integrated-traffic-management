@@ -23,6 +23,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /** Vehicles, inspections, registration, renewal and plate series of {@code vehicle-service.v1.yaml}. */
@@ -135,6 +136,12 @@ class VehicleController {
     @PreAuthorize("hasAuthority('vehicle.read')")
     VehicleDto get(@PathVariable String vin) {
         return VehicleDto.of(vehicles.get(vin, callers.current()), today());
+    }
+
+    @GetMapping(value = "/v1/vehicles", params = "plate")
+    @PreAuthorize("hasAuthority('vehicle.read')")
+    VehicleDto byPlate(@RequestParam String plate) {
+        return VehicleDto.of(vehicles.byPlate(plate, callers.current()), today());
     }
 
     @GetMapping("/v1/vehicles/{vin}/history")

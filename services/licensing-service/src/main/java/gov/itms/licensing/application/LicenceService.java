@@ -100,6 +100,7 @@ public class LicenceService {
 
         boolean handles(LicenceRequest.Kind kind);
 
+        /** @return the licence created or changed, or null when the request creates no licence (a permit) */
         Licence completed(LicenceRequest request, CurrentActor system);
     }
 
@@ -228,26 +229,51 @@ public class LicenceService {
         Licence licence = r.kind() == LicenceRequest.Kind.ISSUE ? issue(r, system)
                 : handlers.stream().filter(h -> h.handles(r.kind())).findFirst()
                 .orElseThrow(() -> new IllegalStateException("no handler for " + r.kind())).completed(r, system);
-        repo.updateRequest(r.completed(licence.id(), clock.instant()));
+        repo.updateRequest(r.completed(licence == null ? r.licenceId() : licence.id(), clock.instant()));
         return true;
     }
 
     private Licence issue(LicenceRequest r, CurrentActor system) {
         repo.lockHolder(r.trafficFileNumber());
         Instant now = clock.instant();
-        LocalDate today = today();
         List<ExaminationTransfer> transfers = new ArrayList<>();
+        List<Grant> grants = new ArrayList<>();
         for (UUID id : r.transferIds()) {
             ExaminationTransfer t = repo.transferForUpdate(id).orElseThrow(() -> transferNotFound(id));
             t.requireTransferred();
             transfers.add(t);
+            grants.add(new Grant(t.spec().classCode(), t.spec().gearbox() == ExaminationTransfer.Gearbox.AUTOMATIC,
+                    t.id()));
         }
+        boolean first = repo.licencesOf(r.trafficFileNumber()).isEmpty();
+        Licence licence = createLicence(r, grants, first, "ISSUED", "itms.licence.issued", system);
+        for (ExaminationTransfer t : transfers) {
+            t.usedBy(licence.id(), now);
+            repo.updateTransfer(t);
+        }
+        return licence;
+    }
+
+    /** A class granted on a new licence: tested in an automatic vehicle or not, and from which transfer. */
+    record Grant(String classCode, boolean automatic, UUID transferId) {
+    }
+
+    /**
+     * Creates a licence for a paid request (DL-050, DL-054): next number of the region (DL-061), one class per grant
+     * with today's issue date (DL-021), automatic-only where the class records the gearbox (DL-022), the request's
+     * conditions (DL-023), validity per customer category capped at residency (DL-062), probation when asked
+     * (DL-050), a first card, history, audit and the event.
+     */
+    Licence createLicence(LicenceRequest r, List<Grant> grants, boolean probationary, String historyEvent,
+                          String eventType, CurrentActor system) {
+        Instant now = clock.instant();
+        LocalDate today = today();
         requireNoLicenceInForce(r.trafficFileNumber());
         LocalDate residency = r.value("residencyExpiresOn") == null ? null
                 : LocalDate.parse(r.value("residencyExpiresOn"));
-        Terms terms = terms(classCodes(transfers), r.value("customerCategory"), residency, today, today);
-        boolean first = repo.licencesOf(r.trafficFileNumber()).isEmpty();
-        LocalDate probation = first && rules.probationMonths() > 0
+        Terms terms = terms(grants.stream().map(Grant::classCode).toList(), r.value("customerCategory"), residency,
+                today, today);
+        LocalDate probation = probationary && rules.probationMonths() > 0
                 ? today.plusMonths(rules.probationMonths()) : null;
         List<Licence.Condition> conditions = new ArrayList<>();
         r.payload().forEach((k, v) -> {
@@ -259,26 +285,22 @@ public class LicenceService {
         UUID id = UUID.randomUUID();
         String number = numbers.allocate(r.region(), id.toString(), system).licenceNumber();
         List<Licence.LicenceClass> licenceClasses = new ArrayList<>();
-        for (int i = 0; i < transfers.size(); i++) {
-            ExaminationTransfer t = transfers.get(i);
+        for (int i = 0; i < grants.size(); i++) {
+            Grant g = grants.get(i);
             LicenceClassVersion v = terms.rules().get(i).version();
-            licenceClasses.add(new Licence.LicenceClass(t.spec().classCode(), v.id(), today,
-                    Licence.ClassStatus.ACTIVE, automaticOnly(t, v), t.id()));
+            licenceClasses.add(new Licence.LicenceClass(g.classCode(), v.id(), today, Licence.ClassStatus.ACTIVE,
+                    v.spec().gearboxRecorded() && g.automatic(), g.transferId()));
         }
         Licence licence = Licence.issue(id, number, r.trafficFileNumber(), r.region(), r.value("customerCategory"),
                 today, terms.expiresOn(), probation, residency, licenceClasses, conditions);
         repo.insertLicence(licence);
-        for (ExaminationTransfer t : transfers) {
-            t.usedBy(id, now);
-            repo.updateTransfer(t);
-        }
         Map<String, Object> detail = snapshot(licence);
         detail.put("requestId", r.id().toString());
         Records.Card card = issueCard(licence, Records.CardReason.ISSUE, r, now);
         detail.put("cardSerial", card.serial());
-        repo.history(id, "ISSUED", system.userId(), detail, now);
-        audit.recordAs(system, "LICENCE_ISSUED", ENTITY, number, null, detail, null);
-        events.recordAs(system, "itms.licence.issued", number, detail);
+        repo.history(id, historyEvent, system.userId(), detail, now);
+        audit.recordAs(system, "LICENCE_" + historyEvent, ENTITY, number, null, detail, null);
+        events.recordAs(system, eventType, number, detail);
         return licence;
     }
 

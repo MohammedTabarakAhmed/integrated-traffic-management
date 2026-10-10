@@ -66,6 +66,18 @@ itms:
       - /v1/baskets
       - /v1/baskets/*/payments
       - /v1/receipts/*/cancellations
+      - /v1/payables/*/holds
+      - /v1/payables/*/hold-lifts
+      - /v1/payments/*/refund-requests
+      - /v1/refund-requests/*/approvals
+      - /v1/refund-requests/*/rejections
+      - /v1/settlement-imports
+      - /v1/bank-deposits
+      - /v1/bank-statement-imports
+      - /v1/bank-deposit-exceptions/*/resolutions
+      - /v1/reconciliation-exceptions/*/resolutions
+      - /v1/tills
+      - /v1/tills/*/closures
     retention: ${ITMS_IDEMPOTENCY_RETENTION:24h}
     lock-timeout: ${ITMS_IDEMPOTENCY_LOCK_TIMEOUT:30s}
     cleanup-interval: ${ITMS_IDEMPOTENCY_CLEANUP_INTERVAL:15m}

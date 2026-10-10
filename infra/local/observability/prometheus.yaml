@@ -24,6 +24,14 @@ scrape_configs:
           - payment-service:8090
           - vehicle-service:8090
           - violation-service:8090
+          - device-service:8090
+          - accident-service:8090
+          - rental-service:8090
+          - permit-service:8090
+          - geo-service:8090
+          - road-permit-service:8090
+          - marine-service:8090
+          - crossborder-service:8090
   # API gateway usage analytics (INT-001, ADR-040): requests, latency and status per route and consumer.
   - job_name: apisix
     metrics_path: /apisix/prometheus/metrics

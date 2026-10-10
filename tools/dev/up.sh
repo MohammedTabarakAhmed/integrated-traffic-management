@@ -62,6 +62,22 @@ wanted = {
     "VEH_DB_PASSWORD": lambda: secrets.token_urlsafe(24),
     "VIO_DB_USER": lambda: "violation",
     "VIO_DB_PASSWORD": lambda: secrets.token_urlsafe(24),
+    "DEVICE_DB_USER": lambda: "device",
+    "DEVICE_DB_PASSWORD": lambda: secrets.token_urlsafe(24),
+    "ACC_DB_USER": lambda: "accident",
+    "ACC_DB_PASSWORD": lambda: secrets.token_urlsafe(24),
+    "RENT_DB_USER": lambda: "rental",
+    "RENT_DB_PASSWORD": lambda: secrets.token_urlsafe(24),
+    "PERMIT_DB_USER": lambda: "permit",
+    "PERMIT_DB_PASSWORD": lambda: secrets.token_urlsafe(24),
+    "GEO_DB_USER": lambda: "geo",
+    "GEO_DB_PASSWORD": lambda: secrets.token_urlsafe(24),
+    "ROAD_PERMIT_DB_USER": lambda: "roadpermit",
+    "ROAD_PERMIT_DB_PASSWORD": lambda: secrets.token_urlsafe(24),
+    "MARINE_DB_USER": lambda: "marine",
+    "MARINE_DB_PASSWORD": lambda: secrets.token_urlsafe(24),
+    "XB_DB_USER": lambda: "crossborder",
+    "XB_DB_PASSWORD": lambda: secrets.token_urlsafe(24),
     "KC_ADMIN_USER": lambda: "kc-admin",
     "KC_ADMIN_PASSWORD": lambda: secrets.token_urlsafe(24),
     "DEV_IAM_ADMIN_PASSWORD": lambda: secrets.token_urlsafe(16),
@@ -71,6 +87,7 @@ wanted = {
     "DEV_TRANSACTION_SERVICE_SECRET": lambda: secrets.token_urlsafe(32),
     "DEV_VEHICLE_SERVICE_SECRET": lambda: secrets.token_urlsafe(32),
     "DEV_VIOLATION_SERVICE_SECRET": lambda: secrets.token_urlsafe(32),
+    "DEV_DEVICE_SERVICE_SECRET": lambda: secrets.token_urlsafe(32),
     "GRAFANA_ADMIN_PASSWORD": lambda: secrets.token_urlsafe(16),
     "BAO_ROOT_TOKEN": lambda: secrets.token_urlsafe(24),
 }
@@ -95,15 +112,15 @@ if [[ "${1:-}" == "down" ]]; then
 fi
 
 echo "== Building service jars"
-mvn -B -ntp -q package -DskipTests -pl services/iam-service,services/reference-data-service,services/transaction-service,services/hold-eligibility-service,services/traffic-file-service,services/fees-service,services/rules-service,services/workflow-service,services/notification-service,services/document-service,services/appointment-service,services/audit-service,services/payment-service,services/vehicle-service,services/violation-service -am
+mvn -B -ntp -q package -DskipTests -pl services/iam-service,services/reference-data-service,services/transaction-service,services/hold-eligibility-service,services/traffic-file-service,services/fees-service,services/rules-service,services/workflow-service,services/notification-service,services/document-service,services/appointment-service,services/audit-service,services/payment-service,services/vehicle-service,services/violation-service,services/device-service,services/licensing-service,services/accident-service,services/rental-service,services/permit-service,services/geo-service,services/road-permit-service,services/marine-service,services/crossborder-service -am
 
 echo "== Starting the databases and OpenBao"
-"${COMPOSE[@]}" up -d --wait postgres iam-postgres transaction-postgres hold-postgres traffic-file-postgres fees-postgres rules-postgres workflow-postgres notification-postgres document-postgres appointment-postgres audit-postgres payment-postgres vehicle-postgres violation-postgres openbao
+"${COMPOSE[@]}" up -d --wait postgres iam-postgres transaction-postgres hold-postgres traffic-file-postgres fees-postgres rules-postgres workflow-postgres notification-postgres document-postgres appointment-postgres audit-postgres payment-postgres vehicle-postgres violation-postgres device-postgres accident-postgres rental-postgres openbao
 
 echo "== Database owner role itms_owner (ADR-039)"
 for db in "postgres refdata $REFDATA_DB_USER" "iam-postgres iam $IAM_DB_USER" \
           "transaction-postgres transaction $TXN_DB_USER" "hold-postgres hold $HOLD_DB_USER" \
-          "traffic-file-postgres trafficfile $TF_DB_USER" "fees-postgres fees $FEES_DB_USER" "rules-postgres rules $RULES_DB_USER" "workflow-postgres workflow $WORKFLOW_DB_USER" "notification-postgres notification $NOTIF_DB_USER" "document-postgres document $DOC_DB_USER" "appointment-postgres appointment $APPT_DB_USER" "audit-postgres audit $AUDIT_DB_USER" "payment-postgres payment $PAY_DB_USER" "vehicle-postgres vehicle $VEH_DB_USER" "violation-postgres violation $VIO_DB_USER"; do
+          "traffic-file-postgres trafficfile $TF_DB_USER" "fees-postgres fees $FEES_DB_USER" "rules-postgres rules $RULES_DB_USER" "workflow-postgres workflow $WORKFLOW_DB_USER" "notification-postgres notification $NOTIF_DB_USER" "document-postgres document $DOC_DB_USER" "appointment-postgres appointment $APPT_DB_USER" "audit-postgres audit $AUDIT_DB_USER" "payment-postgres payment $PAY_DB_USER" "vehicle-postgres vehicle $VEH_DB_USER" "violation-postgres violation $VIO_DB_USER" "device-postgres device $DEVICE_DB_USER" "accident-postgres accident $ACC_DB_USER" "rental-postgres rental $RENT_DB_USER"; do
   set -- $db
   "${COMPOSE[@]}" exec -T "$1" psql -q -v ON_ERROR_STOP=1 -U "$3" -d "$2" < infra/local/db/itms-owner.sql
   echo "   $2: itms_owner owns the schema"
@@ -127,6 +144,10 @@ BAO_AGENT_TOKEN=$({ printf "export BAO_TOKEN='%s' ITMS_DB_LOGIN_TTL='%s' ITMS_DB
     printf "export PAY_DB_USER='%s' PAY_DB_PASSWORD='%s'\n" "$PAY_DB_USER" "$PAY_DB_PASSWORD"
     printf "export VEH_DB_USER='%s' VEH_DB_PASSWORD='%s'\n" "$VEH_DB_USER" "$VEH_DB_PASSWORD"
     printf "export VIO_DB_USER='%s' VIO_DB_PASSWORD='%s'\n" "$VIO_DB_USER" "$VIO_DB_PASSWORD"
+    printf "export DEVICE_DB_USER='%s' DEVICE_DB_PASSWORD='%s'\n" "$DEVICE_DB_USER" "$DEVICE_DB_PASSWORD"
+    printf "export ACC_DB_USER='%s' ACC_DB_PASSWORD='%s' RENT_DB_USER='%s' RENT_DB_PASSWORD='%s'\n" "$ACC_DB_USER" "$ACC_DB_PASSWORD" "$RENT_DB_USER" "$RENT_DB_PASSWORD"
+    printf "export PERMIT_DB_USER='%s' PERMIT_DB_PASSWORD='%s' GEO_DB_USER='%s' GEO_DB_PASSWORD='%s'\n" "$PERMIT_DB_USER" "$PERMIT_DB_PASSWORD" "$GEO_DB_USER" "$GEO_DB_PASSWORD"
+    printf "export ROAD_PERMIT_DB_USER='%s' ROAD_PERMIT_DB_PASSWORD='%s' MARINE_DB_USER='%s' MARINE_DB_PASSWORD='%s' XB_DB_USER='%s' XB_DB_PASSWORD='%s'\n" "$ROAD_PERMIT_DB_USER" "$ROAD_PERMIT_DB_PASSWORD" "$MARINE_DB_USER" "$MARINE_DB_PASSWORD" "$XB_DB_USER" "$XB_DB_PASSWORD"
     cat infra/local/openbao/configure.sh
   } | "${COMPOSE[@]}" exec -T openbao sh -s | tail -n 1)
 export BAO_AGENT_TOKEN
@@ -149,6 +170,7 @@ KC=(env MSYS_NO_PATHCONV=1 docker compose "${COMPOSE_FILES[@]}" --env-file "$ENV
 "${KC[@]}" update clients/7d0c1a3e-5b2f-4c1d-9e8a-100000000002 -r itms -s "secret=$DEV_TRANSACTION_SERVICE_SECRET"
 "${KC[@]}" update clients/7d0c1a3e-5b2f-4c1d-9e8a-100000000003 -r itms -s "secret=$DEV_VEHICLE_SERVICE_SECRET"
 "${KC[@]}" update clients/7d0c1a3e-5b2f-4c1d-9e8a-100000000004 -r itms -s "secret=$DEV_VIOLATION_SERVICE_SECRET"
+"${KC[@]}" update clients/7d0c1a3e-5b2f-4c1d-9e8a-100000000005 -r itms -s "secret=$DEV_DEVICE_SERVICE_SECRET"
 
 echo "== Granting development roles through iam-service (dev.iam-admin is the bootstrap administrator)"
 IAM=http://localhost:8082
@@ -240,6 +262,38 @@ grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000013 service-account-itms-violation-servic
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000013 service-account-itms-violation-service SUSPENSION_HOLD_PLACER
 # violation-service places and lifts UNPAID_FINES holds on violations left unpaid (VF-023; ADR-058).
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000013 service-account-itms-violation-service UNPAID_FINE_HOLD_MANAGER
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000013 service-account-itms-violation-service VIOLATION_PAYMENT_HOLDER
+# violation-service finds the local vehicle and owner of a partner-state violation by plate (XB-002).
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000013 service-account-itms-violation-service VEHICLE_READER
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000014 service-account-itms-device-service DEVICE_VIOLATION_RECORDER
+# Enforcement device registry and manual capture quality queue (VF-010, VF-011, VF-080, VF-081).
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker DEVICE_ADMIN
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker DEVICE_GATEWAY
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker DEVICE_REVIEWER
+# Accident reporting and rental-company partner API access (AC-001..AC-006, TR-020..TR-033).
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker ACCIDENT_OFFICER
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker ACCIDENT_INVESTIGATOR
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker REPAIR_PERMIT_VERIFIER
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker RENTAL_PARTNER
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker ACCIDENT_PARTY
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker ACCIDENT_SUPERVISOR
+# Permit lifecycle, geography, road authorities, marine and partner-state exchange (TR-001..TR-008, RE-*, XB-*).
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker TRAINING_PERMIT_OFFICER
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker TRAINING_PERMIT_ADMIN
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker GEO_ADMIN
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker ROAD_PERMIT_OFFICER
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker ROAD_AUTHORITY_APPROVER
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker ROAD_PERMIT_ADMIN
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker MARINE_REGISTRY_OFFICER
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker MARINE_INSPECTOR
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker CROSSBORDER_ADMIN
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker CROSSBORDER_EXCHANGER
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker CROSSBORDER_OBJECTION_OFFICER
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker CROSSBORDER_SETTLEMENT_AUDITOR
+# Partner settings and mappings: dev.maker proposes, dev.checker approves (XB-007); data exchange and statements (XB-004, XB-006).
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker CROSSBORDER_APPROVER
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker CROSSBORDER_DATA_OFFICER
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker CROSSBORDER_SETTLEMENT_OFFICER
 # vehicle-service asks hold-eligibility-service whether a renewal is blocked (VL-011, VF-023; ADR-058).
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000012 service-account-itms-vehicle-service ELIGIBILITY_CHECKER
 
@@ -262,6 +316,14 @@ ITMS local stack is up:
   payment-service         http://localhost:8094                     (bearer token required)
   vehicle-service         http://localhost:8095                     (bearer token required)
   violation-service       http://localhost:8096                     (bearer token required)
+  device-service          http://localhost:8097                     (bearer token required)
+  accident-service        http://localhost:8100                     (bearer token required)
+  rental-service          http://localhost:8101                     (bearer token required)
+  permit-service           http://localhost:8102                     (bearer token required)
+  geo-service              http://localhost:8103                     (bearer token required)
+  road-permit-service      http://localhost:8104                     (bearer token required)
+  marine-service           http://localhost:8105                     (bearer token required)
+  crossborder-service      http://localhost:8106                     (bearer token required)
   Keycloak                http://localhost:8180   (realm: itms; users dev.iam-admin / dev.maker / dev.checker;
                                                    passwords in $ENV_FILE; clients itms-directory-feed and
                                                    itms-transaction-service use DEV_DIRECTORY_FEED_SECRET and

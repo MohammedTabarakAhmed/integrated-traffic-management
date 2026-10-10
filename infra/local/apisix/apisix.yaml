@@ -70,6 +70,38 @@ upstreams:
     type: roundrobin
     nodes:
       "violation-service:8080": 1
+  - id: device-service
+    type: roundrobin
+    nodes:
+      "device-service:8080": 1
+  - id: accident-service
+    type: roundrobin
+    nodes:
+      "accident-service:8080": 1
+  - id: rental-service
+    type: roundrobin
+    nodes:
+      "rental-service:8080": 1
+  - id: permit-service
+    type: roundrobin
+    nodes:
+      "permit-service:8080": 1
+  - id: geo-service
+    type: roundrobin
+    nodes:
+      "geo-service:8080": 1
+  - id: road-permit-service
+    type: roundrobin
+    nodes:
+      "road-permit-service:8080": 1
+  - id: marine-service
+    type: roundrobin
+    nodes:
+      "marine-service:8080": 1
+  - id: crossborder-service
+    type: roundrobin
+    nodes:
+      "crossborder-service:8080": 1
 
 plugin_configs:
   - id: protected-api
@@ -308,4 +340,71 @@ routes:
       - /v1/violation-catalogue
       - /v1/violation-catalogue/*
       - /v1/black-point-accounts/*
+  - id: device-service
+    name: device-service
+    upstream_id: device-service
+    plugin_config_id: protected-api
+    uris:
+      - /v1/devices
+      - /v1/devices/*
+      - /v1/device-captures
+      - /v1/device-captures/*
+  - id: accident-service
+    name: accident-service
+    upstream_id: accident-service
+    plugin_config_id: protected-api
+    uris:
+      - /v1/accidents
+      - /v1/accidents/*
+      - /v1/repair-permits/*
+  - id: rental-service
+    name: rental-service
+    upstream_id: rental-service
+    plugin_config_id: protected-api
+    uris:
+      - /v1/rental-companies
+      - /v1/rental-contracts
+      - /v1/rental-contracts/*
+  - id: permit-service
+    name: permit-service
+    upstream_id: permit-service
+    plugin_config_id: protected-api
+    uris:
+      - /v1/permit-types
+      - /v1/permits
+      - /v1/permits/*
+  - id: geo-service
+    name: geo-service
+    upstream_id: geo-service
+    plugin_config_id: protected-api
+    uris:
+      - /v1/geographic-nodes
+      - /v1/geographic-nodes/*
+  - id: road-permit-service
+    name: road-permit-service
+    upstream_id: road-permit-service
+    plugin_config_id: protected-api
+    uris:
+      - /v1/road-permits
+      - /v1/road-permits/*
+  - id: marine-service
+    name: marine-service
+    upstream_id: marine-service
+    plugin_config_id: protected-api
+    uris:
+      - /v1/marine-craft
+      - /v1/marine-craft/*
+      - /v1/marine-operator-licences
+  - id: crossborder-service
+    name: crossborder-service
+    upstream_id: crossborder-service
+    plugin_config_id: protected-api
+    uris:
+      - /v1/partner-states
+      - /v1/partner-states/*
+      - /v1/exchange-messages
+      - /v1/exchange-messages/*
+      - /v1/config-proposals
+      - /v1/config-proposals/*
+      - /v1/settlement-statements/*
 #END

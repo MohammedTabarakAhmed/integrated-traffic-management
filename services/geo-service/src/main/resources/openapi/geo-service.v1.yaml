@@ -1,0 +1,67 @@
+openapi: 3.1.0
+info: {title: ITMS National Geography API, version: 1.0.0}
+paths:
+  /v1/geographic-nodes:
+    post:
+      operationId: createGeographicNode
+      summary: Add a bilingual geographic hierarchy, road, bridge, tunnel or service-centre node
+      tags: [Geography]
+      x-itms-permission: geo.node.manage
+      x-itms-scope: national
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Node'}}}}
+      responses: {'201': {description: Geographic node created}, '400': {$ref: '#/components/responses/Problem'}, '401': {description: Authentication required}, '403': {description: Permission denied}}
+    get:
+      operationId: listGeographicChildren
+      summary: List geographic nodes below a parent
+      tags: [Geography]
+      x-itms-permission: geo.node.read
+      x-itms-scope: national
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: parentId, in: query, required: true, schema: {type: string, format: uuid}}
+        - {name: type, in: query, required: false, schema: {type: string, maxLength: 24}}
+      responses: {'200': {description: Geographic children}, '401': {description: Authentication required}, '403': {description: Permission denied}}
+  /v1/geographic-nodes/{id}:
+    get:
+      operationId: getGeographicNode
+      summary: Read a geographic node
+      tags: [Geography]
+      x-itms-permission: geo.node.read
+      x-itms-scope: national
+      security: [{bearerAuth: []}]
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses: {'200': {description: Geographic node}, '401': {description: Authentication required}, '403': {description: Permission denied}, '404': {$ref: '#/components/responses/Problem'}}
+components:
+  securitySchemes: {bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}}
+  parameters:
+    IdempotencyKey: {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 8, maxLength: 128}}
+  responses:
+    Problem: {description: Invalid request, content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+  schemas:
+    Node:
+      type: object
+      additionalProperties: false
+      required: [type, code, nameEn, nameAr]
+      properties:
+        parentId: {type: string, format: uuid}
+        type: {type: string, enum: [REGION, CITY, AREA, STREET, INTERSECTION, BRIDGE, TUNNEL, ROAD_SEGMENT, SERVICE_CENTRE]}
+        code: {type: string, minLength: 1, maxLength: 40}
+        nameEn: {type: string, minLength: 1, maxLength: 200}
+        nameAr: {type: string, minLength: 1, maxLength: 200}
+        region: {type: string, maxLength: 40}
+        latitude: {type: number, minimum: -90, maximum: 90}
+        longitude: {type: number, minimum: -180, maximum: 180}
+        speedLimitKmh: {type: number, exclusiveMinimum: 0}
+        bridgeLoadTonnes: {type: number, exclusiveMinimum: 0}
+        restrictions: {type: string, maxLength: 1000}
+        openingHours: {type: string, maxLength: 500}
+        roadType: {type: string, maxLength: 24}
+        laneCount: {type: integer, minimum: 1, maximum: 32}
+        direction: {type: string, enum: [BIDIRECTIONAL, FORWARD, REVERSE]}
+        owningAuthority: {type: string, maxLength: 80}
+    Problem:
+      type: object
+      additionalProperties: true
+      properties: {type: {type: string, format: uri-reference}, title: {type: string, maxLength: 200}, status: {type: integer}, detail: {type: string, maxLength: 1000}}

@@ -46,6 +46,10 @@ final class GatewayAdapters {
         record StatusBody(String status, String gatewayTxnId, Long amountMinor, String currency, String paidAt) {
         }
 
+        record RefundRequest(String merchantRef, String gatewayTxnId, long amountMinor, String currency) { }
+
+        record RefundAnswer(String refundRef) { }
+
         @Override
         public Session openSession(UUID paymentId, long amountMinor, String currency, String returnUrl,
                                    String summary) {
@@ -83,6 +87,24 @@ final class GatewayAdapters {
             } catch (RuntimeException e) {
                 LOG.warn("Payment gateway status inquiry for {} failed: {}", paymentId, e.getClass().getSimpleName());
                 throw new Ports.GatewayUnavailableException("payment gateway unavailable", e);
+            }
+        }
+
+        @Override
+        public String refund(UUID paymentId, String gatewayTxnId, String refundId, long amountMinor, String currency) {
+            try {
+                RefundAnswer answer = client.post().uri("/v1/refunds")
+                        .header("Idempotency-Key", refundId)
+                        .body(new RefundRequest(paymentId.toString(), gatewayTxnId, amountMinor, currency))
+                        .retrieve().body(RefundAnswer.class);
+                if (answer == null || answer.refundRef() == null || answer.refundRef().isBlank()) {
+                    throw new Ports.GatewayUnavailableException("gateway gave no refund reference", null);
+                }
+                return answer.refundRef();
+            } catch (RestClientException e) {
+                LOG.warn("Refund {} for payment {} was not confirmed: {}", refundId, paymentId,
+                        e.getClass().getSimpleName());
+                throw new Ports.GatewayUnavailableException("payment gateway refund is unavailable", e);
             }
         }
     }

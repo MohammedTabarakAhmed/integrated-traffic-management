@@ -1,5 +1,6 @@
 package gov.itms.licensing.infrastructure;
 
+import gov.itms.licensing.application.ForeignService;
 import gov.itms.licensing.application.LicenceClassService;
 import gov.itms.licensing.application.LicenceNumberService;
 import gov.itms.licensing.application.LicenceService;
@@ -42,7 +43,7 @@ import tools.jackson.databind.ObjectMapper;
  */
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties({LicensingServiceConfiguration.LicensingProperties.class,
-        LicensingServiceConfiguration.StatusProperties.class})
+        LicensingServiceConfiguration.StatusProperties.class, LicensingServiceConfiguration.ForeignProperties.class})
 public class LicensingServiceConfiguration {
 
     /**
@@ -103,6 +104,23 @@ public class LicensingServiceConfiguration {
         }
     }
 
+    /**
+     * {@code itms.licensing.foreign.*}: accepted languages (DL-054), fixed permit validities (DL-055), international
+     * permit validity and approved printers (DL-056); interim answers in Q-079.
+     */
+    @ConfigurationProperties("itms.licensing.foreign")
+    public record ForeignProperties(List<String> acceptedLanguages, @DefaultValue("30") int visitorPermitDays,
+                                    @DefaultValue("30") int cardPendingPermitDays,
+                                    @DefaultValue("12") int idpValidityMonths, List<String> idpPrinters,
+                                    @DefaultValue("false") boolean exchangeProbation) {
+
+        ForeignService.ForeignRules rules() {
+            return new ForeignService.ForeignRules(acceptedLanguages == null ? Set.of() : Set.copyOf(acceptedLanguages),
+                    visitorPermitDays, cardPendingPermitDays, idpValidityMonths,
+                    idpPrinters == null ? Set.of() : Set.copyOf(idpPrinters), exchangeProbation);
+        }
+    }
+
     @Bean
     JdbcLicenceClassRepository licenceClassRepository(JdbcClient jdbc, ObjectMapper json) {
         return new JdbcLicenceClassRepository(jdbc, json);
@@ -158,6 +176,21 @@ public class LicensingServiceConfiguration {
                 processed, clock);
         licences.addHandler(status);
         return status;
+    }
+
+    @Bean
+    JdbcForeignRepository foreignRepository(JdbcClient jdbc, ObjectMapper json) {
+        return new JdbcForeignRepository(jdbc, json);
+    }
+
+    @Bean
+    ForeignService foreignService(LicenceService licences, JdbcForeignRepository foreign,
+                                  LicenceNumberService numbers, ForeignProperties properties, AuditRecorder audit,
+                                  DomainEventRecorder events, Clock clock) {
+        ForeignService service = new ForeignService(licences, foreign, numbers, properties.rules(), audit, events,
+                clock);
+        licences.addHandler(service);
+        return service;
     }
 
     private static ServiceClientProperties client(Environment environment, String name) {

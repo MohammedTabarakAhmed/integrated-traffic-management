@@ -1,0 +1,54 @@
+spring:
+  application:
+    name: accident-service
+  config:
+    import: "optional:configtree:${ITMS_SECRETS_DIR:/run/secrets/}"
+  datasource:
+    url: ${ACC_DB_URL}
+    username: ${ACC_DB_USER:}
+    password: ${ACC_DB_PASSWORD:}
+  flyway:
+    locations: classpath:db/platform,classpath:db/migration
+    out-of-order: true
+  kafka:
+    bootstrap-servers: ${ITMS_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+  threads:
+    virtual:
+      enabled: true
+itms:
+  events:
+    enabled: ${ITMS_EVENTS_ENABLED:false}
+    audit-topic: ${ITMS_EVENTS_AUDIT_TOPIC:itms.audit.v1}
+    domain-topic: ${ITMS_EVENTS_DOMAIN_TOPIC:}
+    batch-size: ${ITMS_EVENTS_BATCH_SIZE:100}
+    send-timeout: ${ITMS_EVENTS_SEND_TIMEOUT:10s}
+    relay-interval: ${ITMS_EVENTS_RELAY_INTERVAL:1s}
+  security:
+    issuer: ${ITMS_OIDC_ISSUER}
+    jwk-set-uri: ${ITMS_OIDC_JWKS_URI}
+    audience: itms-api
+    authorisation-source: ${ITMS_AUTHORISATION_SOURCE:iam}
+    iam:
+      base-url: ${ITMS_IAM_URL:}
+      cache-ttl: ${ITMS_IAM_CACHE_TTL:60s}
+  idempotency:
+    enabled: true
+    paths: [/v1/accidents, /v1/accident-paper-books, /v1/accident-paper-books/*/reports, /v1/accident-paper-books/*/reconciliation, /v1/accident-paper-books/*/losses, /v1/accidents/*/fault-decisions, /v1/accidents/*/repair-permits, /v1/repair-permits/*/cancellations, /v1/accidents/*/objections, /v1/accident-objections/*/reviews, /v1/accidents/*/hit-and-run-parties/*/identifications, /v1/accidents/*/closures, /v1/accidents/*/prosecution-referrals, /v1/accidents/*/ambulance-requests, /v1/accidents/*/insurer-notifications]
+    retention: 24h
+    lock-timeout: 30s
+    cleanup-interval: 15m
+management:
+  server:
+    port: ${ITMS_MANAGEMENT_PORT:8090}
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+server:
+  error:
+    include-stacktrace: never
+    include-message: never

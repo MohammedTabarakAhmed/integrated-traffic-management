@@ -43,6 +43,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class PaymentService {
 
     public static final String PAYABLE_REGISTER = "payment.payable.register";
+    public static final String PAYABLE_HOLD = "payment.payable.hold";
     public static final String PAY_FOR_OTHERS = "payment.basket.create";
     public static final String COLLECT = "payment.collect";
     public static final String CALLBACK = "payment.gateway.callback";
@@ -120,6 +121,42 @@ public class PaymentService {
         return repo.findPayable(id).orElseThrow(() -> notFound("PAYABLE", id));
     }
 
+    @Transactional
+    public void placePayableHold(UUID id, String sourceRef, String reason, Caller caller) {
+        channelOf(caller);
+        Payable payable = repo.lockPayables(List.of(id)).stream().findFirst()
+                .orElseThrow(() -> notFound("PAYABLE", id));
+        require(caller.grants().allowsInRegion(PAYABLE_HOLD, payable.region()));
+        if (sourceRef == null || !sourceRef.matches("^[A-Z0-9][A-Z0-9:_-]{0,79}$")
+                || reason == null || reason.isBlank() || reason.length() > 500) {
+            throw DomainException.validation("PAYABLE_HOLD_INVALID", "a source reference and reason are required",
+                    List.of("VF-052"));
+        }
+        if (payable.status() != Payable.Status.OPEN) {
+            throw DomainException.conflict("PAYABLE_NOT_OPEN", "only an open payable can be paused",
+                    List.of("VF-052"));
+        }
+        repo.placePayableHold(id, sourceRef, reason.strip(), caller.actor().id(), clock.instant());
+        audit.record("PAYABLE_PAUSED", "Payable", id.toString(), null, Map.of("sourceRef", sourceRef), reason);
+    }
+
+    @Transactional
+    public void liftPayableHold(UUID id, String sourceRef, String reason, Caller caller) {
+        channelOf(caller);
+        Payable payable = repo.lockPayables(List.of(id)).stream().findFirst()
+                .orElseThrow(() -> notFound("PAYABLE", id));
+        require(caller.grants().allowsInRegion(PAYABLE_HOLD, payable.region()));
+        if (reason == null || reason.isBlank() || reason.length() > 500) {
+            throw DomainException.validation("REASON_INVALID", "a reason is required", List.of("VF-052"));
+        }
+        if (!repo.liftPayableHold(id, sourceRef, reason.strip(), caller.actor().id(), clock.instant())) {
+            throw DomainException.conflict("PAYABLE_HOLD_NOT_ACTIVE", "the payable has no matching active hold",
+                    List.of("VF-052"));
+        }
+        audit.record("PAYABLE_RESUMED", "Payable", id.toString(), Map.of("sourceRef", sourceRef),
+                Map.of("active", false), reason);
+    }
+
     // ---- baskets and payments (FN-001, FN-002)
 
     @Transactional
@@ -127,7 +164,12 @@ public class PaymentService {
         channelOf(caller);
         List<Payable> items = new ArrayList<>();
         for (UUID id : payableIds) {
-            items.add(repo.findPayable(id).orElseThrow(() -> notFound("PAYABLE", id)));
+            Payable item = repo.findPayable(id).orElseThrow(() -> notFound("PAYABLE", id));
+            if (repo.payableHeld(id)) {
+                throw DomainException.conflict("PAYABLE_PAUSED", "item " + item.itemRef() + " is under objection",
+                        List.of("VF-052"));
+            }
+            items.add(item);
         }
         Basket b = Basket.of(UUID.randomUUID(), items, region, caller.actor().id(), clock.instant());
         repo.insertBasket(b);
@@ -158,7 +200,14 @@ public class PaymentService {
         }
         Basket b = repo.findBasket(basketId).orElseThrow(() -> notFound("BASKET", basketId));
         b.requireOpen();
+        if (b.payableIds().stream().anyMatch(repo::payableHeld)) {
+            throw DomainException.conflict("PAYABLE_PAUSED", "a basket item is under objection", List.of("VF-052"));
+        }
         boolean counter = Payment.COUNTER_METHODS.contains(method);
+        if (counter && repo.openTillForUpdate(caller.actor().id(), b.region()).isEmpty()) {
+            throw DomainException.conflict("TILL_NOT_OPEN", "open a till before collecting counter payments",
+                    List.of("FN-020"));
+        }
         if (counter) {
             require(caller.grants().allowsInRegion(COLLECT, b.region()));
         } else if (!b.createdBy().equals(caller.actor().id())) {
@@ -181,10 +230,18 @@ public class PaymentService {
                         + "number or terminal reference)", List.of("FN-001"), "counterReference");
             }
             // the cashier takes the money only for items still open
-            repo.lockPayables(b.payableIds()).forEach(Payable::requireOpen);
+            List<Payable> locked = repo.lockPayables(b.payableIds());
+            locked.forEach(Payable::requireOpen);
+            if (locked.stream().anyMatch(item -> repo.payableHeld(item.id()))) {
+                throw DomainException.conflict("PAYABLE_PAUSED", "a basket item is under objection",
+                        List.of("VF-052"));
+            }
             repo.insertPayment(p);
             p.confirmAtCounter(counterReference, now);
             Receipt r = settle(p, b, caller.actor().id());
+            if (r == null) {
+                return new Started(repo.findPayment(p.id()).orElse(p), null, null);
+            }
             audit.record("PAYMENT_COLLECTED", "Payment", p.id().toString(), null, paymentSnapshot(p),
                     r.number());
             return new Started(p, null, r);
@@ -235,7 +292,7 @@ public class PaymentService {
         repo.logCallback(paymentId, gatewayTxnId, status, "ACCEPTED", now);
         if ("SUCCESS".equals(status)) {
             Receipt r = confirm(p, gatewayTxnId, amountMinor, currency, now, "gateway-callback");
-            return new CallbackOutcome(p, r, false);
+            return new CallbackOutcome(repo.findPayment(paymentId).orElse(p), r, false);
         }
         p.fail(gatewayTxnId);
         repo.updatePayment(p);
@@ -258,6 +315,14 @@ public class PaymentService {
     private Receipt settle(Payment p, Basket b, String by) {
         List<Payable> items = repo.lockPayables(b.payableIds());
         for (Payable item : items) {
+            if (repo.payableHeld(item.id())) {
+                repo.updatePayment(Payment.restore(p.id(), p.basketId(), p.method(), p.amountMinor(), p.currency(),
+                        p.channel(), p.region(), p.payerId(), p.createdAt(), Payment.Status.EXCEPTION,
+                        p.gatewaySessionId(), p.gatewayTxnId(), p.confirmedAt(), "ITEM_PAUSED:" + item.itemRef(),
+                        p.lastInquiryAt()));
+                raiseException(p, "item " + item.itemRef() + " is paused");
+                return null;
+            }
             if (item.status() != Payable.Status.OPEN) {
                 repo.updatePayment(Payment.restore(p.id(), p.basketId(), p.method(), p.amountMinor(), p.currency(),
                         p.channel(), p.region(), p.payerId(), p.createdAt(), Payment.Status.EXCEPTION,
@@ -281,13 +346,17 @@ public class PaymentService {
         for (Payable item : items) {
             for (Payable.Line l : item.lines()) {
                 lines.add(new Receipt.Line(item.id(), item.itemType(), item.itemRef(), item.trafficFileNumber(),
-                        l.financialItem(), l.beneficiary(), l.description(), l.amountMinor()));
+                        l.financialItem(), l.beneficiary(), l.costCentre(), l.description(), l.amountMinor()));
             }
         }
         Receipt r = new Receipt(UUID.randomUUID(), number, p.id(), Receipt.typeOf(items), p.region(), p.channel(),
                 p.method(), p.currency(), p.amountMinor(), lines, p.payerId(), now, day, Receipt.Status.ISSUED, null,
                 null, null);
         repo.insertReceipt(r);
+        repo.insertLedgerPostings(r);
+        if (Payment.COUNTER_METHODS.contains(p.method())) {
+            repo.recordTillPayment(p, r);
+        }
         Map<String, Object> event = new LinkedHashMap<>(paymentSnapshot(p));
         event.put("receiptNumber", number);
         event.put("receiptType", r.type().name());
@@ -296,6 +365,9 @@ public class PaymentService {
                 i.trafficFileNumber() == null ? "" : i.trafficFileNumber())).toList());
         audit.record("PAYMENT_CONFIRMED", "Payment", p.id().toString(), null, event, by);
         events.record("itms.payment.confirmed", p.id().toString(), event);
+        events.record("itms.payment.ledger-posting-ready", r.id().toString(), Map.of("receiptId", r.id().toString(),
+                "receiptNumber", r.number(), "region", r.region(), "currency", r.currency(),
+                "lineCount", r.lines().size()));
         return r;
     }
 

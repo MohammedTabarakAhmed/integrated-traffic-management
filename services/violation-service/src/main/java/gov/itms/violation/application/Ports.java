@@ -71,6 +71,11 @@ public final class Ports {
         void insertUnpaidHold(UnpaidHold hold);
 
         void unpaidHoldLifted(UUID id, Instant at);
+        void insertPaperBook(ViolationBooks.Book book);
+        Optional<ViolationBooks.Book> paperBook(String serial);
+        void insertPaperBookEntry(String serial,String reportSerial,String violationNumber,Instant at);
+        List<String> paperBookReports(String serial);
+        void finishPaperBook(String serial,String status,String actor,Instant at);
     }
 
     /** payment-service payables (FN-002). */
@@ -80,6 +85,10 @@ public final class Ports {
                       String financialItem, String beneficiary, String description);
 
         void cancel(UUID payableId, String reason);
+
+        void hold(UUID payableId, String sourceRef, String reason);
+
+        void liftHold(UUID payableId, String sourceRef, String reason);
     }
 
     /** hold-eligibility-service holds (CC-030). */
@@ -98,6 +107,32 @@ public final class Ports {
 
         /** Lifts the hold; a hold that is no longer active counts as lifted. */
         void lift(String holdId, String reason);
+    }
+
+    /** Which violations crossed a border, and with which partner state (XB-001, XB-002). */
+    public interface CrossborderLinks {
+
+        enum Direction { INBOUND, OUTBOUND }
+
+        record Link(UUID violationId, String violationNumber, String partner, Direction direction,
+                    String externalId) {
+        }
+
+        void insert(Link link, java.time.Instant at);
+
+        java.util.Optional<Link> byExternalId(String partner, String externalId);
+
+        java.util.Optional<Link> byNumber(String violationNumber);
+    }
+
+    /** vehicle-service: the local vehicle carrying a plate (XB-002). */
+    public interface Vehicles {
+
+        record Registered(String vin, String ownerFileNumber, String region) {
+        }
+
+        /** Empty when no vehicle carries the plate here. */
+        java.util.Optional<Registered> byPlate(String plate);
     }
 
     public static class UnavailableException extends RuntimeException {

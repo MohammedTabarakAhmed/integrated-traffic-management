@@ -5,6 +5,9 @@ import gov.itms.platform.client.ServiceClientProperties;
 import gov.itms.platform.client.ServiceClients;
 import gov.itms.platform.events.DomainEventRecorder;
 import gov.itms.violation.application.ViolationService;
+import gov.itms.violation.application.CrossborderViolations;
+import gov.itms.violation.application.ObjectionService;
+import gov.itms.violation.application.ViolationBooks;
 import gov.itms.violation.domain.BlackPoints;
 import gov.itms.violation.domain.UnpaidHold;
 import io.micrometer.observation.ObservationRegistry;
@@ -31,7 +34,8 @@ import tools.jackson.databind.ObjectMapper;
 
 /** Wires violations to PostgreSQL, payment-service, hold-eligibility-service and the payment events. */
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties(ViolationServiceConfiguration.ViolationProperties.class)
+@EnableConfigurationProperties({ViolationServiceConfiguration.ViolationProperties.class,
+        ViolationServiceConfiguration.CrossborderProperties.class})
 public class ViolationServiceConfiguration {
 
     /**
@@ -56,7 +60,8 @@ public class ViolationServiceConfiguration {
                                       @DefaultValue("1h") Duration unpaidHoldInterval,
                                       @DefaultValue("100") int unpaidHoldBatchSize,
                                       List<String> unpaidHoldBlockedServices,
-                                      List<String> unpaidHoldLiftableByRoles) {
+                                      List<String> unpaidHoldLiftableByRoles,
+                                      @DefaultValue("30d") Duration objectionWindow) {
         public ViolationProperties {
             suspensionMonths = List.copyOf(suspensionMonths);
             warningThresholds = List.copyOf(warningThresholds);
@@ -88,6 +93,11 @@ public class ViolationServiceConfiguration {
     }
 
     @Bean
+    ViolationBooks violationBooks(JdbcClient jdbc,ObjectMapper json,AuditRecorder audit,DomainEventRecorder events,Clock clock) {
+        return new ViolationBooks(new JdbcViolationRepository(jdbc,json),audit,events,clock);
+    }
+
+    @Bean
     ViolationService violationService(JdbcClient jdbc, ObjectMapper json, ViolationProperties p,
                                       Environment environment, AuditRecorder audit, DomainEventRecorder events,
                                       Clock clock, ObjectProvider<ObservationRegistry> observations) {
@@ -103,6 +113,40 @@ public class ViolationServiceConfiguration {
                         p.suspensionMonths(), p.warningThresholds()), Set.copyOf(p.cancelReasons()), p.currency(),
                         ZoneId.of(p.zone()), p.maxReportDelay(),
                         unpaidPolicy(p.unpaidHoldEnabled(), p.unpaidHoldAfter(), p.unpaidHoldBatchSize())), clock);
+    }
+
+    /**
+     * Cross-border violations (Increment 9): the cancellation reason applied when a partner state accepts an objection
+     * (one of the cancel reasons) and the beneficiary of payables collected for partner states (XB-004 settlement).
+     */
+    @ConfigurationProperties("itms.violations.crossborder")
+    public record CrossborderProperties(@DefaultValue("OBJECTION_ACCEPTED") String acceptedObjectionReason,
+                                        @DefaultValue("CROSSBORDER_SETTLEMENT") String beneficiary) {
+    }
+
+    @Bean
+    CrossborderViolations crossborderViolations(JdbcClient jdbc, ObjectMapper json, ViolationService violations,
+                                                ViolationProperties p, CrossborderProperties x,
+                                                Environment environment, AuditRecorder audit,
+                                                DomainEventRecorder events, Clock clock,
+                                                ObjectProvider<ObservationRegistry> observations) {
+        if (!p.cancelReasons().contains(x.acceptedObjectionReason())) {
+            throw new IllegalArgumentException(
+                    "itms.violations.crossborder.accepted-objection-reason must be one of itms.violations.cancel-reasons");
+        }
+        ObservationRegistry registry = observations.getIfAvailable(() -> ObservationRegistry.NOOP);
+        return new CrossborderViolations(violations, new JdbcViolationRepository(jdbc, json),
+                new JdbcCrossborderLinks(jdbc),
+                new Adapters.RemoteVehicles(ServiceClients.create(client(environment, "vehicles"), clock, registry)),
+                new Adapters.RemotePayables(ServiceClients.create(client(environment, "payments"), clock, registry)),
+                audit, events, new CrossborderViolations.Settings(x.acceptedObjectionReason(), x.beneficiary()),
+                clock);
+    }
+
+    @Bean
+    ObjectionService objectionService(JdbcClient jdbc, ViolationService violations, AuditRecorder audit,
+                                      DomainEventRecorder events, Clock clock, ViolationProperties properties) {
+        return new ObjectionService(jdbc, violations, audit, events, clock, properties.objectionWindow());
     }
 
     private static UnpaidHold.Policy unpaidPolicy(boolean enabled, Duration after, int batchSize) {
@@ -173,6 +217,12 @@ public class ViolationServiceConfiguration {
         @Bean
         Adapters.PaymentEventListener paymentEventListener(ViolationService violations, ObjectMapper json) {
             return new Adapters.PaymentEventListener(violations, json);
+        }
+
+        @Bean
+        Adapters.CrossborderEventListener crossborderEventListener(CrossborderViolations crossborder,
+                                                                   ObjectionService objections, ObjectMapper json) {
+            return new Adapters.CrossborderEventListener(crossborder, objections, json);
         }
     }
 }

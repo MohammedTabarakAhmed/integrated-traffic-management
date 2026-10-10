@@ -1,0 +1,189 @@
+openapi: 3.1.0
+info:
+  title: ITMS Device Service
+  version: 1.0.0
+  description: |
+    Enforcement device registry, calibration history and screened capture intake (VF-010..VF-013, VF-080..VF-082).
+    Captures are deduplicated by source key. Captures that fail plate, image, calibration or responsible-party checks
+    remain in the review queue. Approved captures are recorded in violation-service using the same idempotency key.
+servers:
+  - url: /
+security:
+  - bearerAuth: []
+paths:
+  /v1/devices:
+    post:
+      operationId: registerDevice
+      summary: Register an enforcement device (VF-080)
+      tags: [Devices]
+      x-itms-permission: device.manage
+      x-itms-scope: [region]
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DeviceRequest'}
+      responses:
+        '201': {description: Registered device}
+        '409': {description: Device code already exists}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+    get:
+      operationId: listDevices
+      summary: Enforcement devices in a region (VF-080)
+      tags: [Devices]
+      x-itms-permission: device.read
+      x-itms-scope: [region]
+      parameters:
+        - in: query
+          name: region
+          required: true
+          schema: {type: string}
+      responses:
+        '200': {description: Devices visible in the region}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+  /v1/devices/{code}/calibrations:
+    post:
+      operationId: recordDeviceCalibration
+      summary: Record a device calibration and its validity (VF-082)
+      tags: [Devices]
+      x-itms-permission: device.manage
+      x-itms-scope: [region]
+      parameters:
+        - in: path
+          name: code
+          required: true
+          schema: {type: string}
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [validFrom, validUntil]
+              properties:
+                validFrom: {type: string, format: date-time}
+                validUntil: {type: string, format: date-time}
+      responses:
+        '200': {description: Calibration recorded}
+        '404': {description: Device does not exist}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+  /v1/device-captures:
+    post:
+      operationId: ingestDeviceCapture
+      summary: A device reports a capture; good ones become violations, others wait for review (VF-010, VF-011)
+      tags: [Captures]
+      x-itms-permission: device.capture.ingest
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CaptureRequest'}
+      responses:
+        '201': {description: Capture accepted or queued for review}
+        '422': {description: Capture exceeded its permitted age}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+  /v1/device-captures/review-queue:
+    get:
+      operationId: listCaptureReviewQueue
+      summary: Device captures awaiting quality review (VF-081)
+      tags: [Captures]
+      x-itms-permission: device.capture.review
+      x-itms-scope: [region]
+      parameters:
+        - in: query
+          name: region
+          required: true
+          schema: {type: string}
+        - in: query
+          name: limit
+          schema: {type: integer, default: 100, minimum: 1, maximum: 1000}
+      responses:
+        '200': {description: Captures that need manual review}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+  /v1/device-captures/{id}/reviews:
+    post:
+      operationId: reviewDeviceCapture
+      summary: Accept or reject a capture in the quality queue (VF-081)
+      tags: [Captures]
+      x-itms-permission: device.capture.review
+      x-itms-scope: [region]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [accept]
+              properties:
+                accept: {type: boolean}
+                ownerFileNumber: {type: string, maxLength: 60}
+      responses:
+        '200': {description: Capture accepted or rejected}
+        '404': {description: Capture does not exist}
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    IdempotencyKey:
+      in: header
+      name: Idempotency-Key
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 128}
+  schemas:
+    DeviceRequest:
+      type: object
+      additionalProperties: false
+      required: [code, type, owner, region, latitude, longitude, road, direction, speedLimitKmh]
+      properties:
+        code: {type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{0,39}$'}
+        type: {type: string, enum: [RADAR, RED_LIGHT_CAMERA, MOBILE_CAMERA]}
+        owner: {type: string, maxLength: 100}
+        region: {type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{0,39}$'}
+        latitude: {type: number, minimum: -90, maximum: 90}
+        longitude: {type: number, minimum: -180, maximum: 180}
+        road: {type: string, maxLength: 120}
+        direction: {type: string, maxLength: 40}
+        speedLimitKmh: {type: integer, minimum: 5, maximum: 200}
+    CaptureRequest:
+      type: object
+      additionalProperties: false
+      required: [sourceKey, deviceCode, capturedAt, catalogueCode, region, plate, location, evidenceId,
+        plateReadable, imagePresent]
+      properties:
+        sourceKey: {type: string, maxLength: 120}
+        deviceCode: {type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{0,39}$'}
+        capturedAt: {type: string, format: date-time}
+        catalogueCode: {type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{0,39}$'}
+        region: {type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{0,39}$'}
+        plate: {type: string, maxLength: 20}
+        location: {type: string, maxLength: 300}
+        measuredSpeedKmh: {type: integer, minimum: 0, maximum: 500}
+        evidenceId: {type: string, maxLength: 64}
+        ownerFileNumber: {type: string, maxLength: 60}
+        plateReadable: {type: boolean}
+        imagePresent: {type: boolean}

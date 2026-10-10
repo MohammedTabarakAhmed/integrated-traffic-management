@@ -260,6 +260,120 @@ services:
       timeout: 3s
       retries: 20
 
+  device-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: device
+      POSTGRES_USER: ${DEVICE_DB_USER:?run tools/dev/up.sh}
+      POSTGRES_PASSWORD_FILE: /run/secrets/device_db_password
+    secrets:
+      - device_db_password
+    volumes:
+      - device-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d device"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  accident-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: accident
+      POSTGRES_USER: ${ACC_DB_USER:?run tools/dev/up.sh}
+      POSTGRES_PASSWORD_FILE: /run/secrets/accident_db_password
+    secrets: [accident_db_password]
+    volumes: [accident-db:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d accident"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  rental-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: rental
+      POSTGRES_USER: ${RENT_DB_USER:?run tools/dev/up.sh}
+      POSTGRES_PASSWORD_FILE: /run/secrets/rental_db_password
+    secrets: [rental_db_password]
+    volumes: [rental-db:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d rental"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  permit-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: permit
+      POSTGRES_USER: ${PERMIT_DB_USER:?run tools/dev/up.sh}
+      POSTGRES_PASSWORD_FILE: /run/secrets/permit_db_password
+    secrets: [permit_db_password]
+    volumes: [permit-db:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d permit"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  geo-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: geo
+      POSTGRES_USER: ${GEO_DB_USER:?run tools/dev/up.sh}
+      POSTGRES_PASSWORD_FILE: /run/secrets/geo_db_password
+    secrets: [geo_db_password]
+    volumes: [geo-db:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d geo"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  road-permit-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: roadpermit
+      POSTGRES_USER: ${ROAD_PERMIT_DB_USER:?run tools/dev/up.sh}
+      POSTGRES_PASSWORD_FILE: /run/secrets/road_permit_db_password
+    secrets: [road_permit_db_password]
+    volumes: [road-permit-db:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d roadpermit"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  marine-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: marine
+      POSTGRES_USER: ${MARINE_DB_USER:?run tools/dev/up.sh}
+      POSTGRES_PASSWORD_FILE: /run/secrets/marine_db_password
+    secrets: [marine_db_password]
+    volumes: [marine-db:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d marine"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  crossborder-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: crossborder
+      POSTGRES_USER: ${XB_DB_USER:?run tools/dev/up.sh}
+      POSTGRES_PASSWORD_FILE: /run/secrets/crossborder_db_password
+    secrets: [crossborder_db_password]
+    volumes: [crossborder-db:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d crossborder"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   keycloak:
     image: quay.io/keycloak/keycloak:26.8.0
     command: ["start-dev", "--import-realm"]
@@ -950,6 +1064,8 @@ services:
       # service's own client-credentials account (ADR-034); payment confirmations from the broker mark fines paid.
       ITMS_PAYMENTS_URL: http://payment-service:8080
       ITMS_HOLDS_URL: http://hold-eligibility-service:8080
+      # Partner-state violations are loaded against the local vehicle found by plate (XB-002).
+      ITMS_VEHICLES_URL: http://vehicle-service:8080
       ITMS_OIDC_TOKEN_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/token
       ITMS_SERVICE_CLIENT_ID: itms-violation-service
       ITMS_VIOLATIONS_CONSUMER_ENABLED: "true"
@@ -968,6 +1084,8 @@ services:
         target: itms.clients.payments.client-secret
       - source: violation_service_client_secret
         target: itms.clients.holds.client-secret
+      - source: violation_service_client_secret
+        target: itms.clients.vehicles.client-secret
     volumes:
       - type: volume
         source: db-credentials
@@ -996,6 +1114,269 @@ services:
       timeout: 3s
       retries: 30
 
+  device-service:
+    build: ../../services/device-service
+    mem_limit: ${ITMS_SERVICE_MEM_LIMIT:-512m}
+    environment:
+      <<: [*itms-observability, *itms-events]
+      DEVICE_DB_URL: jdbc:postgresql://device-postgres:5432/device
+      ITMS_VIOLATIONS_URL: http://violation-service:8080
+      ITMS_OIDC_TOKEN_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/token
+      ITMS_SERVICE_CLIENT_ID: itms-device-service
+      SPRING_DATASOURCE_HIKARI_CONNECTIONINITSQL: SET ROLE itms_owner
+      ITMS_OIDC_ISSUER: http://localhost:8180/realms/itms
+      ITMS_OIDC_JWKS_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/certs
+      ITMS_AUTHORISATION_SOURCE: iam
+      ITMS_IAM_URL: http://iam-service:8080
+    secrets:
+      - source: device_service_client_secret
+        target: itms.clients.violations.client-secret
+    volumes:
+      - type: volume
+        source: db-credentials
+        target: /run/secrets/spring/datasource
+        read_only: true
+        volume:
+          subpath: device-service
+    ports:
+      - "127.0.0.1:8097:8080"
+    depends_on:
+      bao-agent:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+      kafka:
+        condition: service_healthy
+      device-postgres:
+        condition: service_healthy
+      violation-service:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      iam-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8090/actuator/health/readiness | grep -q UP"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  accident-service:
+    build: ../../services/accident-service
+    mem_limit: ${ITMS_SERVICE_MEM_LIMIT:-512m}
+    environment:
+      <<: [*itms-observability, *itms-events]
+      ACC_DB_URL: jdbc:postgresql://accident-postgres:5432/accident
+      SPRING_DATASOURCE_HIKARI_CONNECTIONINITSQL: SET ROLE itms_owner
+      ITMS_OIDC_ISSUER: http://localhost:8180/realms/itms
+      ITMS_OIDC_JWKS_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/certs
+      ITMS_AUTHORISATION_SOURCE: iam
+      ITMS_IAM_URL: http://iam-service:8080
+    volumes:
+      - type: volume
+        source: db-credentials
+        target: /run/secrets/spring/datasource
+        read_only: true
+        volume:
+          subpath: accident-service
+    ports: ["127.0.0.1:8100:8080"]
+    depends_on:
+      bao-agent: { condition: service_healthy }
+      accident-postgres: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
+      iam-service: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8090/actuator/health/readiness | grep -q UP"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  rental-service:
+    build: ../../services/rental-service
+    mem_limit: ${ITMS_SERVICE_MEM_LIMIT:-512m}
+    environment:
+      <<: [*itms-observability, *itms-events]
+      RENT_DB_URL: jdbc:postgresql://rental-postgres:5432/rental
+      SPRING_DATASOURCE_HIKARI_CONNECTIONINITSQL: SET ROLE itms_owner
+      ITMS_OIDC_ISSUER: http://localhost:8180/realms/itms
+      ITMS_OIDC_JWKS_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/certs
+      ITMS_AUTHORISATION_SOURCE: iam
+      ITMS_IAM_URL: http://iam-service:8080
+    volumes:
+      - type: volume
+        source: db-credentials
+        target: /run/secrets/spring/datasource
+        read_only: true
+        volume:
+          subpath: rental-service
+    ports: ["127.0.0.1:8101:8080"]
+    depends_on:
+      bao-agent: { condition: service_healthy }
+      rental-postgres: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+      keycloak: { condition: service_healthy }
+      iam-service: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8090/actuator/health/readiness | grep -q UP"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  permit-service:
+    build: ../../services/permit-service
+    mem_limit: ${ITMS_SERVICE_MEM_LIMIT:-512m}
+    environment:
+      <<: [*itms-observability, *itms-events]
+      PERMIT_DB_URL: jdbc:postgresql://permit-postgres:5432/permit
+      SPRING_DATASOURCE_HIKARI_CONNECTIONINITSQL: SET ROLE itms_owner
+      ITMS_OIDC_ISSUER: http://localhost:8180/realms/itms
+      ITMS_OIDC_JWKS_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/certs
+      ITMS_AUTHORISATION_SOURCE: iam
+      ITMS_IAM_URL: http://iam-service:8080
+    volumes:
+      - type: volume
+        source: db-credentials
+        target: /run/secrets/spring/datasource
+        read_only: true
+        volume: {subpath: permit-service}
+    ports: ["127.0.0.1:8102:8080"]
+    depends_on:
+      bao-agent: {condition: service_healthy}
+      permit-postgres: {condition: service_healthy}
+      kafka: {condition: service_healthy}
+      keycloak: {condition: service_healthy}
+      iam-service: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8090/actuator/health/readiness | grep -q UP"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  geo-service:
+    build: ../../services/geo-service
+    mem_limit: ${ITMS_SERVICE_MEM_LIMIT:-512m}
+    environment:
+      <<: [*itms-observability, *itms-events]
+      GEO_DB_URL: jdbc:postgresql://geo-postgres:5432/geo
+      SPRING_DATASOURCE_HIKARI_CONNECTIONINITSQL: SET ROLE itms_owner
+      ITMS_OIDC_ISSUER: http://localhost:8180/realms/itms
+      ITMS_OIDC_JWKS_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/certs
+      ITMS_AUTHORISATION_SOURCE: iam
+      ITMS_IAM_URL: http://iam-service:8080
+    volumes:
+      - type: volume
+        source: db-credentials
+        target: /run/secrets/spring/datasource
+        read_only: true
+        volume: {subpath: geo-service}
+    ports: ["127.0.0.1:8103:8080"]
+    depends_on:
+      bao-agent: {condition: service_healthy}
+      geo-postgres: {condition: service_healthy}
+      kafka: {condition: service_healthy}
+      keycloak: {condition: service_healthy}
+      iam-service: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8090/actuator/health/readiness | grep -q UP"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  road-permit-service:
+    build: ../../services/road-permit-service
+    mem_limit: ${ITMS_SERVICE_MEM_LIMIT:-512m}
+    environment:
+      <<: [*itms-observability, *itms-events]
+      ROAD_PERMIT_DB_URL: jdbc:postgresql://road-permit-postgres:5432/roadpermit
+      SPRING_DATASOURCE_HIKARI_CONNECTIONINITSQL: SET ROLE itms_owner
+      ITMS_OIDC_ISSUER: http://localhost:8180/realms/itms
+      ITMS_OIDC_JWKS_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/certs
+      ITMS_AUTHORISATION_SOURCE: iam
+      ITMS_IAM_URL: http://iam-service:8080
+    volumes:
+      - type: volume
+        source: db-credentials
+        target: /run/secrets/spring/datasource
+        read_only: true
+        volume: {subpath: road-permit-service}
+    ports: ["127.0.0.1:8104:8080"]
+    depends_on:
+      bao-agent: {condition: service_healthy}
+      road-permit-postgres: {condition: service_healthy}
+      kafka: {condition: service_healthy}
+      keycloak: {condition: service_healthy}
+      iam-service: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8090/actuator/health/readiness | grep -q UP"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  marine-service:
+    build: ../../services/marine-service
+    mem_limit: ${ITMS_SERVICE_MEM_LIMIT:-512m}
+    environment:
+      <<: [*itms-observability, *itms-events]
+      MARINE_DB_URL: jdbc:postgresql://marine-postgres:5432/marine
+      SPRING_DATASOURCE_HIKARI_CONNECTIONINITSQL: SET ROLE itms_owner
+      ITMS_OIDC_ISSUER: http://localhost:8180/realms/itms
+      ITMS_OIDC_JWKS_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/certs
+      ITMS_AUTHORISATION_SOURCE: iam
+      ITMS_IAM_URL: http://iam-service:8080
+    volumes:
+      - type: volume
+        source: db-credentials
+        target: /run/secrets/spring/datasource
+        read_only: true
+        volume: {subpath: marine-service}
+    ports: ["127.0.0.1:8105:8080"]
+    depends_on:
+      bao-agent: {condition: service_healthy}
+      marine-postgres: {condition: service_healthy}
+      kafka: {condition: service_healthy}
+      keycloak: {condition: service_healthy}
+      iam-service: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8090/actuator/health/readiness | grep -q UP"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  crossborder-service:
+    build: ../../services/crossborder-service
+    mem_limit: ${ITMS_SERVICE_MEM_LIMIT:-512m}
+    environment:
+      <<: [*itms-observability, *itms-events]
+      XB_DB_URL: jdbc:postgresql://crossborder-postgres:5432/crossborder
+      # Partner-state exchange (XB-*): violation-service events drive sending, payment notices and objections;
+      # partner endpoints are configured per partner through approved proposals (the local mock: http://partner-state-mock:8080/xb/<CODE>).
+      ITMS_CROSSBORDER_LOCAL_STATE: LOCAL
+      ITMS_CROSSBORDER_CONSUMER_ENABLED: "true"
+      SPRING_DATASOURCE_HIKARI_CONNECTIONINITSQL: SET ROLE itms_owner
+      ITMS_OIDC_ISSUER: http://localhost:8180/realms/itms
+      ITMS_OIDC_JWKS_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/certs
+      ITMS_AUTHORISATION_SOURCE: iam
+      ITMS_IAM_URL: http://iam-service:8080
+    volumes:
+      - type: volume
+        source: db-credentials
+        target: /run/secrets/spring/datasource
+        read_only: true
+        volume: {subpath: crossborder-service}
+    ports: ["127.0.0.1:8106:8080"]
+    depends_on:
+      bao-agent: {condition: service_healthy}
+      crossborder-postgres: {condition: service_healthy}
+      kafka: {condition: service_healthy}
+      keycloak: {condition: service_healthy}
+      iam-service: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8090/actuator/health/readiness | grep -q UP"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
   # ---- Partner mocks (Gate C). Built from the ICDs; never used outside local development and tests.
   identity-register-mock:
     image: wiremock/wiremock:3.13.1
@@ -1008,6 +1389,12 @@ services:
     command: ["--port", "8080", "--disable-banner"]
     volumes:
       - ./mocks/licensing-authority/mappings:/home/wiremock/mappings:ro
+
+  partner-state-mock:
+    image: wiremock/wiremock:3.13.1
+    command: ["--port", "8080", "--disable-banner", "--global-response-templating"]
+    volumes:
+      - ./mocks/partner-state/mappings:/home/wiremock/mappings:ro
 
   payment-gateway-mock:
     image: wiremock/wiremock:3.13.1
@@ -1095,6 +1482,22 @@ services:
         condition: service_healthy
       violation-service:
         condition: service_healthy
+      device-service:
+        condition: service_healthy
+      accident-service:
+        condition: service_healthy
+      rental-service:
+        condition: service_healthy
+      permit-service:
+        condition: service_healthy
+      geo-service:
+        condition: service_healthy
+      road-permit-service:
+        condition: service_healthy
+      marine-service:
+        condition: service_healthy
+      crossborder-service:
+        condition: service_healthy
     healthcheck:
       # Ready once routes are loaded and the token check answers: an unauthenticated call gets 401.
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9080 && printf 'GET /v1/roles HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && head -1 <&3 | grep -q ' 401 '"]
@@ -1141,7 +1544,7 @@ services:
       openbao:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "for s in iam-service reference-data-service transaction-service hold-eligibility-service traffic-file-service fees-service rules-service workflow-service notification-service document-service appointment-service audit-service payment-service vehicle-service violation-service; do test -s /run/db-credentials/$$s/username && test -s /run/db-credentials/$$s/password || exit 1; done"]
+      test: ["CMD-SHELL", "for s in iam-service reference-data-service transaction-service hold-eligibility-service traffic-file-service fees-service rules-service workflow-service notification-service document-service appointment-service audit-service payment-service vehicle-service violation-service device-service accident-service rental-service permit-service geo-service road-permit-service marine-service crossborder-service; do test -s /run/db-credentials/$$s/username && test -s /run/db-credentials/$$s/password || exit 1; done"]
       interval: 2s
       timeout: 3s
       retries: 30
@@ -1214,6 +1617,24 @@ services:
 secrets:
   violation_service_client_secret:
     environment: DEV_VIOLATION_SERVICE_SECRET
+  device_service_client_secret:
+    environment: DEV_DEVICE_SERVICE_SECRET
+  device_db_password:
+    environment: DEVICE_DB_PASSWORD
+  accident_db_password:
+    environment: ACC_DB_PASSWORD
+  rental_db_password:
+    environment: RENT_DB_PASSWORD
+  permit_db_password:
+    environment: PERMIT_DB_PASSWORD
+  geo_db_password:
+    environment: GEO_DB_PASSWORD
+  road_permit_db_password:
+    environment: ROAD_PERMIT_DB_PASSWORD
+  marine_db_password:
+    environment: MARINE_DB_PASSWORD
+  crossborder_db_password:
+    environment: XB_DB_PASSWORD
   violation_db_password:
     environment: VIO_DB_PASSWORD
   vehicle_service_client_secret:
@@ -1281,5 +1702,13 @@ volumes:
   payment-db:
   vehicle-db:
   violation-db:
+  device-db:
+  accident-db:
+  rental-db:
+  permit-db:
+  geo-db:
+  road-permit-db:
+  marine-db:
+  crossborder-db:
   db-credentials:
   kafka-data:

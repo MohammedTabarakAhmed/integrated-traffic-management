@@ -54,6 +54,8 @@ services:
     environment: *lite-mock-jvm
   payment-gateway-mock:
     environment: *lite-mock-jvm
+  partner-state-mock:
+    environment: *lite-mock-jvm
   insurance-hub-mock:
     environment: *lite-mock-jvm
   messaging-gateway-mock:
@@ -88,4 +90,20 @@ services:
   vehicle-service:
     environment: *lite-service-jvm
   violation-service:
+    environment: *lite-service-jvm
+  device-service:
+    environment: *lite-service-jvm
+  accident-service:
+    environment: *lite-service-jvm
+  rental-service:
+    environment: *lite-service-jvm
+  permit-service:
+    environment: *lite-service-jvm
+  geo-service:
+    environment: *lite-service-jvm
+  road-permit-service:
+    environment: *lite-service-jvm
+  marine-service:
+    environment: *lite-service-jvm
+  crossborder-service:
     environment: *lite-service-jvm

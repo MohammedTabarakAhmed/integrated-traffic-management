@@ -135,6 +135,31 @@
           }
         }
       ]
+    },
+    {
+      "id": "7d0c1a3e-5b2f-4c1d-9e8a-100000000005",
+      "clientId": "itms-device-service",
+      "name": "device-service's own account for recording quality-approved device captures (VF-010, VF-011, ADR-034). LOCAL DEVELOPMENT ONLY: the secret is set by tools/dev/up.sh",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "fullScopeAllowed": false,
+      "protocolMappers": [
+        {
+          "name": "itms-api audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "itms-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
     }
   ],
   "users": [
@@ -188,6 +213,12 @@
       "username": "service-account-itms-violation-service",
       "enabled": true,
       "serviceAccountClientId": "itms-violation-service"
+    },
+    {
+      "id": "7d0c1a3e-5b2f-4c1d-9e8a-000000000014",
+      "username": "service-account-itms-device-service",
+      "enabled": true,
+      "serviceAccountClientId": "itms-device-service"
     }
   ]
 }

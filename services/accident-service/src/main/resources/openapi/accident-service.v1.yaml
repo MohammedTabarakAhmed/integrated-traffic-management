@@ -1,0 +1,488 @@
+openapi: 3.1.0
+info:
+  title: ITMS Accident Service
+  version: 1.0.0
+  description: Accident reports and parties (AC-001..AC-006); evidence references are document-service identifiers.
+servers:
+  - url: /
+security:
+  - bearerAuth: []
+tags: [{ name: Accidents }]
+paths:
+  /v1/accidents:
+    post:
+      tags: [Accidents]
+      summary: Report an accident with parties and evidence (AC-001, AC-004..AC-006)
+      operationId: reportAccident
+      x-itms-permission: accident.report
+      x-itms-scope: [region]
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [region, occurredAt, location, origin, parties]
+              properties:
+                region: { type: string, maxLength: 40, pattern: '^[A-Z0-9_-]{1,40}$' }
+                occurredAt: { type: string, format: date-time }
+                location: { type: string, maxLength: 500, description: GPS or mapped location reference }
+                roadCondition: { type: string, maxLength: 80 }
+                weather: { type: string, maxLength: 80 }
+                origin: { type: string, enum: [CUSTOMER_APP, OFFICER_DEVICE, PAPER_BOOK] }
+                evidenceDocumentIds: { type: array, maxItems: 100, items: { type: string, maxLength: 80 } }
+                parties:
+                  type: array
+                  minItems: 1
+                  maxItems: 50
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [role, agrees]
+                    properties:
+                      trafficFileNumber: { type: string, maxLength: 40 }
+                      vehiclePlate: { type: string, maxLength: 40 }
+                      role: { type: string, enum: [DRIVER, PASSENGER, PEDESTRIAN] }
+                      seatPosition: { type: string, maxLength: 40 }
+                      injuryDegree: { type: string, maxLength: 40 }
+                      transportMethod: { type: string, maxLength: 80 }
+                      intoxicationStatus: { type: string, maxLength: 40 }
+                      faultPercent: { type: integer, minimum: 0, maximum: 100 }
+                      agrees: { type: boolean }
+                      unknownParty: { type: boolean }
+      responses:
+        '201': { description: Reported; all agreeing parties with percentages totaling 100 are immediately fault-decided }
+        '401': { description: Unauthorized }
+        '403': { description: Outside the caller's regional scope }
+        '400': { description: Invalid report }
+  /v1/accidents/{id}:
+    get:
+      tags: [Accidents]
+      summary: Get an accident report by id
+      operationId: getAccident
+      x-itms-permission: accident.read
+      x-itms-scope: [region]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: Accident report }
+        '401': { description: Unauthorized }
+        '403': { description: Outside the caller's regional scope }
+        '404': { description: Report not found }
+  /v1/accidents/{id}/fault-decisions:
+    post:
+      tags: [Accidents]
+      summary: Record an investigator's fault decision (AC-003, AC-005)
+      operationId: decideAccidentFault
+      x-itms-permission: accident.investigate
+      x-itms-scope: [region]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason, shares]
+              properties:
+                reason: { type: string, minLength: 3, maxLength: 500 }
+                shares:
+                  type: array
+                  minItems: 1
+                  maxItems: 50
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [partyNo, faultPercent]
+                    properties:
+                      partyNo: { type: integer, minimum: 1 }
+                      faultPercent: { type: integer, minimum: 0, maximum: 100 }
+      responses:
+        '200': { description: Fault decided; shares cover all parties and total 100 }
+        '401': { description: Unauthorized }
+        '403': { description: Outside the investigator's region }
+        '404': { description: Report not found }
+  /v1/accidents/{id}/repair-permits:
+    post:
+      tags: [Accidents]
+      summary: Issue a repair permit listing accident damage (AC-020)
+      operationId: issueRepairPermit
+      x-itms-permission: accident.repair-permit.issue
+      x-itms-scope: [region]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [vehiclePlate, damagedParts]
+              properties:
+                vehiclePlate: { type: string, maxLength: 40 }
+                damagedParts:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items: { type: string, minLength: 1, maxLength: 120 }
+      responses:
+        '201': { description: Permit issued with verification code for QR encoding }
+        '401': { description: Unauthorized }
+        '403': { description: Outside the accident's region }
+        '409': { description: Fault decision is pending }
+  /v1/accident-paper-books:
+    post:
+      tags: [Accidents]
+      operationId: issueAccidentPaperBook
+      summary: Issue an accident paper book to an officer (AC-022)
+      x-itms-permission: accident.paper-book.issue
+      x-itms-scope: [region]
+      parameters:
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PaperBookRequest'}
+      responses:
+        '201': {description: Book issued, content: {application/json: {schema: {$ref: '#/components/schemas/PaperBook'}}}}
+        '400': {description: Invalid book data}
+        '401': {description: Unauthorized}
+        '403': {description: Permission required}
+  /v1/accident-paper-books/{serial}/reports:
+    post:
+      tags: [Accidents]
+      operationId: enterAccidentPaperReport
+      summary: Link a paper report to its issued book (AC-022)
+      x-itms-permission: accident.paper-book.record
+      x-itms-scope: [region]
+      parameters:
+        - {name: serial, in: path, required: true, schema: {type: string}}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PaperReportRequest'}
+      responses:
+        '200': {description: Paper report linked, content: {application/json: {schema: {$ref: '#/components/schemas/PaperBookEntry'}}}}
+        '400': {description: Book entry is invalid}
+        '401': {description: Unauthorized}
+        '403': {description: Permission required}
+  /v1/accident-paper-books/{serial}/reconciliation:
+    post:
+      tags: [Accidents]
+      operationId: reconcileAccidentPaperBook
+      summary: Reconcile all report serials entered from a book (AC-022)
+      x-itms-permission: accident.paper-book.reconcile
+      x-itms-scope: [region]
+      parameters:
+        - {name: serial, in: path, required: true, schema: {type: string}}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PaperReconciliationRequest'}
+      responses:
+        '200': {description: Book reconciled, content: {application/json: {schema: {$ref: '#/components/schemas/PaperBook'}}}}
+        '400': {description: Report serial list does not match entries}
+        '401': {description: Unauthorized}
+        '403': {description: Permission required}
+  /v1/accident-paper-books/{serial}/losses:
+    post:
+      tags: [Accidents]
+      operationId: reportLostAccidentPaperBook
+      summary: Mark an issued accident paper book as lost (AC-022)
+      x-itms-permission: accident.paper-book.issue
+      x-itms-scope: [region]
+      parameters:
+        - {name: serial, in: path, required: true, schema: {type: string}}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false, required: [reason], properties: {reason: {type: string, minLength: 1, maxLength: 1000}}}
+      responses:
+        '200': {description: Book marked lost}
+        '400': {description: Book cannot be marked lost}
+        '401': {description: Unauthorized}
+        '403': {description: Permission required}
+  /v1/accidents/{id}/objections:
+    post:
+      tags: [Accidents]
+      summary: File a party objection within the fault-decision window (AC-009)
+      operationId: fileAccidentObjection
+      x-itms-permission: accident.objection.submit
+      x-itms-scope: [region]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [partyNo, reason]
+              properties:
+                partyNo: {type: integer, minimum: 1}
+                reason: {type: string, minLength: 1, maxLength: 1000}
+      responses:
+        '201': {description: Objection filed for senior-investigator review}
+        '400': {description: Objection is outside the configured window or invalid}
+        '401': {description: Unauthorized}
+        '403': {description: Outside the caller's region}
+  /v1/accident-objections/{id}/reviews:
+    post:
+      tags: [Accidents]
+      summary: Accept or reject a pending objection as a senior investigator (AC-009)
+      operationId: reviewAccidentObjection
+      x-itms-permission: accident.objection.review
+      x-itms-scope: [region]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [accept, reason]
+              properties:
+                accept: {type: boolean}
+                reason: {type: string, minLength: 1, maxLength: 1000}
+      responses:
+        '200': {description: Objection decision recorded; an accepted objection reopens investigation}
+        '400': {description: Invalid decision}
+        '401': {description: Unauthorized}
+        '403': {description: Outside the investigator's region}
+        '404': {description: Objection not found}
+  /v1/accidents/{id}/hit-and-run-parties/{partyNo}/identifications:
+    post:
+      tags: [Accidents]
+      summary: Identify a party previously recorded as unknown (AC-008)
+      operationId: identifyHitRunParty
+      x-itms-permission: accident.investigate
+      x-itms-scope: [region]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: partyNo, in: path, required: true, schema: {type: integer, minimum: 1}}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              minProperties: 1
+              properties:
+                trafficFileNumber: {type: string, maxLength: 40}
+                vehiclePlate: {type: string, maxLength: 40}
+      responses:
+        '200': {description: Hit-and-run identity attached to the report}
+        '400': {description: Party is not recorded as unknown}
+        '401': {description: Unauthorized}
+        '403': {description: Outside the investigator's region}
+  /v1/accidents/{id}/closures:
+    post:
+      tags: [Accidents]
+      summary: Close a decided accident after its objection window (AC-005)
+      operationId: closeAccident
+      x-itms-permission: accident.investigate
+      x-itms-scope: [region]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false, properties: {reason: {type: string, maxLength: 1000}}}
+      responses:
+        '200': {description: Accident closed}
+        '400': {description: Objection period has not ended or objections are pending}
+        '401': {description: Unauthorized}
+        '403': {description: Outside investigator's region}
+  /v1/accidents/{id}/prosecution-referrals:
+    post:
+      tags: [Accidents]
+      summary: Refer a serious accident and its evidence to prosecution (AC-011)
+      operationId: referAccidentToProsecution
+      x-itms-permission: accident.prosecution.refer
+      x-itms-scope: [region]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false, required: [reason], properties: {reason: {type: string, minLength: 1, maxLength: 1000}}}
+      responses:
+        '200': {description: Prosecution referral queued with report evidence references}
+        '400': {description: Accident is not open or referral reason is invalid}
+        '401': {description: Unauthorized}
+        '403': {description: Outside the investigator's region}
+  /v1/accidents/{id}/ambulance-requests:
+    post:
+      tags: [Accidents]
+      summary: Queue an ambulance service exchange for an accident (AC-007)
+      operationId: requestAccidentAmbulance
+      x-itms-permission: accident.external.send
+      x-itms-scope: [region]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      responses:
+        '202': {description: Ambulance request queued}
+        '401': {description: Unauthorized}
+        '403': {description: Outside caller's region}
+  /v1/accidents/{id}/insurer-notifications:
+    post:
+      tags: [Accidents]
+      summary: Queue accident details for linked insurers (AC-012)
+      operationId: notifyAccidentInsurers
+      x-itms-permission: accident.external.send
+      x-itms-scope: [region]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      responses:
+        '202': {description: Insurer notification queued}
+        '401': {description: Unauthorized}
+        '403': {description: Outside caller's region}
+  /v1/repair-permits/{number}:
+    get:
+      tags: [Accidents]
+      summary: Verify a repair permit number and one-time code (AC-021)
+      operationId: verifyRepairPermit
+      x-itms-permission: accident.repair-permit.verify
+      x-itms-scope: [region]
+      parameters:
+        - in: path
+          name: number
+          required: true
+          schema: { type: string, maxLength: 32 }
+        - in: query
+          name: code
+          required: true
+          schema: { type: string, maxLength: 80 }
+      responses:
+        '200': { description: Permit details and valid flag }
+        '401': { description: Unauthorized }
+        '403': { description: Outside the permit's region }
+
+  /v1/repair-permits/{number}/cancellations:
+    post:
+      tags: [Accidents]
+      operationId: cancelRepairPermit
+      summary: Cancel an issued repair permit with a reason (AC-020)
+      x-itms-permission: accident.repair-permit.cancel
+      x-itms-scope: [region]
+      parameters:
+        - { name: number, in: path, required: true, schema: { type: string, maxLength: 32 } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 3, maxLength: 1000 }
+      responses:
+        '200': { description: Permit cancellation recorded }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { description: Outside the permit's region }
+        '404': { description: Permit not found }
+        '409': { description: Permit is not issued }
+        '422': { description: Invalid cancellation request }
+components:
+  schemas:
+    PaperBookRequest:
+      type: object
+      additionalProperties: false
+      required: [serial, region, officerId]
+      properties:
+        serial: {type: string, minLength: 2, maxLength: 40}
+        region: {type: string, minLength: 1, maxLength: 40}
+        officerId: {type: string, minLength: 1, maxLength: 120}
+    PaperBook:
+      type: object
+      required: [serial, region, officerId, status, issuedAt]
+      properties:
+        serial: {type: string}
+        region: {type: string}
+        officerId: {type: string}
+        status: {type: string, enum: [ISSUED, RECONCILED, LOST]}
+        issuedAt: {type: string, format: date-time}
+        reconciledAt: {type: string, format: date-time, nullable: true}
+        reconciledBy: {type: string, nullable: true}
+    PaperReportRequest:
+      type: object
+      additionalProperties: false
+      required: [reportSerial, accidentId]
+      properties:
+        reportSerial: {type: string, minLength: 2, maxLength: 40}
+        accidentId: {type: string, format: uuid}
+    PaperBookEntry:
+      type: object
+      required: [bookSerial, reportSerial, accidentId, enteredAt]
+      properties:
+        bookSerial: {type: string}
+        reportSerial: {type: string}
+        accidentId: {type: string, format: uuid}
+        enteredAt: {type: string, format: date-time}
+    PaperReconciliationRequest:
+      type: object
+      additionalProperties: false
+      required: [reportSerials]
+      properties:
+        reportSerials: {type: array, items: {type: string, minLength: 2, maxLength: 40}}
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, minLength: 16, maxLength: 128 }
+  responses:
+    Problem:
+      description: Problem details (RFC 9457) in Arabic or English
+      content:
+        application/problem+json:
+          schema:
+            type: object
+            required: [status, code]
+            properties:
+              type: { type: string }
+              title: { type: string }
+              status: { type: integer }
+              code: { type: string }
+              detail: { type: string }

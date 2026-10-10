@@ -25,6 +25,11 @@ public final class Ports {
 
         Optional<Vehicle> findByVin(String vin);
 
+        /** The VIN of the vehicle that carries the assigned plate with this display text (XB-002). */
+        default Optional<String> vinByPlate(String display) {
+            return Optional.empty();
+        }
+
         Optional<Vehicle> findForUpdate(UUID id);
 
         void updateVehicle(Vehicle vehicle);

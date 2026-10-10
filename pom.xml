@@ -38,7 +38,15 @@
     <module>services/payment-service</module>
     <module>services/vehicle-service</module>
     <module>services/violation-service</module>
+    <module>services/device-service</module>
     <module>services/licensing-service</module>
+    <module>services/accident-service</module>
+    <module>services/rental-service</module>
+    <module>services/permit-service</module>
+    <module>services/geo-service</module>
+    <module>services/road-permit-service</module>
+    <module>services/marine-service</module>
+    <module>services/crossborder-service</module>
   </modules>
 
   <properties>

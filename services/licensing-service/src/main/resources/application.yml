@@ -120,6 +120,15 @@ itms:
       - /v1/eye-tests
       - /v1/licences/*/cancellations
       - /v1/licences/*/no-objection-certificates
+      - /v1/exchange-country-rules
+      - /v1/exchange-country-rules/*/approvals
+      - /v1/exchange-country-rules/*/rejections
+      - /v1/foreign-licences
+      - /v1/foreign-licences/*/exchanges
+      - /v1/temporary-permits
+      - /v1/temporary-permits/*/cancellation
+      - /v1/licences/*/international-permits
+      - /v1/international-permits/*/printed
     retention: ${ITMS_IDEMPOTENCY_RETENTION:24h}
     lock-timeout: ${ITMS_IDEMPOTENCY_LOCK_TIMEOUT:30s}
     cleanup-interval: ${ITMS_IDEMPOTENCY_CLEANUP_INTERVAL:15m}

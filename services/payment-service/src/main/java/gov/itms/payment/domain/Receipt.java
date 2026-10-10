@@ -20,7 +20,13 @@ public final class Receipt {
 
     /** One itemised line: which payable, which financial item and beneficiary, how much. */
     public record Line(UUID payableId, Payable.ItemType itemType, String itemRef, String trafficFileNumber,
-                       String financialItem, String beneficiary, String description, long amountMinor) {
+                       String financialItem, String beneficiary, String costCentre, String description,
+                       long amountMinor) {
+        public Line(UUID payableId, Payable.ItemType itemType, String itemRef, String trafficFileNumber,
+                    String financialItem, String beneficiary, String description, long amountMinor) {
+            this(payableId, itemType, itemRef, trafficFileNumber, financialItem, beneficiary, beneficiary,
+                    description, amountMinor);
+        }
     }
 
     private final UUID id;

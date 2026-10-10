@@ -1,5 +1,6 @@
 package gov.itms.violation.api;
 
+import gov.itms.violation.application.CrossborderViolations;
 import gov.itms.violation.application.ViolationService;
 import gov.itms.violation.domain.BlackPoints;
 import gov.itms.violation.domain.CatalogueEntry;
@@ -26,10 +27,12 @@ import org.springframework.web.bind.annotation.RestController;
 class ViolationController {
 
     private final ViolationService violations;
+    private final CrossborderViolations crossborder;
     private final Callers callers;
 
-    ViolationController(ViolationService violations, Callers callers) {
+    ViolationController(ViolationService violations, CrossborderViolations crossborder, Callers callers) {
         this.violations = violations;
+        this.crossborder = crossborder;
         this.callers = callers;
     }
 
@@ -64,7 +67,8 @@ class ViolationController {
     record ReportDto(@NotBlank String catalogueCode, @NotNull Instant occurredAt, @NotBlank String region,
                      @NotBlank @Size(max = 300) String location, String plate, String vin, String ownerFileNumber,
                      String driverFileNumber, Integer speedLimitKmh, Integer measuredSpeedKmh,
-                     @NotNull Violation.Source source, String deviceId, @Size(max = 20) List<String> evidenceIds) {
+                     @NotNull Violation.Source source, String deviceId, @Size(max = 20) List<String> evidenceIds,
+                     @Size(max = 12) String registrationState) {
         Violation.Report toDomain() {
             return new Violation.Report(catalogueCode, occurredAt, region, location, plate, vin, ownerFileNumber,
                     driverFileNumber, speedLimitKmh, measuredSpeedKmh, source, deviceId, evidenceIds);
@@ -119,7 +123,10 @@ class ViolationController {
     @PostMapping("/v1/violations")
     @PreAuthorize("hasAuthority('violation.record')")
     ResponseEntity<ViolationDto> record(@Valid @RequestBody ReportDto body) {
-        Violation v = violations.record(body.toDomain(), callers.current());
+        // XB-001: a vehicle registered in a partner state is announced for sending to that state.
+        Violation v = body.registrationState() == null || body.registrationState().isBlank()
+                ? violations.record(body.toDomain(), callers.current())
+                : crossborder.recordForeign(body.toDomain(), body.registrationState(), callers.current());
         return ResponseEntity.created(URI.create("/v1/violations/" + v.number())).body(ViolationDto.of(v));
     }
 

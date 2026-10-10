@@ -19,7 +19,8 @@ public final class Violation {
 
     public enum Status { OPEN, PAID, CANCELLED }
 
-    public enum Source { DEVICE, OFFICER }
+    /** PARTNER: loaded from a partner state's exchange message (XB-002). */
+    public enum Source { DEVICE, OFFICER, PARTNER }
 
     private static final Pattern REF = Pattern.compile("^[A-Z0-9][A-Z0-9-]{0,59}$");
 

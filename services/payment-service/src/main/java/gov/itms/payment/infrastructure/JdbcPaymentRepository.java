@@ -55,7 +55,8 @@ class JdbcPaymentRepository implements Ports.PaymentRepository {
     public void insertPayable(Payable p) {
         ArrayNode lines = json.createArrayNode();
         p.lines().forEach(l -> lines.addObject().put("financialItem", l.financialItem())
-                .put("beneficiary", l.beneficiary()).put("description", l.description())
+                .put("beneficiary", l.beneficiary()).put("costCentre", l.costCentre())
+                .put("description", l.description())
                 .put("amountMinor", l.amountMinor()));
         jdbc.sql("""
                         insert into payable (id, item_type, item_ref, traffic_file_number, region, currency, lines,
@@ -94,6 +95,30 @@ class JdbcPaymentRepository implements Ports.PaymentRepository {
     public void savePayableStatus(Payable p) {
         jdbc.sql("update payable set status = :s where id = :id").param("s", p.status().name()).param("id", p.id())
                 .update();
+    }
+
+    @Override
+    public boolean payableHeld(UUID id) {
+        return jdbc.sql("select exists(select 1 from payable_hold where payable_id=:id and active)")
+                .param("id", id).query(Boolean.class).single();
+    }
+
+    @Override
+    public void placePayableHold(UUID id, String sourceRef, String reason, String actor, Instant at) {
+        jdbc.sql("""
+                insert into payable_hold (id,payable_id,source_ref,reason,active,held_by,held_at)
+                values (:id,:payable,:source,:reason,true,:by,:at)
+                on conflict (payable_id,source_ref) do nothing
+                """).param("id", UUID.randomUUID()).param("payable", id).param("source", sourceRef)
+                .param("reason", reason).param("by", actor).param("at", Timestamp.from(at)).update();
+    }
+
+    @Override
+    public boolean liftPayableHold(UUID id, String sourceRef, String reason, String actor, Instant at) {
+        return jdbc.sql("update payable_hold set active=false,lift_reason=:reason,lifted_by=:by,lifted_at=:at "
+                        + "where payable_id=:id and source_ref=:source and active")
+                .param("reason", reason).param("by", actor).param("at", Timestamp.from(at)).param("id", id)
+                .param("source", sourceRef).update() == 1;
     }
 
     // ---- baskets
@@ -227,6 +252,7 @@ class JdbcPaymentRepository implements Ports.PaymentRepository {
             n.put("trafficFileNumber", l.trafficFileNumber());
             n.put("financialItem", l.financialItem());
             n.put("beneficiary", l.beneficiary());
+            n.put("costCentre", l.costCentre());
             n.put("description", l.description());
             n.put("amountMinor", l.amountMinor());
         }
@@ -241,6 +267,42 @@ class JdbcPaymentRepository implements Ports.PaymentRepository {
                 .param("lines", json.writeValueAsString(lines)).param("payer", r.payerId())
                 .param("at", Timestamp.from(r.issuedAt())).param("day", Date.valueOf(r.businessDay()))
                 .param("status", r.status().name()).update();
+    }
+
+    @Override
+    public void insertLedgerPostings(Receipt r) {
+        for (int i = 0; i < r.lines().size(); i++) {
+            Receipt.Line line = r.lines().get(i);
+            jdbc.sql("""
+                    insert into ledger_posting (receipt_id,line_no,financial_item,beneficiary,cost_centre,region,
+                        amount_minor,currency,created_at)
+                    values (:receipt,:line,:item,:beneficiary,:costCentre,:region,:amount,:currency,:created)
+                    on conflict (receipt_id,line_no) do nothing
+                    """).param("receipt", r.id()).param("line", i + 1).param("item", line.financialItem())
+                    .param("beneficiary", line.beneficiary()).param("costCentre", line.costCentre())
+                    .param("region", r.region()).param("amount", line.amountMinor()).param("currency", r.currency())
+                    .param("created", Timestamp.from(r.issuedAt())).update();
+        }
+    }
+
+    @Override
+    public Optional<UUID> openTillForUpdate(String cashierId, String region) {
+        return jdbc.sql("select id from cashier_till where cashier_id=:cashier and region=:region and status='OPEN' "
+                        + "for update")
+                .param("cashier", cashierId).param("region", region).query(UUID.class).optional();
+    }
+
+    @Override
+    public void recordTillPayment(Payment p, Receipt r) {
+        UUID tillId = openTillForUpdate(p.payerId(), p.region()).orElseThrow(() -> DomainException.conflict(
+                "TILL_NOT_OPEN", "cashier must open a till before collecting counter payments", List.of("FN-020")));
+        jdbc.sql("""
+                insert into till_payment (payment_id,till_id,receipt_id,method,amount_minor,recorded_at)
+                values (:payment,:till,:receipt,:method,:amount,:at)
+                on conflict (payment_id) do nothing
+                """).param("payment", p.id()).param("till", tillId).param("receipt", r.id())
+                .param("method", p.method().name()).param("amount", p.amountMinor())
+                .param("at", Timestamp.from(r.issuedAt())).update();
     }
 
     @Override
@@ -312,6 +374,7 @@ class JdbcPaymentRepository implements Ports.PaymentRepository {
         List<Payable.Line> lines = new ArrayList<>();
         for (JsonNode l : json.readTree(rs.getString("lines"))) {
             lines.add(new Payable.Line(l.get("financialItem").asString(), l.get("beneficiary").asString(),
+                    l.hasNonNull("costCentre") ? l.get("costCentre").asString() : l.get("beneficiary").asString(),
                     l.hasNonNull("description") ? l.get("description").asString() : null,
                     l.get("amountMinor").asLong()));
         }
@@ -338,6 +401,7 @@ class JdbcPaymentRepository implements Ports.PaymentRepository {
                     Payable.ItemType.valueOf(l.get("itemType").asString()), l.get("itemRef").asString(),
                     l.hasNonNull("trafficFileNumber") ? l.get("trafficFileNumber").asString() : null,
                     l.get("financialItem").asString(), l.get("beneficiary").asString(),
+                    l.hasNonNull("costCentre") ? l.get("costCentre").asString() : l.get("beneficiary").asString(),
                     l.hasNonNull("description") ? l.get("description").asString() : null,
                     l.get("amountMinor").asLong()));
         }

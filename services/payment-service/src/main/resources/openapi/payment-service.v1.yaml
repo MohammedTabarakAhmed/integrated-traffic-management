@@ -6,7 +6,7 @@ info:
     Payments (FN-001..FN-005, FN-010, FN-011, FN-014, FN-022; ADR-054).
 
     Payables (FN-002): the owning services register what is owed (a transaction's fees, a violation's fine, general
-    income), itemised by financial item and beneficiary, in minor units. Payment-service never prices anything.
+    income), itemised by financial item, beneficiary and cost centre, in minor units. Payment-service never prices anything.
 
     Baskets and payments (FN-001, FN-002): open payables of one or more traffic files go into a basket, paid in one
     payment. Online methods open a session on the gateway's hosted pages (ITMS never sees card data, ICD-03) and wait
@@ -32,6 +32,7 @@ tags:
   - name: Payables
   - name: Payments
   - name: Receipts
+  - name: Finance
 
 paths:
   /v1/payables:
@@ -329,6 +330,402 @@ paths:
         '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
 
+  /v1/payments/{id}/refund-requests:
+    post:
+      operationId: requestRefund
+      summary: Request a refund of a payment (maker; FN-006)
+      tags: [Refunds]
+      x-itms-permission: payment.refund.request
+      x-itms-scope: [region]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [amountMinor, reason]
+              properties:
+                amountMinor: { type: integer, minimum: 1 }
+                reason: { type: string, minLength: 3, maxLength: 500 }
+      responses:
+        '201': { description: Refund request awaiting independent approval }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '401': {description: Authentication required}
+
+  /v1/payables/{id}/holds:
+    post:
+      operationId: pausePayable
+      tags: [Payables]
+      summary: Pause collection of a payable while it is under objection (VF-052)
+      x-itms-permission: payment.payable.hold
+      x-itms-scope: [region]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [sourceRef, reason]
+              properties:
+                sourceRef: { type: string, maxLength: 80 }
+                reason: { type: string, minLength: 3, maxLength: 500 }
+      responses:
+        '204': { description: Payable paused }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+
+  /v1/payables/{id}/hold-lifts:
+    post:
+      operationId: resumePayable
+      tags: [Payables]
+      summary: Resume a payable after objection review
+      x-itms-permission: payment.payable.hold
+      x-itms-scope: [region]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [sourceRef, reason]
+              properties:
+                sourceRef: { type: string, maxLength: 80 }
+                reason: { type: string, minLength: 3, maxLength: 500 }
+      responses:
+        '204': { description: Payable resumed }
+        '404': { $ref: '#/components/responses/Problem' }
+        '401': {description: Authentication required}
+        '403': {description: Permission denied}
+
+  /v1/refund-requests/{id}/approvals:
+    post:
+      operationId: approveRefund
+      summary: Approve a refund request (checker, never the maker; FN-006)
+      tags: [Refunds]
+      x-itms-permission: payment.refund.approve
+      x-itms-scope: [region]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 3, maxLength: 500 }
+      responses:
+        '200': { description: Refund approved within the reviewer's limit }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '401': {description: Authentication required}
+
+  /v1/refund-requests/{id}/rejections:
+    post:
+      operationId: rejectRefund
+      summary: Reject a refund request (checker; FN-006)
+      tags: [Refunds]
+      x-itms-permission: payment.refund.approve
+      x-itms-scope: [region]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 3, maxLength: 500 }
+      responses:
+        '200': { description: Refund request rejected with reason }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '401': {description: Authentication required}
+
+  /v1/settlement-imports:
+    post:
+      operationId: importSettlement
+      summary: Import gateway or bank settlement lines for reconciliation (FN-012, FN-040)
+      tags: [Finance]
+      x-itms-permission: payment.settlement.import
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [lines]
+              properties:
+                lines:
+                  type: array
+                  minItems: 1
+                  maxItems: 10000
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [source, externalRef, region, currency, amountMinor]
+                    properties:
+                      source: { type: string, maxLength: 40, pattern: '^[A-Z][A-Z0-9_]{1,39}$' }
+                      externalRef: { type: string, maxLength: 200 }
+                      paidAt: { type: [string, 'null'], format: date-time }
+                      region: { type: string, maxLength: 40 }
+                      currency: { type: string, pattern: '^[A-Z]{3}$' }
+                      amountMinor: { type: integer, minimum: 0 }
+      responses:
+        '200': { description: Imported rows with automatic matches and exceptions }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '401': {description: Authentication required}
+
+  /v1/reconciliation-exceptions:
+    get:
+      operationId: listReconciliationExceptions
+      summary: Open reconciliation exceptions (FN-040)
+      tags: [Finance]
+      x-itms-permission: payment.finance.read
+      x-itms-scope: national
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 100, minimum: 1, maximum: 1000 } }
+      responses:
+        '200': { description: Unmatched settlement lines for finance investigation }
+        '403': { $ref: '#/components/responses/Problem' }
+        '401': {description: Authentication required}
+
+  /v1/reconciliation-exceptions/{id}/resolutions:
+    post:
+      operationId: resolveReconciliationException
+      summary: Resolve a reconciliation exception with a reason (FN-041)
+      tags: [Finance]
+      x-itms-permission: payment.finance.resolve
+      x-itms-scope: [region]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [paymentId, reason]
+              properties:
+                paymentId: { type: string, format: uuid }
+                reason: { type: string, minLength: 3, maxLength: 500 }
+      responses:
+        '200': { description: Reconciliation item resolved against a confirmed matching payment }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '401': {description: Authentication required}
+
+  /v1/bank-deposits:
+    post:
+      tags: [Finance]
+      operationId: recordBankDeposit
+      summary: Group issued receipts into a bank deposit (FN-021)
+      x-itms-permission: payment.settlement.import
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [depositRef, bank, receiptNumbers]
+              properties:
+                depositRef: { type: string, maxLength: 120 }
+                bank: { type: string, maxLength: 120 }
+                receiptNumbers: { type: array, minItems: 1, maxItems: 500, uniqueItems: true,
+                  items: { type: string, maxLength: 100 } }
+      responses:
+        '201': { description: Deposit group created with receipt total }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/bank-statement-imports:
+    post:
+      tags: [Finance]
+      operationId: importBankStatement
+      summary: Match bank statement lines against recorded deposits (FN-021)
+      x-itms-permission: payment.settlement.import
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [lines]
+              properties:
+                lines:
+                  type: array
+                  minItems: 1
+                  maxItems: 10000
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [source, externalRef, bank, region, currency, amountMinor]
+                    properties:
+                      source: { type: string, maxLength: 40, pattern: '^[A-Z][A-Z0-9_]{1,39}$' }
+                      externalRef: { type: string, maxLength: 200 }
+                      bank: { type: string, maxLength: 120 }
+                      bookedAt: { type: [string, 'null'], format: date-time }
+                      region: { type: string, maxLength: 40 }
+                      currency: { type: string, pattern: '^[A-Z]{3}$' }
+                      amountMinor: { type: integer, minimum: 0 }
+      responses:
+        '200': { description: Statement lines with exact deposit matches and exceptions }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/bank-deposit-exceptions:
+    get:
+      tags: [Finance]
+      operationId: listBankDepositExceptions
+      summary: List unmatched bank statement lines
+      x-itms-permission: payment.finance.read
+      x-itms-scope: national
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 100, minimum: 1, maximum: 1000 } }
+      responses:
+        '200': { description: Unmatched bank statement lines }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+
+  /v1/bank-deposit-exceptions/{id}/resolutions:
+    post:
+      tags: [Finance]
+      operationId: resolveBankDepositException
+      summary: Resolve a bank statement exception against a deposit
+      x-itms-permission: payment.finance.resolve
+      x-itms-scope: [region]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [depositId, reason]
+              properties:
+                depositId: { type: string, format: uuid }
+                reason: { type: string, minLength: 3, maxLength: 500 }
+      responses:
+        '200': { description: Bank statement exception resolved against a matching deposit }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/tills:
+    post:
+      tags: [Finance]
+      operationId: openTill
+      summary: Open a cashier till with its opening cash amount (FN-020)
+      x-itms-permission: payment.till.manage
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [region, openingAmountMinor]
+              properties:
+                region: { type: string, maxLength: 40 }
+                openingAmountMinor: { type: integer, minimum: 0 }
+      responses:
+        '201': { description: Till opened }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /v1/tills/{id}/closures:
+    post:
+      tags: [Finance]
+      operationId: closeTill
+      summary: Reconcile and close the caller's till (FN-020)
+      x-itms-permission: payment.till.manage
+      x-itms-scope: [own, region]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [totals, reason]
+              properties:
+                reason: { type: string, minLength: 3, maxLength: 500 }
+                totals:
+                  type: array
+                  minItems: 1
+                  maxItems: 3
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [method, actualMinor]
+                    properties:
+                      method: { type: string, enum: [CASH, CARD_TERMINAL, CHEQUE] }
+                      actualMinor: { type: integer, minimum: 0 }
+      responses:
+        '200': { description: Till closed with expected, actual and difference totals }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -416,6 +813,7 @@ components:
       properties:
         financialItem: { $ref: '#/components/schemas/Code' }
         beneficiary: { $ref: '#/components/schemas/Code' }
+        costCentre: { $ref: '#/components/schemas/Code' }
         description: { oneOf: [ { type: string, maxLength: 200 }, { type: 'null' } ] }
         amountMinor: { type: integer, minimum: 0, maximum: 1000000000000 }
     RegisterRequest:
@@ -533,7 +931,7 @@ components:
           items:
             type: object
             additionalProperties: false
-            required: [payableId, itemType, itemRef, financialItem, beneficiary, amountMinor]
+            required: [payableId, itemType, itemRef, financialItem, beneficiary, costCentre, amountMinor]
             properties:
               payableId: { type: string, format: uuid }
               itemType: { $ref: '#/components/schemas/ItemType' }
@@ -541,6 +939,7 @@ components:
               trafficFileNumber: { $ref: '#/components/schemas/NullableString' }
               financialItem: { type: string }
               beneficiary: { type: string }
+              costCentre: { type: string }
               description: { $ref: '#/components/schemas/NullableString' }
               amountMinor: { type: integer }
         issuedAt: { type: string, format: date-time }

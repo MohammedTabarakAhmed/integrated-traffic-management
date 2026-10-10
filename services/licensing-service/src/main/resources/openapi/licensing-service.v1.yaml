@@ -3,7 +3,7 @@ info:
   title: ITMS Licensing Service
   version: 1.0.0
   description: |
-    Driving licences (DL-020..DL-023, DL-050..DL-065). This version covers the licence class catalogue (slice 3.1), licence number ranges (slice 3.2) and licences issued from passed examination files (slice 3.3).
+    Driving licences (DL-020..DL-023, DL-050..DL-065). This version covers the licence class catalogue (slice 3.1), licence number ranges (slice 3.2), licences issued from passed examination files (slice 3.3) and renewal, automatic renewal, replacement, change of details, cards and eye tests (slice 3.4).
 
     Licence classes (DL-020, DL-062; BRD §6.2): a class (for example `LIGHT`) has rules per customer category —
     minimum age, optional maximum age, the required tests in order (test type codes of examination-service, DL-043),
@@ -31,6 +31,7 @@ servers:
 security:
   - bearerAuth: []
 tags:
+  - name: Licence transactions
   - name: Licence classes
   - name: Licence numbers
   - name: Licences
@@ -763,6 +764,265 @@ paths:
         '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
 
+  /v1/licences/{licenceId}/renewals:
+    post:
+      tags: [Licence transactions]
+      operationId: requestLicenceRenewal
+      summary: Ask for a licence renewal (DL-051)
+      description: |
+        Allowed from `itms.licensing.renewal-window-days` (default 90) before expiry and after it (422 `RENEWAL_TOO_EARLY`);
+        only an ACTIVE licence (409 `LICENCE_NOT_ACTIVE`) with no other request waiting (409 `REQUEST_OPEN`). A passed eye
+        test of the last `eye-test-validity-days` covering every class in force is needed (422 `EYE_TEST_REQUIRED`). The new
+        expiry runs from the current one (from today when expired) for the shortest class validity of the customer category,
+        never past a linked residency (422 `RESIDENCY_TOO_SHORT`). Holds are checked for service `LIC_RENEWAL` (422
+        `ELIGIBILITY_BLOCKED`); the fee is quoted with the current expiry date so fees-service adds the late fee. On payment
+        the licence is renewed, the corrective lenses condition added when the eye test needs it, a new card issued and
+        `itms.licence.renewed` published.
+      x-itms-permission: licensing.licence.renew
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/LicenceId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RenewRequest' }
+      responses:
+        '201':
+          description: Request opened; waits for payment
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LicenceRequest' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/licences/{licenceId}/replacements:
+    post:
+      tags: [Licence transactions]
+      operationId: requestLicenceReplacement
+      summary: Replace a lost or damaged licence card (DL-052)
+      description: |
+        The live card is cancelled at once; the new card is issued when payment-service confirms payment
+        (`itms.licence.card-replaced`). Refused for a cancelled or surrendered licence (409 `LICENCE_ENDED`).
+      x-itms-permission: licensing.licence.replace
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/LicenceId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReplacementRequest' }
+      responses:
+        '201':
+          description: Old card cancelled; request waits for payment
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LicenceRequest' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/licences/{licenceId}/changes:
+    post:
+      tags: [Licence transactions]
+      operationId: requestLicenceChange
+      summary: Change licence details on a request with evidence (DL-057)
+      description: |
+        Needs a document-service evidence id (422 `EVIDENCE_REQUIRED`) and a description. On payment the customer category
+        and residency end are applied (a linked residency ending earlier brings the expiry forward, DL-062), a new card is
+        issued and `itms.licence.changed` published. Identity register changes reach licensing as
+        `itms.traffic-file.identity-updated` events instead: a new name or nationality reissues the card without a fee.
+      x-itms-permission: licensing.licence.change
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/LicenceId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChangeRequest' }
+      responses:
+        '201':
+          description: Request opened; waits for payment
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LicenceRequest' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/licences/{licenceId}/cards:
+    get:
+      tags: [Licence transactions]
+      operationId: listLicenceCards
+      summary: A licence's cards, newest first (DL-060)
+      x-itms-permission: licensing.licence.read
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/LicenceId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CardCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/eye-tests:
+    post:
+      tags: [Licence transactions]
+      operationId: recordEyeTest
+      summary: Receive an eye test result from an approved optometry centre (DL-007)
+      description: |
+        One result per centre and reference (409 `EYE_TEST_EXISTS`); no test date in the future (422 `TESTED_IN_FUTURE`).
+        `permittedClasses` empty means every class.
+      x-itms-permission: licensing.eye-test.record
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EyeTestRequest' }
+      responses:
+        '201':
+          description: Recorded
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EyeTest' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [Licence transactions]
+      operationId: listEyeTests
+      summary: A person's eye test results, newest first
+      x-itms-permission: licensing.licence.read
+      x-itms-scope: national
+      parameters:
+        - name: trafficFileNumber
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/Ref' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EyeTestCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+
+  /v1/licences/{licenceId}/auto-renewal:
+    post:
+      tags: [Licence transactions]
+      operationId: consentAutoRenewal
+      summary: Switch on automatic renewal with a payment method on file (DL-065)
+      description: |
+        For each expiry date, once the renewal window opens, `itms.licence.auto-renewal-notice` is published (the consent
+        notice); after `itms.licensing.auto-renewal.notice-days` the renewal runs with every renewal check and its payable is
+        published as `itms.licence.auto-renewal-due` with the payment method reference; a failed check is published as
+        `itms.licence.auto-renewal-failed`.
+      x-itms-permission: licensing.auto-renewal.manage
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/LicenceId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConsentRequest' }
+      responses:
+        '200':
+          description: OK
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AutoRenewal' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [Licence transactions]
+      operationId: getAutoRenewal
+      summary: The automatic renewal consent of a licence
+      x-itms-permission: licensing.licence.read
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/LicenceId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AutoRenewal' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/licences/{licenceId}/auto-renewal/withdrawal:
+    post:
+      tags: [Licence transactions]
+      operationId: withdrawAutoRenewal
+      summary: Switch off automatic renewal (DL-065)
+      x-itms-permission: licensing.auto-renewal.manage
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/LicenceId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AutoRenewal' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1080,6 +1340,8 @@ components:
           oneOf:
             - { type: array, maxItems: 20, items: { $ref: '#/components/schemas/ConditionRequest' } }
             - { type: 'null' }
+        delivery: { oneOf: [ { $ref: '#/components/schemas/Delivery' }, { type: 'null' } ] }
+        address: { oneOf: [ { type: string, minLength: 5, maxLength: 300 }, { type: 'null' } ] }
     AddConditionRequest:
       type: object
       additionalProperties: false
@@ -1090,7 +1352,7 @@ components:
         reason: { type: string, minLength: 3, maxLength: 500 }
     RequestKind:
       type: string
-      enum: [ISSUE]
+      enum: [ISSUE, RENEWAL, REPLACEMENT, CHANGE]
     LicenceRequest:
       type: object
       additionalProperties: false
@@ -1174,6 +1436,114 @@ components:
       required: [items]
       properties:
         items: { type: array, items: { type: string } }
+    Delivery:
+      type: string
+      enum: [CENTRE, COURIER]
+      description: Printed at a centre, or by a card printer with courier delivery (DL-060); address needed for COURIER
+    RenewRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        customerCategory: { oneOf: [ { $ref: '#/components/schemas/CustomerCategory' }, { type: 'null' } ] }
+        residencyExpiresOn: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
+        delivery: { oneOf: [ { $ref: '#/components/schemas/Delivery' }, { type: 'null' } ] }
+        address: { oneOf: [ { type: string, minLength: 5, maxLength: 300 }, { type: 'null' } ] }
+    ReplacementRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: { type: string, enum: [LOST, DAMAGED] }
+        delivery: { oneOf: [ { $ref: '#/components/schemas/Delivery' }, { type: 'null' } ] }
+        address: { oneOf: [ { type: string, minLength: 5, maxLength: 300 }, { type: 'null' } ] }
+    ChangeRequest:
+      type: object
+      additionalProperties: false
+      required: [description, evidenceDocumentId]
+      properties:
+        customerCategory: { oneOf: [ { $ref: '#/components/schemas/CustomerCategory' }, { type: 'null' } ] }
+        residencyExpiresOn: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
+        description: { type: string, minLength: 3, maxLength: 500 }
+        evidenceDocumentId: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$' }
+        delivery: { oneOf: [ { $ref: '#/components/schemas/Delivery' }, { type: 'null' } ] }
+        address: { oneOf: [ { type: string, minLength: 5, maxLength: 300 }, { type: 'null' } ] }
+    Card:
+      type: object
+      additionalProperties: false
+      required: [id, serial, reason, delivery, status, createdAt, statusAt]
+      properties:
+        id: { type: string, format: uuid }
+        serial: { type: integer }
+        reason: { type: string, enum: [ISSUE, RENEWAL, REPLACEMENT, CHANGE, CLASS_ADDED] }
+        delivery: { $ref: '#/components/schemas/Delivery' }
+        address: { oneOf: [ { type: string }, { type: 'null' } ] }
+        status:
+          type: string
+          enum: [PENDING_PRINT, SENT_TO_PRINTER, PRINTED, DISPATCHED, DELIVERED, COLLECTED, RETURNED, CANCELLED]
+        trackingRef: { oneOf: [ { type: string }, { type: 'null' } ] }
+        createdAt: { type: string, format: date-time }
+        statusAt: { type: string, format: date-time }
+    CardCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Card' } }
+    EyeTestRequest:
+      type: object
+      additionalProperties: false
+      required: [trafficFileNumber, centreCode, reference, testedOn, result, correctiveLenses]
+      properties:
+        trafficFileNumber: { $ref: '#/components/schemas/Ref' }
+        centreCode: { $ref: '#/components/schemas/Code' }
+        reference: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$' }
+        testedOn: { type: string, format: date }
+        result: { type: string, enum: [PASS, FAIL] }
+        correctiveLenses: { type: boolean }
+        permittedClasses:
+          oneOf:
+            - { type: array, maxItems: 30, items: { $ref: '#/components/schemas/Code' } }
+            - { type: 'null' }
+    EyeTest:
+      type: object
+      additionalProperties: false
+      required: [id, trafficFileNumber, centreCode, reference, testedOn, result, correctiveLenses, permittedClasses,
+                 receivedAt]
+      properties:
+        id: { type: string, format: uuid }
+        trafficFileNumber: { type: string }
+        centreCode: { type: string }
+        reference: { type: string }
+        testedOn: { type: string, format: date }
+        result: { type: string, enum: [PASS, FAIL] }
+        correctiveLenses: { type: boolean }
+        permittedClasses: { type: array, items: { type: string } }
+        receivedAt: { type: string, format: date-time }
+    EyeTestCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/EyeTest' } }
+    ConsentRequest:
+      type: object
+      additionalProperties: false
+      required: [paymentMethodRef]
+      properties:
+        paymentMethodRef: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$' }
+    AutoRenewal:
+      type: object
+      additionalProperties: false
+      required: [licenceId, paymentMethodRef, status, consentAt]
+      properties:
+        licenceId: { type: string, format: uuid }
+        paymentMethodRef: { type: string }
+        status: { type: string, enum: [ACTIVE, WITHDRAWN] }
+        consentAt: { type: string, format: date-time }
+        noticeForExpiry: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
+        noticeAt: { oneOf: [ { type: string, format: date-time }, { type: 'null' } ] }
+        attemptForExpiry: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
+        withdrawnAt: { oneOf: [ { type: string, format: date-time }, { type: 'null' } ] }
     Problem:
       type: object
       required: [status, code]

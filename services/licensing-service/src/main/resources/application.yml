@@ -53,7 +53,21 @@ itms:
     payment-topic: ${ITMS_LICENSING_PAYMENT_TOPIC:itms.payment-service.events.v1}
     service-codes:
       "[ISSUE]": LIC_ISSUE
+      "[RENEWAL]": LIC_RENEWAL
+      "[REPLACEMENT]": LIC_REPLACEMENT
+      "[CHANGE]": LIC_CHANGE
     condition-codes: ${ITMS_LICENSING_CONDITION_CODES:CORRECTIVE_LENSES,HEARING_AID,ADAPTED_VEHICLE}
+    # Renewal (DL-051; BRD default window 90 days). Eye test validity and the auto-renewal notice period are interim
+    # answers (Q-077).
+    renewal-window-days: ${ITMS_LICENSING_RENEWAL_WINDOW_DAYS:90}
+    eye-test-validity-days: ${ITMS_LICENSING_EYE_TEST_VALIDITY_DAYS:180}
+    lenses-condition: ${ITMS_LICENSING_LENSES_CONDITION:CORRECTIVE_LENSES}
+    traffic-file-topic: ${ITMS_LICENSING_TRAFFIC_FILE_TOPIC:itms.traffic-file-service.events.v1}
+    auto-renewal:
+      enabled: ${ITMS_LICENSING_AUTO_RENEWAL_ENABLED:true}
+      notice-days: ${ITMS_LICENSING_AUTO_RENEWAL_NOTICE_DAYS:14}
+      interval: ${ITMS_LICENSING_AUTO_RENEWAL_INTERVAL:1h}
+      batch-size: ${ITMS_LICENSING_AUTO_RENEWAL_BATCH_SIZE:200}
   # Calls to other services with this service's own client-credentials account (ADR-034).
   clients:
     fees:
@@ -90,6 +104,12 @@ itms:
       - /v1/licence-issues
       - /v1/licences/*/conditions
       - /v1/licences/*/conditions/*/removal
+      - /v1/licences/*/renewals
+      - /v1/licences/*/replacements
+      - /v1/licences/*/changes
+      - /v1/licences/*/auto-renewal
+      - /v1/licences/*/auto-renewal/withdrawal
+      - /v1/eye-tests
     retention: ${ITMS_IDEMPOTENCY_RETENTION:24h}
     lock-timeout: ${ITMS_IDEMPOTENCY_LOCK_TIMEOUT:30s}
     cleanup-interval: ${ITMS_IDEMPOTENCY_CLEANUP_INTERVAL:15m}

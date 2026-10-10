@@ -6,6 +6,7 @@ import gov.itms.licensing.domain.ExaminationTransfer;
 import gov.itms.licensing.domain.Licence;
 import gov.itms.licensing.domain.LicenceClassVersion;
 import gov.itms.licensing.domain.LicenceRequest;
+import gov.itms.licensing.domain.Records;
 import gov.itms.platform.audit.AuditRecorder;
 import gov.itms.platform.events.DomainEventRecorder;
 import gov.itms.platform.security.CurrentActor;
@@ -84,11 +85,28 @@ public class LicenceService {
      * @param residencyExpiresOn the end of the holder's residency, needed when a class links validity to it
      */
     public record IssueSpec(String trafficFileNumber, String region, List<UUID> transferIds, String customerCategory,
-                            LocalDate residencyExpiresOn, List<Licence.Condition> conditions) {
+                            LocalDate residencyExpiresOn, List<Licence.Condition> conditions,
+                            Records.Delivery delivery, String address) {
         public IssueSpec {
             transferIds = transferIds == null ? List.of() : List.copyOf(transferIds);
             conditions = conditions == null ? List.of() : List.copyOf(conditions);
+            delivery = delivery == null ? Records.Delivery.CENTRE : delivery;
+            address = Records.address(address);
         }
+    }
+
+    /** A request completed by payment: makes the change the request asks for (DL-051…DL-057). */
+    public interface PaidHandler {
+
+        boolean handles(LicenceRequest.Kind kind);
+
+        Licence completed(LicenceRequest request, CurrentActor system);
+    }
+
+    private final List<PaidHandler> handlers = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    public void addHandler(PaidHandler handler) {
+        handlers.add(handler);
     }
 
     // ---- examination transfers (DL-036)
@@ -171,7 +189,7 @@ public class LicenceService {
                     List.of("DL-050"));
         }
         requireKnownConditions(spec.conditions());
-        terms(transfers, spec.customerCategory(), spec.residencyExpiresOn(), today);
+        terms(classCodes(transfers), spec.customerCategory(), spec.residencyExpiresOn(), today, today);
         String serviceCode = rules.serviceCode(LicenceRequest.Kind.ISSUE);
         requireNoHolds(serviceCode, spec.trafficFileNumber(), null, channel);
         Ports.FeeQuotes.Quote quote = fees.quote(serviceCode, spec.region(), spec.customerCategory(), null,
@@ -184,8 +202,9 @@ public class LicenceService {
         for (Licence.Condition c : spec.conditions()) {
             payload.put("condition." + c.code(), c.note() == null ? "" : c.note());
         }
+        delivery(payload, spec.delivery(), spec.address());
         return open(LicenceRequest.Kind.ISSUE, null, spec.trafficFileNumber(), spec.region(), quote, payload,
-                spec.transferIds(), channel, caller);
+                spec.transferIds(), channel, caller.actor().id(), null);
     }
 
     /**
@@ -206,9 +225,9 @@ public class LicenceService {
         }
         LicenceRequest r = found.get();
         CurrentActor system = CurrentActor.system(SYSTEM);
-        Licence licence = switch (r.kind()) {
-            case ISSUE -> issue(r, system);
-        };
+        Licence licence = r.kind() == LicenceRequest.Kind.ISSUE ? issue(r, system)
+                : handlers.stream().filter(h -> h.handles(r.kind())).findFirst()
+                .orElseThrow(() -> new IllegalStateException("no handler for " + r.kind())).completed(r, system);
         repo.updateRequest(r.completed(licence.id(), clock.instant()));
         return true;
     }
@@ -226,7 +245,7 @@ public class LicenceService {
         requireNoLicenceInForce(r.trafficFileNumber());
         LocalDate residency = r.value("residencyExpiresOn") == null ? null
                 : LocalDate.parse(r.value("residencyExpiresOn"));
-        Terms terms = terms(transfers, r.value("customerCategory"), residency, today);
+        Terms terms = terms(classCodes(transfers), r.value("customerCategory"), residency, today, today);
         boolean first = repo.licencesOf(r.trafficFileNumber()).isEmpty();
         LocalDate probation = first && rules.probationMonths() > 0
                 ? today.plusMonths(rules.probationMonths()) : null;
@@ -255,6 +274,8 @@ public class LicenceService {
         }
         Map<String, Object> detail = snapshot(licence);
         detail.put("requestId", r.id().toString());
+        Records.Card card = issueCard(licence, Records.CardReason.ISSUE, r, now);
+        detail.put("cardSerial", card.serial());
         repo.history(id, "ISSUED", system.userId(), detail, now);
         audit.recordAs(system, "LICENCE_ISSUED", ENTITY, number, null, detail, null);
         events.recordAs(system, "itms.licence.issued", number, detail);
@@ -332,6 +353,13 @@ public class LicenceService {
         return r;
     }
 
+    /** A licence's cards, newest first (DL-060). */
+    @Transactional(readOnly = true)
+    public List<Records.Card> cards(UUID licenceId, Caller caller) {
+        licenceInRegion(licenceId, READ, caller, false);
+        return repo.cards(licenceId);
+    }
+
     /** The condition codes that may be recorded (DL-023). */
     public List<String> conditionCodes() {
         return rules.sortedConditionCodes();
@@ -349,18 +377,19 @@ public class LicenceService {
 
     /**
      * Resolves each class's rule for the customer category on {@code today}: the licence lasts the shortest
-     * validity among its classes and, when a class links validity to residency, never beyond the residency.
+     * validity among its classes from {@code from} and, when a class links validity to residency, never beyond the
+     * residency.
      */
-    Terms terms(List<ExaminationTransfer> transfers, String customerCategory, LocalDate residencyExpiresOn,
+    Terms terms(List<String> classCodes, String customerCategory, LocalDate residencyExpiresOn, LocalDate from,
                 LocalDate today) {
         if (customerCategory == null || !customerCategory.matches("^[A-Z][A-Z0-9_]{0,39}$")) {
             throw DomainException.validation("FIELD_INVALID", "customerCategory is missing or malformed",
                     List.of("DL-062"), "customerCategory");
         }
-        List<LicenceClassService.ResolvedRule> resolved = transfers.stream()
-                .map(t -> classes.ruleOn(t.spec().classCode(), customerCategory, today)).toList();
+        List<LicenceClassService.ResolvedRule> resolved = classCodes.stream()
+                .map(c -> classes.ruleOn(c, customerCategory, today)).toList();
         int months = resolved.stream().mapToInt(r -> r.rule().validityMonths()).min().orElseThrow();
-        LocalDate expires = today.plusMonths(months);
+        LocalDate expires = from.plusMonths(months);
         if (resolved.stream().anyMatch(r -> r.rule().residencyLinked())) {
             if (residencyExpiresOn == null) {
                 throw DomainException.validation("RESIDENCY_EXPIRY_REQUIRED", "the licence validity is linked to the"
@@ -375,6 +404,15 @@ public class LicenceService {
             }
         }
         return new Terms(resolved, expires);
+    }
+
+    /** Whether any of the classes links validity to residency for the customer category (DL-062). */
+    boolean residencyLinked(List<String> classCodes, String customerCategory, LocalDate today) {
+        return classCodes.stream().anyMatch(c -> classes.ruleOn(c, customerCategory, today).rule().residencyLinked());
+    }
+
+    private static List<String> classCodes(List<ExaminationTransfer> transfers) {
+        return transfers.stream().map(t -> t.spec().classCode()).toList();
     }
 
     private List<ExaminationTransfer> openTransfers(String trafficFileNumber, List<UUID> ids) {
@@ -427,16 +465,19 @@ public class LicenceService {
         }
     }
 
-    /** Registers the payable of a quoted fee and keeps the request until payment is confirmed. */
+    /**
+     * Registers the payable of a quoted fee and keeps the request until payment is confirmed; {@code as} is the system
+     * actor for requests opened by a job (DL-065), null for a person's request.
+     */
     LicenceRequest open(LicenceRequest.Kind kind, UUID licenceId, String trafficFileNumber, String region,
                         Ports.FeeQuotes.Quote quote, Map<String, String> payload, List<UUID> transferIds,
-                        Channel channel, Caller caller) {
+                        Channel channel, String actorId, CurrentActor as) {
         UUID id = UUID.randomUUID();
         UUID payableId = payables.register(LicenceRequest.itemRef(id), trafficFileNumber, region, quote.currency(),
                 quote.lines());
         LicenceRequest r = new LicenceRequest(id, kind, LicenceRequest.Status.AWAITING_PAYMENT, licenceId,
                 trafficFileNumber, region, quote.id(), payableId, quote.total(), quote.currency(), payload,
-                transferIds, caller.actor().id(), channel, clock.instant(), null);
+                transferIds, actorId, channel, clock.instant(), null);
         repo.insertRequest(r);
         Map<String, Object> detail = new LinkedHashMap<>();
         detail.put("requestId", id.toString());
@@ -446,10 +487,76 @@ public class LicenceService {
         detail.put("currency", quote.currency());
         detail.putAll(payload);
         if (licenceId != null) {
-            repo.history(licenceId, kind.name() + "_REQUESTED", caller.actor().id(), detail, clock.instant());
+            repo.history(licenceId, kind.name() + "_REQUESTED", actorId, detail, clock.instant());
         }
-        audit.record("LICENCE_" + kind.name() + "_REQUESTED", "LicenceRequest", id.toString(), null, detail, null);
+        if (as == null) {
+            audit.record("LICENCE_" + kind.name() + "_REQUESTED", "LicenceRequest", id.toString(), null, detail, null);
+        } else {
+            audit.recordAs(as, "LICENCE_" + kind.name() + "_REQUESTED", "LicenceRequest", id.toString(), null, detail,
+                    null);
+        }
         return r;
+    }
+
+    /** One request at a time per licence. */
+    void requireNoOpenRequest(Licence l) {
+        if (!repo.openRequestsOf(l.id()).isEmpty()) {
+            throw DomainException.conflict("REQUEST_OPEN", "another request of this licence waits for payment",
+                    List.of("DL-051", "DL-052", "DL-057"));
+        }
+    }
+
+    // ---- cards (DL-052, DL-060)
+
+    static void delivery(Map<String, String> payload, Records.Delivery delivery, String address) {
+        payload.put("delivery", (delivery == null ? Records.Delivery.CENTRE : delivery).name());
+        if (address != null) {
+            payload.put("address", address);
+        }
+    }
+
+    /** A new card for the licence with the delivery the request asked for; earlier live cards are cancelled. */
+    Records.Card issueCard(Licence licence, Records.CardReason reason, LicenceRequest r, Instant now) {
+        String delivery = r == null ? null : r.value("delivery");
+        return issueCard(licence, reason, delivery == null ? Records.Delivery.CENTRE
+                : Records.Delivery.valueOf(delivery), r == null ? null : r.value("address"), now);
+    }
+
+    Records.Card issueCard(Licence licence, Records.CardReason reason, Records.Delivery delivery, String address,
+                           Instant now) {
+        cancelCards(licence, now);
+        Records.Card card = new Records.Card(UUID.randomUUID(), licence.id(), repo.nextCardSerial(licence.id()),
+                reason, delivery, address, Records.CardStatus.PENDING_PRINT, null, now, now);
+        repo.insertCard(card);
+        return card;
+    }
+
+    /** Cancels every live card of the licence at once (DL-052); returns how many. */
+    int cancelCards(Licence licence, Instant now) {
+        int n = 0;
+        for (Records.Card c : repo.cards(licence.id())) {
+            if (c.live()) {
+                repo.updateCard(c.moveTo(Records.CardStatus.CANCELLED, null, now));
+                n++;
+            }
+        }
+        return n;
+    }
+
+    LicensingRules rules() {
+        return rules;
+    }
+
+    Ports.FeeQuotes fees() {
+        return fees;
+    }
+
+    LicenceRepository repo() {
+        return repo;
+    }
+
+    LicenceClassService classes() {
+        return classes;
     }
 
     Licence licenceInRegion(UUID id, String permission, Caller caller, boolean forUpdate) {

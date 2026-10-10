@@ -5,6 +5,7 @@ import gov.itms.licensing.domain.Channel;
 import gov.itms.licensing.domain.ExaminationTransfer;
 import gov.itms.licensing.domain.Licence;
 import gov.itms.licensing.domain.LicenceRequest;
+import gov.itms.licensing.domain.Records;
 import java.sql.Date;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -286,6 +287,172 @@ class JdbcLicenceRepository implements LicenceRepository {
     public List<LicenceRequest> openRequests(String trafficFileNumber, LicenceRequest.Kind kind) {
         return jdbc.sql(REQUEST + " where traffic_file_number = :t and kind = :k and status = 'AWAITING_PAYMENT'")
                 .param("t", trafficFileNumber).param("k", kind.name()).query(this::mapRequest).list();
+    }
+
+    @Override
+    public List<LicenceRequest> openRequestsOf(UUID licenceId) {
+        return jdbc.sql(REQUEST + " where licence_id = :l and status = 'AWAITING_PAYMENT'").param("l", licenceId)
+                .query(this::mapRequest).list();
+    }
+
+    // ---- cards
+
+    private static final String CARD = """
+            select id, licence_id, serial, reason, delivery, address, status, tracking_ref, created_at, status_at
+            from licence_card""";
+
+    @Override
+    public int nextCardSerial(UUID licenceId) {
+        return jdbc.sql("select coalesce(max(serial), 0) + 1 from licence_card where licence_id = :l")
+                .param("l", licenceId).query(Integer.class).single();
+    }
+
+    @Override
+    public void insertCard(Records.Card c) {
+        jdbc.sql("""
+                        insert into licence_card (id, licence_id, serial, reason, delivery, address, status,
+                            tracking_ref, created_at, status_at)
+                        values (:id, :l, :serial, :reason, :delivery, :address, :status, :tracking, :created, :at)""")
+                .param("id", c.id()).param("l", c.licenceId()).param("serial", c.serial())
+                .param("reason", c.reason().name()).param("delivery", c.delivery().name())
+                .param("address", c.address()).param("status", c.status().name()).param("tracking", c.trackingRef())
+                .param("created", Timestamp.from(c.createdAt())).param("at", Timestamp.from(c.statusAt())).update();
+    }
+
+    @Override
+    public void updateCard(Records.Card c) {
+        jdbc.sql("update licence_card set status = :status, tracking_ref = :tracking, status_at = :at where id = :id")
+                .param("status", c.status().name()).param("tracking", c.trackingRef())
+                .param("at", Timestamp.from(c.statusAt())).param("id", c.id()).update();
+    }
+
+    @Override
+    public Optional<Records.Card> card(UUID id) {
+        return jdbc.sql(CARD + " where id = :id").param("id", id).query(this::mapCard).optional();
+    }
+
+    @Override
+    public Optional<Records.Card> cardForUpdate(UUID id) {
+        return jdbc.sql(CARD + " where id = :id for update").param("id", id).query(this::mapCard).optional();
+    }
+
+    @Override
+    public List<Records.Card> cards(UUID licenceId) {
+        return jdbc.sql(CARD + " where licence_id = :l order by serial desc").param("l", licenceId)
+                .query(this::mapCard).list();
+    }
+
+    @Override
+    public List<Records.Card> cardsIn(Records.CardStatus status, Records.Delivery delivery, int limit) {
+        return jdbc.sql(CARD + " where status = :s and delivery = :d order by created_at limit :n")
+                .param("s", status.name()).param("d", delivery.name()).param("n", limit).query(this::mapCard).list();
+    }
+
+    private Records.Card mapCard(ResultSet rs, int n) throws SQLException {
+        return new Records.Card(rs.getObject("id", UUID.class), rs.getObject("licence_id", UUID.class),
+                rs.getInt("serial"), Records.CardReason.valueOf(rs.getString("reason")),
+                Records.Delivery.valueOf(rs.getString("delivery")), rs.getString("address"),
+                Records.CardStatus.valueOf(rs.getString("status")), rs.getString("tracking_ref"),
+                rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("status_at").toInstant());
+    }
+
+    // ---- eye tests
+
+    private static final String EYE = """
+            select id, traffic_file_number, centre_code, reference, tested_on, result, corrective_lenses,
+                permitted_classes::text as permitted_classes, received_at, received_by
+            from eye_test""";
+
+    @Override
+    public boolean insertEyeTest(Records.EyeTest t) {
+        return jdbc.sql("""
+                        insert into eye_test (id, traffic_file_number, centre_code, reference, tested_on, result,
+                            corrective_lenses, permitted_classes, received_at, received_by)
+                        values (:id, :file, :centre, :ref, :on, :result, :lenses, cast(:classes as jsonb), :at, :by)
+                        on conflict (centre_code, reference) do nothing""")
+                .param("id", t.id()).param("file", t.trafficFileNumber()).param("centre", t.centreCode())
+                .param("ref", t.reference()).param("on", Date.valueOf(t.testedOn())).param("result", t.result().name())
+                .param("lenses", t.correctiveLenses()).param("classes", json.writeValueAsString(t.permittedClasses()))
+                .param("at", Timestamp.from(t.receivedAt())).param("by", t.receivedBy()).update() == 1;
+    }
+
+    @Override
+    public Optional<Records.EyeTest> eyeTest(String centreCode, String reference) {
+        return jdbc.sql(EYE + " where centre_code = :c and reference = :r").param("c", centreCode)
+                .param("r", reference).query(this::mapEye).optional();
+    }
+
+    @Override
+    public List<Records.EyeTest> eyeTests(String trafficFileNumber) {
+        return jdbc.sql(EYE + " where traffic_file_number = :t order by tested_on desc, received_at desc")
+                .param("t", trafficFileNumber).query(this::mapEye).list();
+    }
+
+    private Records.EyeTest mapEye(ResultSet rs, int n) throws SQLException {
+        List<String> classes = new ArrayList<>();
+        for (JsonNode c : json.readTree(rs.getString("permitted_classes"))) {
+            classes.add(c.asString());
+        }
+        return new Records.EyeTest(rs.getObject("id", UUID.class), rs.getString("traffic_file_number"),
+                rs.getString("centre_code"), rs.getString("reference"), rs.getDate("tested_on").toLocalDate(),
+                Records.EyeResult.valueOf(rs.getString("result")), rs.getBoolean("corrective_lenses"), classes,
+                rs.getTimestamp("received_at").toInstant(), rs.getString("received_by"));
+    }
+
+    // ---- automatic renewal
+
+    private static final String AUTO = """
+            select a.licence_id, a.payment_method_ref, a.status, a.consent_by, a.consent_at, a.notice_for_expiry,
+                a.notice_at, a.attempt_for_expiry, a.attempt_at, a.withdrawn_by, a.withdrawn_at
+            from auto_renewal a""";
+
+    @Override
+    public Optional<Records.AutoRenewal> autoRenewalForUpdate(UUID licenceId) {
+        return jdbc.sql(AUTO + " where a.licence_id = :l for update").param("l", licenceId).query(this::mapAuto)
+                .optional();
+    }
+
+    @Override
+    public Optional<Records.AutoRenewal> autoRenewal(UUID licenceId) {
+        return jdbc.sql(AUTO + " where a.licence_id = :l").param("l", licenceId).query(this::mapAuto).optional();
+    }
+
+    @Override
+    public void saveAutoRenewal(Records.AutoRenewal c) {
+        jdbc.sql("""
+                        insert into auto_renewal (licence_id, payment_method_ref, status, consent_by, consent_at,
+                            notice_for_expiry, notice_at, attempt_for_expiry, attempt_at, withdrawn_by, withdrawn_at)
+                        values (:l, :ref, :status, :by, :at, :notice, :noticeAt, :attempt, :attemptAt, :wBy, :wAt)
+                        on conflict (licence_id) do update set payment_method_ref = excluded.payment_method_ref,
+                            status = excluded.status, consent_by = excluded.consent_by,
+                            consent_at = excluded.consent_at, notice_for_expiry = excluded.notice_for_expiry,
+                            notice_at = excluded.notice_at, attempt_for_expiry = excluded.attempt_for_expiry,
+                            attempt_at = excluded.attempt_at, withdrawn_by = excluded.withdrawn_by,
+                            withdrawn_at = excluded.withdrawn_at""")
+                .param("l", c.licenceId()).param("ref", c.paymentMethodRef()).param("status", c.status().name())
+                .param("by", c.consentBy()).param("at", ts(c.consentAt())).param("notice", date(c.noticeForExpiry()))
+                .param("noticeAt", ts(c.noticeAt())).param("attempt", date(c.attemptForExpiry()))
+                .param("attemptAt", ts(c.attemptAt())).param("wBy", c.withdrawnBy()).param("wAt", ts(c.withdrawnAt()))
+                .update();
+    }
+
+    @Override
+    public List<Records.AutoRenewal> autoRenewalsDue(LocalDate expiringBy, int limit) {
+        return jdbc.sql(AUTO + " join licence l on l.id = a.licence_id where a.status = 'ACTIVE'"
+                        + " and l.status = 'ACTIVE' and l.expires_on <= :by order by l.expires_on limit :n")
+                .param("by", Date.valueOf(expiringBy)).param("n", limit).query(this::mapAuto).list();
+    }
+
+    private Records.AutoRenewal mapAuto(ResultSet rs, int n) throws SQLException {
+        return new Records.AutoRenewal(rs.getObject("licence_id", UUID.class), rs.getString("payment_method_ref"),
+                Records.ConsentStatus.valueOf(rs.getString("status")), rs.getString("consent_by"),
+                instant(rs, "consent_at"), localDate(rs, "notice_for_expiry"), instant(rs, "notice_at"),
+                localDate(rs, "attempt_for_expiry"), instant(rs, "attempt_at"), rs.getString("withdrawn_by"),
+                instant(rs, "withdrawn_at"));
+    }
+
+    private static Timestamp ts(Instant i) {
+        return i == null ? null : Timestamp.from(i);
     }
 
     @SuppressWarnings("unchecked")

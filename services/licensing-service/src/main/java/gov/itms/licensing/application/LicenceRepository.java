@@ -3,7 +3,9 @@ package gov.itms.licensing.application;
 import gov.itms.licensing.domain.ExaminationTransfer;
 import gov.itms.licensing.domain.Licence;
 import gov.itms.licensing.domain.LicenceRequest;
+import gov.itms.licensing.domain.Records;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -67,4 +69,42 @@ public interface LicenceRepository {
 
     /** The person's requests of a kind that still wait for payment. */
     List<LicenceRequest> openRequests(String trafficFileNumber, LicenceRequest.Kind kind);
+
+    /** A licence's requests, of any kind, that still wait for payment. */
+    List<LicenceRequest> openRequestsOf(UUID licenceId);
+
+    // cards (DL-052, DL-060)
+    int nextCardSerial(UUID licenceId);
+
+    void insertCard(Records.Card card);
+
+    void updateCard(Records.Card card);
+
+    Optional<Records.Card> card(UUID id);
+
+    Optional<Records.Card> cardForUpdate(UUID id);
+
+    /** A licence's cards, newest first. */
+    List<Records.Card> cards(UUID licenceId);
+
+    /** Cards in a status, oldest first (for the printer hand-over, DL-060). */
+    List<Records.Card> cardsIn(Records.CardStatus status, Records.Delivery delivery, int limit);
+
+    // eye tests (DL-007)
+    boolean insertEyeTest(Records.EyeTest test);
+
+    Optional<Records.EyeTest> eyeTest(String centreCode, String reference);
+
+    /** A person's eye tests, newest test date first. */
+    List<Records.EyeTest> eyeTests(String trafficFileNumber);
+
+    // automatic renewal (DL-065)
+    Optional<Records.AutoRenewal> autoRenewalForUpdate(UUID licenceId);
+
+    Optional<Records.AutoRenewal> autoRenewal(UUID licenceId);
+
+    void saveAutoRenewal(Records.AutoRenewal consent);
+
+    /** Active consents whose licence is active and expires on or before {@code expiringBy}. */
+    List<Records.AutoRenewal> autoRenewalsDue(LocalDate expiringBy, int limit);
 }

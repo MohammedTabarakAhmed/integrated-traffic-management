@@ -1,6 +1,7 @@
 package gov.itms.licensing.infrastructure;
 
 import gov.itms.licensing.application.LicenceService;
+import gov.itms.licensing.application.LicenceTransactions;
 import gov.itms.licensing.application.Ports;
 import gov.itms.platform.client.ServiceCallException;
 import java.time.LocalDate;
@@ -196,6 +197,42 @@ final class Adapters {
                         LOG.error("Paid licensing request {} could not be completed: {}", itemRef, e.getMessage());
                     }
                 }
+            }
+        }
+    }
+
+    /**
+     * Follows traffic-file-service ({@code itms.traffic-file.identity-updated}, DL-057, DL-010): the licences of a
+     * person whose register identity changed get a new card or a history line. Each CloudEvent id is applied once.
+     */
+    static class TrafficFileEventListener {
+
+        private final LicenceTransactions transactions;
+        private final ObjectMapper json;
+
+        TrafficFileEventListener(LicenceTransactions transactions, ObjectMapper json) {
+            this.transactions = transactions;
+            this.json = json;
+        }
+
+        @KafkaListener(topics = "${itms.licensing.traffic-file-topic:itms.traffic-file-service.events.v1}",
+                groupId = "${itms.licensing.consumer-group:licensing-service}")
+        void onMessage(String message) {
+            JsonNode event;
+            try {
+                event = json.readTree(message);
+            } catch (RuntimeException e) {
+                LOG.warn("Skipping a traffic file event that is not JSON");
+                return;
+            }
+            String type = event.path("type").asString("");
+            String id = event.path("id").asString("");
+            String file = event.path("subject").asString("");
+            if (id.isEmpty() || file.isEmpty()) {
+                return;
+            }
+            if ("itms.traffic-file.identity-updated".equals(type)) {
+                transactions.onRegisterChange(id, file, event.path("data").path("changeType").asString(""));
             }
         }
     }

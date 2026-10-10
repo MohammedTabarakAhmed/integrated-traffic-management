@@ -5,12 +5,14 @@ import gov.itms.licensing.application.LicenceNumberRepository;
 import gov.itms.licensing.application.LicenceNumberService;
 import gov.itms.licensing.application.LicenceRepository;
 import gov.itms.licensing.application.LicenceService;
+import gov.itms.licensing.application.LicenceTransactions;
 import gov.itms.licensing.domain.Channel;
 import gov.itms.licensing.domain.ExaminationTransfer;
 import gov.itms.licensing.domain.Licence;
 import gov.itms.licensing.domain.LicenceClassVersion;
 import gov.itms.licensing.domain.LicenceNumberRange;
 import gov.itms.licensing.domain.LicenceRequest;
+import gov.itms.licensing.domain.Records;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -154,12 +156,13 @@ final class ApiModels {
     record IssueRequest(@NotBlank String trafficFileNumber, @NotBlank String region,
                         @NotNull @Size(min = 1, max = 10) List<@NotNull UUID> transferIds,
                         @NotBlank String customerCategory, LocalDate residencyExpiresOn,
-                        @Size(max = 20) List<@NotNull @Valid ConditionRequest> conditions) {
+                        @Size(max = 20) List<@NotNull @Valid ConditionRequest> conditions,
+                        Records.Delivery delivery, @Size(max = 300) String address) {
 
         LicenceService.IssueSpec toDomain(LocalDate today) {
             return new LicenceService.IssueSpec(trafficFileNumber, region, transferIds, customerCategory,
                     residencyExpiresOn, conditions == null ? List.of() : conditions.stream()
-                    .map(c -> new Licence.Condition(c.code(), c.note(), today)).toList());
+                    .map(c -> new Licence.Condition(c.code(), c.note(), today)).toList(), delivery, address);
         }
     }
 
@@ -206,6 +209,66 @@ final class ApiModels {
     record HistoryDto(String event, String actorId, Map<String, Object> detail, Instant at) {
         static HistoryDto of(LicenceRepository.HistoryEntry h) {
             return new HistoryDto(h.event(), h.actorId(), h.detail(), h.at());
+        }
+    }
+
+    record RenewRequest(String customerCategory, LocalDate residencyExpiresOn, Records.Delivery delivery,
+                        @Size(max = 300) String address) {
+        LicenceTransactions.RenewSpec toDomain() {
+            return new LicenceTransactions.RenewSpec(customerCategory, residencyExpiresOn, delivery, address);
+        }
+    }
+
+    record ReplacementRequest(@NotNull LicenceTransactions.ReplacementReason reason, Records.Delivery delivery,
+                              @Size(max = 300) String address) {
+    }
+
+    record ChangeRequest(String customerCategory, LocalDate residencyExpiresOn,
+                         @NotBlank @Size(min = 3, max = 500) String description,
+                         @NotBlank String evidenceDocumentId, Records.Delivery delivery,
+                         @Size(max = 300) String address) {
+        LicenceTransactions.ChangeSpec toDomain() {
+            return new LicenceTransactions.ChangeSpec(customerCategory, residencyExpiresOn, description,
+                    evidenceDocumentId, delivery, address);
+        }
+    }
+
+    record CardDto(UUID id, int serial, Records.CardReason reason, Records.Delivery delivery, String address,
+                   Records.CardStatus status, String trackingRef, Instant createdAt, Instant statusAt) {
+        static CardDto of(Records.Card c) {
+            return new CardDto(c.id(), c.serial(), c.reason(), c.delivery(), c.address(), c.status(), c.trackingRef(),
+                    c.createdAt(), c.statusAt());
+        }
+    }
+
+    record EyeTestRequest(@NotBlank String trafficFileNumber, @NotBlank String centreCode,
+                          @NotBlank String reference, @NotNull LocalDate testedOn,
+                          @NotNull Records.EyeResult result, @NotNull Boolean correctiveLenses,
+                          @Size(max = 30) List<@NotNull String> permittedClasses) {
+        Records.EyeTest toDomain() {
+            return new Records.EyeTest(UUID.randomUUID(), trafficFileNumber, centreCode, reference, testedOn, result,
+                    correctiveLenses, permittedClasses, Instant.EPOCH, "-");
+        }
+    }
+
+    record EyeTestDto(UUID id, String trafficFileNumber, String centreCode, String reference, LocalDate testedOn,
+                      Records.EyeResult result, boolean correctiveLenses, List<String> permittedClasses,
+                      Instant receivedAt) {
+        static EyeTestDto of(Records.EyeTest t) {
+            return new EyeTestDto(t.id(), t.trafficFileNumber(), t.centreCode(), t.reference(), t.testedOn(),
+                    t.result(), t.correctiveLenses(), t.permittedClasses(), t.receivedAt());
+        }
+    }
+
+    record ConsentRequest(@NotBlank @Size(max = 100) String paymentMethodRef) {
+    }
+
+    record AutoRenewalDto(UUID licenceId, String paymentMethodRef, Records.ConsentStatus status, Instant consentAt,
+                          LocalDate noticeForExpiry, Instant noticeAt, LocalDate attemptForExpiry,
+                          Instant withdrawnAt) {
+        static AutoRenewalDto of(Records.AutoRenewal a) {
+            return new AutoRenewalDto(a.licenceId(), a.paymentMethodRef(), a.status(), a.consentAt(),
+                    a.noticeForExpiry(), a.noticeAt(), a.attemptForExpiry(), a.withdrawnAt());
         }
     }
 

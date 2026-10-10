@@ -63,10 +63,10 @@ public final class Licence {
     private final String licenceNumber;
     private final String trafficFileNumber;
     private final String region;
-    private final String customerCategory;
     private final List<LicenceClass> classes;
     private final List<Condition> conditions;
     private final long version;
+    private String customerCategory;
     private Status status;
     private LocalDate issuedOn;
     private LocalDate expiresOn;
@@ -139,6 +139,51 @@ public final class Licence {
             throw new DomainException(DomainException.Kind.NOT_FOUND, "CONDITION_NOT_FOUND",
                     "the licence has no condition " + code, List.of("DL-023"), code);
         }
+    }
+
+    /**
+     * DL-051: the licence runs to {@code newExpiry}; the customer category and residency are those of the renewal.
+     */
+    public void renew(LocalDate newExpiry, String category, LocalDate residency) {
+        requireActive();
+        if (!newExpiry.isAfter(expiresOn)) {
+            throw DomainException.validation("LICENCE_EXPIRY_INVALID", "a renewal must move the expiry date later",
+                    List.of("DL-051"));
+        }
+        this.expiresOn = newExpiry;
+        this.customerCategory = Objects.requireNonNull(category);
+        this.residencyExpiresOn = residency;
+    }
+
+    /**
+     * DL-057: a new customer category or residency end. A linked residency that now ends earlier brings the expiry
+     * forward (DL-062); a later one never extends it (that is a renewal).
+     */
+    public void changeTerms(String category, LocalDate residency, boolean residencyLinked) {
+        requireNotEnded();
+        this.customerCategory = Objects.requireNonNull(category);
+        this.residencyExpiresOn = residency;
+        if (residencyLinked && residency != null && residency.isBefore(expiresOn)) {
+            if (!residency.isAfter(issuedOn)) {
+                throw DomainException.validation("RESIDENCY_ENDED", "the holder's residency has ended",
+                        List.of("DL-062"));
+            }
+            this.expiresOn = residency;
+        }
+    }
+
+    /** Renewal and similar changes need a licence in force, not suspended or ended. */
+    public void requireActive() {
+        requireNotEnded();
+        if (status != Status.ACTIVE) {
+            throw DomainException.conflict("LICENCE_NOT_ACTIVE", "licence " + licenceNumber + " is " + status,
+                    List.of("DL-051", "DL-058"), status.name());
+        }
+    }
+
+    /** The codes of the classes in force on the licence. */
+    public List<String> activeClassCodes() {
+        return classes.stream().filter(c -> c.status() == ClassStatus.ACTIVE).map(LicenceClass::classCode).toList();
     }
 
     /** The status as the holder sees it on {@code day}: an active licence past its expiry reads EXPIRED. */

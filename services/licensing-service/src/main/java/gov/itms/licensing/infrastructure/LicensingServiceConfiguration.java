@@ -3,18 +3,24 @@ package gov.itms.licensing.infrastructure;
 import gov.itms.licensing.application.LicenceClassService;
 import gov.itms.licensing.application.LicenceNumberService;
 import gov.itms.licensing.application.LicenceService;
+import gov.itms.licensing.application.LicenceTransactions;
 import gov.itms.licensing.application.LicensingRules;
 import gov.itms.licensing.domain.LicenceRequest;
 import gov.itms.platform.audit.AuditRecorder;
 import gov.itms.platform.client.ServiceClientProperties;
 import gov.itms.platform.client.ServiceClients;
 import gov.itms.platform.events.DomainEventRecorder;
+import gov.itms.platform.events.ProcessedEvents;
 import io.micrometer.observation.ObservationRegistry;
 import java.time.Clock;
+import java.time.Duration;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -25,9 +31,14 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.scheduling.annotation.Scheduled;
 import tools.jackson.databind.ObjectMapper;
 
-/** Wires licensing to PostgreSQL, fees-service, payment-service, hold-eligibility-service and the payment events. */
+/**
+ * Wires licensing to PostgreSQL, fees-service, payment-service, hold-eligibility-service, the payment and traffic file
+ * events, and the automatic renewal job.
+ */
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(LicensingServiceConfiguration.LicensingProperties.class)
 public class LicensingServiceConfiguration {
@@ -35,13 +46,24 @@ public class LicensingServiceConfiguration {
     /**
      * {@code itms.licensing.*} (NFR-042). Code-keyed maps are written with brackets ({@code "[ISSUE]": LIC_ISSUE}).
      *
-     * @param probationMonths BRD default 2 years (DL-050)
-     * @param serviceCodes    fees-service and hold-eligibility-service code per paid transaction
-     * @param conditionCodes  the licence conditions that may be recorded (DL-023)
+     * @param probationMonths     BRD default 2 years (DL-050)
+     * @param serviceCodes        fees-service and hold-eligibility-service code per paid transaction
+     * @param conditionCodes      the licence conditions that may be recorded (DL-023)
+     * @param renewalWindowDays   BRD default 90 days (DL-051)
+     * @param eyeTestValidityDays how old a passed eye test may be for renewal (Q-077)
+     * @param lensesCondition     condition recorded when the eye test needs corrective lenses
+     * @param autoRenewal         the automatic renewal job (DL-065)
      */
     @ConfigurationProperties("itms.licensing")
     public record LicensingProperties(@DefaultValue("24") int probationMonths, Map<String, String> serviceCodes,
-                                      List<String> conditionCodes) {
+                                      List<String> conditionCodes, @DefaultValue("90") int renewalWindowDays,
+                                      @DefaultValue("180") int eyeTestValidityDays, String lensesCondition,
+                                      @DefaultValue AutoRenewal autoRenewal) {
+
+        /** DL-065: notice period, run interval and batch size of the job. */
+        public record AutoRenewal(@DefaultValue("true") boolean enabled, @DefaultValue("14") int noticeDays,
+                                  @DefaultValue("1h") Duration interval, @DefaultValue("200") int batchSize) {
+        }
 
         public LicensingProperties {
             serviceCodes = serviceCodes == null ? Map.of() : Map.copyOf(serviceCodes);
@@ -51,12 +73,17 @@ public class LicensingServiceConfiguration {
                     throw new IllegalArgumentException("itms.licensing.condition-codes has an invalid entry (DL-023)");
                 }
             }
+            if (autoRenewal == null || autoRenewal.batchSize() < 1 || autoRenewal.batchSize() > 5000) {
+                throw new IllegalArgumentException("itms.licensing.auto-renewal.batch-size must be 1-5000");
+            }
         }
 
         LicensingRules rules() {
             Map<LicenceRequest.Kind, String> byKind = new EnumMap<>(LicenceRequest.Kind.class);
             serviceCodes.forEach((k, v) -> byKind.put(LicenceRequest.Kind.valueOf(k), v));
-            return new LicensingRules(probationMonths, byKind, Set.copyOf(conditionCodes));
+            return new LicensingRules(probationMonths, byKind, Set.copyOf(conditionCodes), renewalWindowDays,
+                    eyeTestValidityDays, autoRenewal.noticeDays(),
+                    lensesCondition == null || lensesCondition.isBlank() ? null : lensesCondition);
         }
     }
 
@@ -99,13 +126,63 @@ public class LicensingServiceConfiguration {
                 properties.rules(), audit, events, clock);
     }
 
+    @Bean
+    LicenceTransactions licenceTransactions(LicenceService licences, AuditRecorder audit, DomainEventRecorder events,
+                                            ProcessedEvents processed, Clock clock) {
+        LicenceTransactions transactions = new LicenceTransactions(licences, audit, events, processed, clock);
+        licences.addHandler(transactions);
+        return transactions;
+    }
+
     private static ServiceClientProperties client(Environment environment, String name) {
         return Binder.get(environment).bind("itms.clients." + name, ServiceClientProperties.class)
                 .orElseThrow(() -> new IllegalStateException("itms.clients." + name + " is not configured"))
                 .validate("itms.clients." + name);
     }
 
-    /** Completes paid requests from payment events (off without a broker). */
+    /** Sends automatic renewal notices and runs due renewals (DL-065); each licence in its own transaction. */
+    public static class AutoRenewalJob {
+
+        private static final Logger LOG = LoggerFactory.getLogger(AutoRenewalJob.class);
+        private final LicenceTransactions transactions;
+        private final int batchSize;
+
+        public AutoRenewalJob(LicenceTransactions transactions, int batchSize) {
+            this.transactions = transactions;
+            this.batchSize = batchSize;
+        }
+
+        @Scheduled(initialDelayString = "${itms.licensing.auto-renewal.interval:1h}",
+                fixedDelayString = "${itms.licensing.auto-renewal.interval:1h}")
+        public void run() {
+            int done = 0;
+            for (UUID licenceId : transactions.autoRenewalsDue(batchSize)) {
+                try {
+                    if (!"NOTHING".equals(transactions.autoRenewOne(licenceId))) {
+                        done++;
+                    }
+                } catch (RuntimeException e) {
+                    LOG.error("Automatic renewal of licence {} failed; retried on the next run", licenceId, e);
+                }
+            }
+            if (done > 0) {
+                LOG.info("Automatic renewal: {} licences notified or renewed", done);
+            }
+        }
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    @EnableScheduling
+    @ConditionalOnProperty(name = "itms.licensing.auto-renewal.enabled", havingValue = "true", matchIfMissing = true)
+    static class AutoRenewalConfiguration {
+
+        @Bean
+        AutoRenewalJob autoRenewalJob(LicenceTransactions transactions, LicensingProperties properties) {
+            return new AutoRenewalJob(transactions, properties.autoRenewal().batchSize());
+        }
+    }
+
+    /** Completes paid requests from payment events and follows traffic file changes (off without a broker). */
     @Configuration(proxyBeanMethods = false)
     @ConditionalOnProperty(name = "itms.licensing.consumer-enabled", havingValue = "true")
     static class ConsumerConfiguration {
@@ -113,6 +190,12 @@ public class LicensingServiceConfiguration {
         @Bean
         Adapters.PaymentEventListener paymentEventListener(LicenceService licences, ObjectMapper json) {
             return new Adapters.PaymentEventListener(licences, json);
+        }
+
+        @Bean
+        Adapters.TrafficFileEventListener trafficFileEventListener(LicenceTransactions transactions,
+                                                                   ObjectMapper json) {
+            return new Adapters.TrafficFileEventListener(transactions, json);
         }
     }
 }

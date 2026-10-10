@@ -12,6 +12,8 @@ import com.atlassian.oai.validator.model.SimpleRequest;
 import com.atlassian.oai.validator.model.SimpleResponse;
 import com.atlassian.oai.validator.report.ValidationReport;
 import gov.itms.licensing.application.LicenceNumberService;
+import gov.itms.licensing.application.LicenceService;
+import gov.itms.licensing.infrastructure.PartnerStub;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -21,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
@@ -35,6 +38,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -75,6 +80,26 @@ class LicensingApiIT {
     JdbcClient db;
     @Autowired
     LicenceNumberService numbers;
+    @Autowired
+    LicenceService licences;
+
+    private static final PartnerStub PARTNERS = new PartnerStub();
+    private static final AtomicInteger FILES = new AtomicInteger();
+
+    @DynamicPropertySource
+    static void partners(DynamicPropertyRegistry registry) {
+        for (String client : List.of("fees", "payments", "holds")) {
+            registry.add("itms.clients." + client + ".base-url", PARTNERS::baseUrl);
+            registry.add("itms.clients." + client + ".token-uri", () -> PARTNERS.baseUrl() + "/token");
+            registry.add("itms.clients." + client + ".client-id", () -> PartnerStub.CLIENT_ID);
+            registry.add("itms.clients." + client + ".client-secret", () -> PartnerStub.CLIENT_SECRET);
+        }
+    }
+
+    @AfterAll
+    static void stopPartners() {
+        PARTNERS.close();
+    }
 
     @BeforeAll
     static void loadContract() {
@@ -375,5 +400,208 @@ class LicensingApiIT {
                 .content(json.writeValueAsString(version(newClass(), TODAY, 120)))).andReturn();
         assertThat(keyless.getResponse().getStatus()).isEqualTo(400);
         assertThat(code(keyless)).isEqualTo("IDEMPOTENCY_KEY_REQUIRED");
+    }
+
+    // ---- licences (slice 3.3)
+
+    private static RequestPostProcessor sender() {
+        return user("svc-examination", "examination", "EXAMINATION_TRANSFER_SENDER", "licensing.transfer.receive");
+    }
+
+    private static RequestPostProcessor officer() {
+        return user("u-officer", "officer", "LICENSING_OFFICER", "licensing.licence.issue",
+                "licensing.licence.condition", "licensing.licence.read");
+    }
+
+    private static RequestPostProcessor supervisor() {
+        return user("u-supervisor", "supervisor", "LICENSING_SUPERVISOR", "licensing.transfer.reverse",
+                "licensing.licence.read");
+    }
+
+    private static String newFile() {
+        return "TF" + FILES.incrementAndGet() + Long.toString(System.nanoTime() % 1_000_000_000L, 36).toUpperCase();
+    }
+
+    /** An approved class in force today and an active number range of region {@code region}. */
+    private String licensable(String region, String prefix) throws Exception {
+        String classCode = newClass();
+        approved(version(classCode, TODAY, 120));
+        RequestPostProcessor rangeMaker = user("u-maker", "maker", "LICENCE_NUMBER_MAKER",
+                "licensing.number-range.submit");
+        RequestPostProcessor rangeChecker = user("u-checker", "checker", "LICENCE_NUMBER_CHECKER",
+                "licensing.number-range.approve");
+        if (db.sql("select count(*) from licence_number_range where region = :r").param("r", region)
+                .query(Long.class).single() == 0) {
+            MvcResult r = postAs("/v1/licence-number-ranges", Map.of("region", region, "prefix", prefix, "width", 6,
+                    "firstNumber", 1, "lastNumber", 999, "reason", "licence numbers"), rangeMaker);
+            assertThat(r.getResponse().getStatus()).as(r.getResponse().getContentAsString()).isEqualTo(201);
+            postAs("/v1/licence-number-ranges/" + body(r).get("id").asString() + "/approvals", Map.of(),
+                    rangeChecker);
+        }
+        return classCode;
+    }
+
+    private String transferred(String file, String classCode, String gearbox, String region) throws Exception {
+        MvcResult r = postAs("/v1/examination-transfers", Map.of("examinationFileRef", "EX-" + file + "-" + classCode,
+                "trafficFileNumber", file, "classCode", classCode, "gearbox", gearbox, "passedOn", TODAY.toString(),
+                "region", region), sender());
+        assertThat(r.getResponse().getStatus()).as(r.getResponse().getContentAsString()).isEqualTo(201);
+        return body(r).get("id").asString();
+    }
+
+    private static Map<String, Object> issue(String file, String region, String category, String residency,
+                                             List<Map<String, Object>> conditions, String... transfers) {
+        Map<String, Object> m = new HashMap<>();
+        m.put("trafficFileNumber", file);
+        m.put("region", region);
+        m.put("transferIds", List.of(transfers));
+        m.put("customerCategory", category);
+        m.put("residencyExpiresOn", residency);
+        m.put("conditions", conditions);
+        return m;
+    }
+
+    @Test
+    @Tag("DL-050")
+    @Tag("DL-021")
+    @Tag("DL-022")
+    @Tag("DL-023")
+    @Tag("DL-036")
+    @DisplayName("licence issue: transfer, holds checked, fee and payable, issued on payment with number, automatic-only,"
+            + " probation and conditions; history, audit, event and guards")
+    void licenceIssue() throws Exception {
+        String classCode = licensable("IT_LIC", "LX");
+        String file = newFile();
+        String transfer = transferred(file, classCode, "AUTOMATIC", "IT_LIC");
+        assertThat(code(postAs("/v1/examination-transfers", Map.of("examinationFileRef", "EX-" + file + "-"
+                + classCode, "trafficFileNumber", file, "classCode", classCode, "gearbox", "MANUAL", "passedOn",
+                TODAY.toString(), "region", "IT_LIC"), sender()))).isEqualTo("TRANSFER_EXISTS");
+
+        MvcResult opened = postAs("/v1/licence-issues", issue(file, "IT_LIC", "CITIZEN", null,
+                List.of(Map.of("code", "CORRECTIVE_LENSES")), transfer), officer());
+        assertThat(opened.getResponse().getStatus()).as(opened.getResponse().getContentAsString()).isEqualTo(201);
+        JsonNode request = body(opened);
+        assertThat(request.get("status").asString()).isEqualTo("AWAITING_PAYMENT");
+        assertThat(request.get("amountMinor").asLong()).isEqualTo(PartnerStub.FEE);
+        String itemRef = "LR-" + request.get("id").asString().toUpperCase();
+        assertThat(PARTNERS.payables.stream().anyMatch(p -> p.get("itemRef").asString().equals(itemRef))).isTrue();
+        assertThat(PARTNERS.quotes.getLast().get("serviceCode").asString()).isEqualTo("LIC_ISSUE");
+        assertThat(PARTNERS.quotes.getLast().get("quantities").get("CLASSES").asString()).isEqualTo("1");
+        assertThat(PARTNERS.checks.getLast().get("subjects").get(0).get("id").asString()).isEqualTo(file);
+
+        assertThat(code(postAs("/v1/licence-issues", issue(file, "IT_LIC", "CITIZEN", null, null, transfer),
+                officer()))).isEqualTo("REQUEST_OPEN");
+        assertThat(code(postAs("/v1/examination-transfers/" + transfer + "/reversal", Map.of("reason", "wrong file"),
+                supervisor()))).isEqualTo("TRANSFER_IN_REQUEST");
+
+        assertThat(licences.onPaid(itemRef)).isTrue();
+        assertThat(licences.onPaid(itemRef)).as("a repeated payment event changes nothing").isFalse();
+
+        JsonNode done = body(getAs("/v1/licence-requests/" + request.get("id").asString(), officer()));
+        assertThat(done.get("status").asString()).isEqualTo("COMPLETED");
+        String licenceId = done.get("licenceId").asString();
+        JsonNode licence = body(getAs("/v1/licences/" + licenceId, officer()));
+        assertThat(licence.get("licenceNumber").asString()).startsWith("LX");
+        assertThat(licence.get("status").asString()).isEqualTo("ACTIVE");
+        assertThat(licence.get("expiresOn").asString()).isEqualTo(TODAY.plusMonths(120).toString());
+        assertThat(licence.get("probationary").asBoolean()).isTrue();
+        assertThat(licence.get("probationUntil").asString()).isEqualTo(TODAY.plusMonths(24).toString());
+        assertThat(licence.get("classes").get(0).get("classCode").asString()).isEqualTo(classCode);
+        assertThat(licence.get("classes").get(0).get("issuedOn").asString()).isEqualTo(TODAY.toString());
+        assertThat(licence.get("classes").get(0).get("automaticOnly").asBoolean()).isTrue();
+        assertThat(licence.get("conditions").get(0).get("code").asString()).isEqualTo("CORRECTIVE_LENSES");
+        assertThat(body(getAs("/v1/licences?trafficFileNumber=" + file, officer())).get("items")).hasSize(1);
+        assertThat(body(getAs("/v1/licences?licenceNumber=" + licence.get("licenceNumber").asString(), officer()))
+                .get("items").get(0).get("id").asString()).isEqualTo(licenceId);
+        assertThat(body(getAs("/v1/examination-transfers/" + transfer, officer())).get("status").asString())
+                .isEqualTo("USED");
+        assertThat(code(postAs("/v1/examination-transfers/" + transfer + "/reversal", Map.of("reason", "wrong file"),
+                supervisor()))).isEqualTo("TRANSFER_NOT_OPEN");
+
+        String second = transferred(file, licensable("IT_LIC", "LX"), "MANUAL", "IT_LIC");
+        assertThat(code(postAs("/v1/licence-issues", issue(file, "IT_LIC", "CITIZEN", null, null, second),
+                officer()))).isEqualTo("LICENCE_EXISTS");
+
+        String conditions = "/v1/licences/" + licenceId + "/conditions";
+        assertThat(body(postAs(conditions, Map.of("code", "HEARING_AID", "reason", "audiology report"), officer()))
+                .get("conditions")).hasSize(2);
+        assertThat(code(postAs(conditions, Map.of("code", "HEARING_AID", "reason", "again"), officer())))
+                .isEqualTo("CONDITION_EXISTS");
+        assertThat(code(postAs(conditions, Map.of("code", "NIGHT_ONLY", "reason", "unknown"), officer())))
+                .isEqualTo("CONDITION_UNKNOWN");
+        assertThat(body(postAs(conditions + "/HEARING_AID/removal", Map.of("reason", "new report"), officer()))
+                .get("conditions")).hasSize(1);
+        JsonNode history = body(getAs("/v1/licences/" + licenceId + "/history", officer())).get("items");
+        List<String> events = new java.util.ArrayList<>();
+        history.forEach(h -> events.add(h.get("event").asString()));
+        assertThat(events).containsExactly("ISSUED", "CONDITION_ADDED", "CONDITION_REMOVED");
+        assertThat(body(getAs("/v1/licence-condition-codes", officer())).get("items").toString())
+                .contains("CORRECTIVE_LENSES");
+
+        String number = licence.get("licenceNumber").asString();
+        assertThat(db.sql("select count(*) from event_outbox where event_type = 'itms.licence.issued' and subject = :s")
+                .param("s", number).query(Long.class).single()).isEqualTo(1);
+        assertThat(db.sql("select count(*) from audit_outbox where entity_id = :s and action = 'LICENCE_ISSUED'")
+                .param("s", number).query(Long.class).single()).isEqualTo(1);
+        assertThatThrownBy(() -> db.sql("delete from licence where id = cast(:id as uuid)").param("id", licenceId)
+                .update()).isInstanceOf(DataAccessException.class).hasMessageContaining("never deleted");
+        assertThatThrownBy(() -> db.sql("update licence set licence_number = 'X', version = version + 1"
+                + " where id = cast(:id as uuid)").param("id", licenceId).update())
+                .isInstanceOf(DataAccessException.class);
+        assertThatThrownBy(() -> db.sql("delete from licence_history where licence_id = cast(:id as uuid)")
+                .param("id", licenceId).update()).isInstanceOf(DataAccessException.class);
+    }
+
+    @Test
+    @Tag("DL-050")
+    @Tag("DL-062")
+    @Tag("DL-036")
+    @DisplayName("licence issue refusals: residency link, holds, fees down; a reversed transfer cannot be used")
+    void licenceIssueRefusals() throws Exception {
+        String classCode = licensable("IT_LIC", "LX");
+        String file = newFile();
+        String transfer = transferred(file, classCode, "MANUAL", "IT_LIC");
+
+        assertThat(code(postAs("/v1/licence-issues", issue(file, "IT_LIC", "RESIDENT", null, null, transfer),
+                officer()))).isEqualTo("RESIDENCY_EXPIRY_REQUIRED");
+        assertThat(code(postAs("/v1/licence-issues", issue(file, "IT_LIC", "CITIZEN", null,
+                List.of(Map.of("code", "NIGHT_ONLY")), transfer), officer()))).isEqualTo("CONDITION_UNKNOWN");
+
+        PARTNERS.blockedFiles.add(file);
+        MvcResult blocked = postAs("/v1/licence-issues", issue(file, "IT_LIC", "CITIZEN", null, null, transfer),
+                officer());
+        PARTNERS.blockedFiles.remove(file);
+        assertThat(blocked.getResponse().getStatus()).isEqualTo(422);
+        assertThat(code(blocked)).isEqualTo("ELIGIBILITY_BLOCKED");
+        assertThat(body(blocked).get("nextStep").asString()).isEqualTo("PAY_FINES");
+
+        PARTNERS.feesDown = true;
+        MvcResult down = postAs("/v1/licence-issues", issue(file, "IT_LIC", "CITIZEN", null, null, transfer),
+                officer());
+        PARTNERS.feesDown = false;
+        assertThat(down.getResponse().getStatus()).isEqualTo(503);
+        assertThat(code(down)).isEqualTo("FEES_UNAVAILABLE");
+
+        LocalDate residency = TODAY.plusMonths(6);
+        MvcResult opened = postAs("/v1/licence-issues", issue(file, "IT_LIC", "RESIDENT", residency.toString(), null,
+                transfer), officer());
+        assertThat(opened.getResponse().getStatus()).as(opened.getResponse().getContentAsString()).isEqualTo(201);
+        assertThat(licences.onPaid("LR-" + body(opened).get("id").asString().toUpperCase())).isTrue();
+        JsonNode licence = body(getAs("/v1/licences?trafficFileNumber=" + file, officer())).get("items").get(0);
+        assertThat(licence.get("expiresOn").asString()).as("never past the residency (DL-062)")
+                .isEqualTo(residency.toString());
+        assertThat(licence.get("classes").get(0).get("automaticOnly").asBoolean()).isFalse();
+
+        String other = newFile();
+        String reversed = transferred(other, classCode, "MANUAL", "IT_LIC");
+        JsonNode r = body(postAs("/v1/examination-transfers/" + reversed + "/reversal",
+                Map.of("reason", "recorded in error"), supervisor()));
+        assertThat(r.get("status").asString()).isEqualTo("REVERSED");
+        assertThat(code(postAs("/v1/licence-issues", issue(other, "IT_LIC", "CITIZEN", null, null, reversed),
+                officer()))).isEqualTo("TRANSFER_NOT_OPEN");
+        assertThat(code(postAs("/v1/licence-issues", issue(other, "IT_LIC", "CITIZEN", null, null, transfer),
+                officer()))).isEqualTo("TRANSFER_NOT_OPEN");
+        assertThat(db.sql("select count(*) from event_outbox where event_type = 'itms.licensing.transfer-reversed'")
+                .query(Long.class).single()).isGreaterThanOrEqualTo(1);
     }
 }

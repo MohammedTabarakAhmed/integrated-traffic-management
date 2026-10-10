@@ -145,7 +145,11 @@ public class LicenceClassService {
     @Transactional(readOnly = true)
     public ResolvedRule rule(String classCode, String customerCategory, LocalDate day, Caller caller) {
         require(caller, READ);
-        LocalDate on = day == null ? today(clock.instant()) : day;
+        return ruleOn(classCode, customerCategory, day == null ? today(clock.instant()) : day);
+    }
+
+    /** {@link #rule} for licensing's own commands, which checked their own permissions. */
+    ResolvedRule ruleOn(String classCode, String customerCategory, LocalDate on) {
         LicenceClassVersion version = versionInForce(classCode, on);
         return new ResolvedRule(version, version.spec().ruleFor(customerCategory).orElseThrow(() ->
                 new DomainException(DomainException.Kind.NOT_FOUND, "CLASS_RULE_NOT_FOUND",

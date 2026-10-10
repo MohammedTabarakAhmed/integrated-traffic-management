@@ -5,6 +5,7 @@ import gov.itms.licensing.domain.Channel;
 import gov.itms.licensing.domain.DomainException;
 import gov.itms.licensing.domain.LicenceNumberRange;
 import gov.itms.platform.audit.AuditRecorder;
+import gov.itms.platform.security.CurrentActor;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -140,6 +141,12 @@ public class LicenceNumberService {
      */
     @Transactional
     public UsedNumber allocate(String region, String allocatedTo) {
+        return allocate(region, allocatedTo, null);
+    }
+
+    /** {@link #allocate(String, String)} audited as {@code as} (a system actor, for work driven by events). */
+    @Transactional
+    public UsedNumber allocate(String region, String allocatedTo, CurrentActor as) {
         ranges.lockRegion(region);
         for (LicenceNumberRange candidate : ranges.activeInRegion(region)) {
             if (!candidate.hasNumbersLeft()) {
@@ -160,7 +167,11 @@ public class LicenceNumberService {
             after.put("region", region);
             after.put("rangeId", range.id().toString());
             after.put("allocatedTo", allocatedTo);
-            audit.record("LICENCE_NUMBER_ALLOCATED", ENTITY, range.id().toString(), null, after, null);
+            if (as == null) {
+                audit.record("LICENCE_NUMBER_ALLOCATED", ENTITY, range.id().toString(), null, after, null);
+            } else {
+                audit.recordAs(as, "LICENCE_NUMBER_ALLOCATED", ENTITY, range.id().toString(), null, after, null);
+            }
             return used;
         }
         throw DomainException.conflict("LICENCE_NUMBERS_EXHAUSTED",

@@ -3,9 +3,14 @@ package gov.itms.licensing.api;
 import gov.itms.licensing.application.LicenceClassService;
 import gov.itms.licensing.application.LicenceNumberRepository;
 import gov.itms.licensing.application.LicenceNumberService;
+import gov.itms.licensing.application.LicenceRepository;
+import gov.itms.licensing.application.LicenceService;
 import gov.itms.licensing.domain.Channel;
+import gov.itms.licensing.domain.ExaminationTransfer;
+import gov.itms.licensing.domain.Licence;
 import gov.itms.licensing.domain.LicenceClassVersion;
 import gov.itms.licensing.domain.LicenceNumberRange;
+import gov.itms.licensing.domain.LicenceRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -13,6 +18,7 @@ import jakarta.validation.constraints.Size;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /** Request/response shapes of {@code licensing-service.v1.yaml}. */
@@ -117,6 +123,89 @@ final class ApiModels {
         static UsedNumberDto of(LicenceNumberRepository.UsedNumber u) {
             return new UsedNumberDto(u.licenceNumber(), u.rangeId(), u.region(), u.number(), u.allocatedAt(),
                     u.allocatedTo());
+        }
+    }
+
+    record TransferRequest(@NotBlank String examinationFileRef, @NotBlank String trafficFileNumber,
+                           @NotBlank String classCode, @NotNull ExaminationTransfer.Gearbox gearbox,
+                           @NotNull LocalDate passedOn, @NotBlank String region) {
+
+        ExaminationTransfer.Spec toDomain() {
+            return new ExaminationTransfer.Spec(examinationFileRef, trafficFileNumber, classCode, gearbox, passedOn,
+                    region);
+        }
+    }
+
+    record TransferDto(UUID id, String examinationFileRef, String trafficFileNumber, String classCode,
+                       ExaminationTransfer.Gearbox gearbox, LocalDate passedOn, String region,
+                       ExaminationTransfer.Status status, UUID licenceId, Instant receivedAt,
+                       String reversalReason, Instant changedAt) {
+        static TransferDto of(ExaminationTransfer t) {
+            ExaminationTransfer.Spec s = t.spec();
+            return new TransferDto(t.id(), s.examinationFileRef(), s.trafficFileNumber(), s.classCode(), s.gearbox(),
+                    s.passedOn(), s.region(), t.status(), t.licenceId(), t.receivedAt(), t.reversalReason(),
+                    t.changedAt());
+        }
+    }
+
+    record ConditionRequest(@NotBlank String code, @Size(max = 200) String note) {
+    }
+
+    record IssueRequest(@NotBlank String trafficFileNumber, @NotBlank String region,
+                        @NotNull @Size(min = 1, max = 10) List<@NotNull UUID> transferIds,
+                        @NotBlank String customerCategory, LocalDate residencyExpiresOn,
+                        @Size(max = 20) List<@NotNull @Valid ConditionRequest> conditions) {
+
+        LicenceService.IssueSpec toDomain(LocalDate today) {
+            return new LicenceService.IssueSpec(trafficFileNumber, region, transferIds, customerCategory,
+                    residencyExpiresOn, conditions == null ? List.of() : conditions.stream()
+                    .map(c -> new Licence.Condition(c.code(), c.note(), today)).toList());
+        }
+    }
+
+    record AddConditionRequest(@NotBlank String code, @Size(max = 200) String note,
+                               @NotBlank @Size(min = 3, max = 500) String reason) {
+    }
+
+    record RequestDto(UUID id, LicenceRequest.Kind kind, LicenceRequest.Status status, UUID licenceId,
+                      String trafficFileNumber, String region, UUID payableId, long amountMinor, String currency,
+                      List<UUID> transferIds, Instant requestedAt, Instant completedAt) {
+        static RequestDto of(LicenceRequest r) {
+            return new RequestDto(r.id(), r.kind(), r.status(), r.licenceId(), r.trafficFileNumber(), r.region(),
+                    r.payableId(), r.amountMinor(), r.currency(), r.transferIds(), r.requestedAt(), r.completedAt());
+        }
+    }
+
+    record LicenceClassDto(String classCode, UUID classVersionId, LocalDate issuedOn, Licence.ClassStatus status,
+                           boolean automaticOnly) {
+        static LicenceClassDto of(Licence.LicenceClass c) {
+            return new LicenceClassDto(c.classCode(), c.classVersionId(), c.issuedOn(), c.status(), c.automaticOnly());
+        }
+    }
+
+    record ConditionDto(String code, String note, LocalDate since) {
+        static ConditionDto of(Licence.Condition c) {
+            return new ConditionDto(c.code(), c.note(), c.since());
+        }
+    }
+
+    record LicenceDto(UUID id, String licenceNumber, String trafficFileNumber, String region,
+                      String customerCategory, String status, LocalDate issuedOn, LocalDate expiresOn,
+                      LocalDate probationUntil, boolean probationary, LocalDate residencyExpiresOn,
+                      LocalDate suspendedUntil, List<LicenceClassDto> classes, List<ConditionDto> conditions,
+                      long version) {
+        static LicenceDto of(Licence l, LocalDate today) {
+            return new LicenceDto(l.id(), l.licenceNumber(), l.trafficFileNumber(), l.region(),
+                    l.customerCategory(), l.statusOn(today), l.issuedOn(), l.expiresOn(), l.probationUntil(),
+                    l.probationaryOn(today), l.residencyExpiresOn(), l.suspendedUntil(),
+                    l.classes().stream().map(LicenceClassDto::of).toList(),
+                    l.conditions().stream().map(ConditionDto::of).toList(), l.version());
+        }
+    }
+
+    record HistoryDto(String event, String actorId, Map<String, Object> detail, Instant at) {
+        static HistoryDto of(LicenceRepository.HistoryEntry h) {
+            return new HistoryDto(h.event(), h.actorId(), h.detail(), h.at());
         }
     }
 

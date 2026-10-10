@@ -1,6 +1,8 @@
 package gov.itms.licensing.api;
 
 import gov.itms.platform.web.Problems;
+import gov.itms.licensing.application.EligibilityBlockedException;
+import gov.itms.licensing.application.Ports;
 import gov.itms.licensing.domain.DomainException;
 import org.springframework.context.MessageSource;
 import org.springframework.context.i18n.LocaleContextHolder;
@@ -12,6 +14,8 @@ import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Maps domain rule violations to problem+json with a plain-language message in the caller's language (CH-053,
@@ -40,6 +44,28 @@ class DomainExceptionAdvice {
         String detail = messages.getMessage("problem." + e.code(), e.args(), e.getMessage(),
                 LocaleContextHolder.getLocale());
         return Problems.of(status, e.code(), detail, e.requirementRefs());
+    }
+
+    /**
+     * Holds block the transaction (DL-050, CC-032): {@code detail} joins every reason in plain language and
+     * {@code blocks} lists them; the first block's next step is also given as {@code nextStep}.
+     */
+    @ExceptionHandler(EligibilityBlockedException.class)
+    ProblemDetail eligibilityBlocked(EligibilityBlockedException e) {
+        String detail = e.blocks().stream().map(Ports.Eligibility.Block::message).collect(Collectors.joining(" "));
+        ProblemDetail problem = Problems.of(HttpStatus.UNPROCESSABLE_CONTENT, e.code(), detail, e.requirementRefs());
+        problem.setProperty("nextStep", e.blocks().get(0).nextStep());
+        problem.setProperty("blocks", e.blocks().stream().map(b -> Map.of("reasonCode", b.reasonCode(),
+                "nextStep", b.nextStep(), "message", b.message())).toList());
+        return problem;
+    }
+
+    /** fees-service, payment-service or hold-eligibility-service did not answer: nothing was changed. */
+    @ExceptionHandler(Ports.UnavailableException.class)
+    ProblemDetail unavailable(Ports.UnavailableException e) {
+        String detail = messages.getMessage("problem." + e.code(), null, e.getMessage(),
+                LocaleContextHolder.getLocale());
+        return Problems.of(HttpStatus.SERVICE_UNAVAILABLE, e.code(), detail, List.of("DL-050", "CC-032"));
     }
 
     /** Two decisions on the same record crossed; the second must re-read (DAT-002). */

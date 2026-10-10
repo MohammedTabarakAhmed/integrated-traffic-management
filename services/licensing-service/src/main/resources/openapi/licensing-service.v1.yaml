@@ -3,7 +3,7 @@ info:
   title: ITMS Licensing Service
   version: 1.0.0
   description: |
-    Driving licences (DL-020..DL-023, DL-050..DL-065). This version covers the licence class catalogue (slice 3.1) and licence number ranges (slice 3.2).
+    Driving licences (DL-020..DL-023, DL-050..DL-065). This version covers the licence class catalogue (slice 3.1), licence number ranges (slice 3.2) and licences issued from passed examination files (slice 3.3).
 
     Licence classes (DL-020, DL-062; BRD §6.2): a class (for example `LIGHT`) has rules per customer category —
     minimum age, optional maximum age, the required tests in order (test type codes of examination-service, DL-043),
@@ -33,6 +33,7 @@ security:
 tags:
   - name: Licence classes
   - name: Licence numbers
+  - name: Licences
 
 paths:
   /v1/licence-class-versions:
@@ -441,6 +442,327 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Problem' }
 
+  /v1/examination-transfers:
+    post:
+      tags: [Licences]
+      operationId: receiveExaminationTransfer
+      summary: Hand a passed examination file over to licensing (DL-036)
+      description: |
+        Sent by examination-service with its own account. One transfer per examination file and class (409
+        `TRANSFER_EXISTS`); the pass date may not lie in the future (422 `PASSED_IN_FUTURE`).
+      x-itms-permission: licensing.transfer.receive
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TransferRequest' }
+      responses:
+        '201':
+          description: Received
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Transfer' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [Licences]
+      operationId: listExaminationTransfers
+      summary: A person's examination transfers, newest first, in the caller's regions
+      x-itms-permission: licensing.licence.read
+      x-itms-scope: [region]
+      parameters:
+        - name: trafficFileNumber
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/Ref' }
+      responses:
+        '200':
+          description: Transfers
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransferCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+
+  /v1/examination-transfers/{transferId}:
+    get:
+      tags: [Licences]
+      operationId: getExaminationTransfer
+      summary: One examination transfer
+      x-itms-permission: licensing.licence.read
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/TransferId'
+      responses:
+        '200':
+          description: Transfer
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Transfer' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/examination-transfers/{transferId}/reversal:
+    post:
+      tags: [Licences]
+      operationId: reverseExaminationTransfer
+      summary: Reverse a transfer, with a reason, while no licence was issued from it (DL-036)
+      description: |
+        Refused when the transfer was used or reversed already (409 `TRANSFER_NOT_OPEN`) or a licence request waiting
+        for payment uses it (409 `TRANSFER_IN_REQUEST`). Publishes `itms.licensing.transfer-reversed`.
+      x-itms-permission: licensing.transfer.reverse
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/TransferId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RejectRequest' }
+      responses:
+        '200':
+          description: Reversed
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Transfer' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/licence-issues:
+    post:
+      tags: [Licences]
+      operationId: requestLicenceIssue
+      summary: Ask for a new licence from passed examination files (DL-050)
+      description: |
+        Checks, before any fee: every transfer is open and of this person, one per class (422
+        `LICENCE_CLASS_DUPLICATE`); the person holds no licence in force (409 `LICENCE_EXISTS`, use add class, DL-053)
+        and has no other issue request waiting (409 `REQUEST_OPEN`); the conditions are in the list (422
+        `CONDITION_UNKNOWN`); each class has a rule in force for the customer category (404 `CLASS_NOT_IN_FORCE`,
+        `CLASS_RULE_NOT_FOUND`); a residency end date is given when a class links validity to it (422
+        `RESIDENCY_EXPIRY_REQUIRED`, `RESIDENCY_ENDED`); no hold blocks service `LIC_ISSUE` for the traffic file (422
+        `ELIGIBILITY_BLOCKED` with `blocks` and `nextStep`). Then the fee is quoted at fees-service (quantity `CLASSES`)
+        and the payable registered at payment-service (item reference `LR-<request id>`). When payment-service
+        confirms payment, the licence is issued: the next number of the region (DL-061), one class per transfer with
+        its own issue date (DL-021), automatic-only when tested in an automatic vehicle of a class recording the
+        gearbox (DL-022), the conditions (DL-023), the shortest validity of its classes for the customer category and
+        never past a linked residency (DL-062), probation for a first licence (DL-050); `itms.licence.issued` is
+        published. 503 when fees-service, payment-service or hold-eligibility-service cannot be reached.
+      x-itms-permission: licensing.licence.issue
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IssueRequest' }
+      responses:
+        '201':
+          description: Request opened; waits for payment
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LicenceRequest' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/licence-requests/{requestId}:
+    get:
+      tags: [Licences]
+      operationId: getLicenceRequest
+      summary: A paid licensing request and whether it was completed
+      x-itms-permission: licensing.licence.read
+      x-itms-scope: [region]
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LicenceRequest' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/licences:
+    get:
+      tags: [Licences]
+      operationId: listLicences
+      summary: A person's licences (newest first) or the licence with a number; give exactly one of the two
+      x-itms-permission: licensing.licence.read
+      x-itms-scope: [region]
+      parameters:
+        - name: trafficFileNumber
+          in: query
+          schema: { $ref: '#/components/schemas/Ref' }
+        - name: licenceNumber
+          in: query
+          schema: { type: string, maxLength: 20 }
+      responses:
+        '200':
+          description: Licences
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LicenceCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/licences/{licenceId}:
+    get:
+      tags: [Licences]
+      operationId: getLicence
+      summary: One licence; an active licence past its expiry reads EXPIRED
+      x-itms-permission: licensing.licence.read
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/LicenceId'
+      responses:
+        '200':
+          description: Licence
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Licence' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/licences/{licenceId}/history:
+    get:
+      tags: [Licences]
+      operationId: getLicenceHistory
+      summary: What happened to a licence, oldest first
+      x-itms-permission: licensing.licence.read
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/LicenceId'
+      responses:
+        '200':
+          description: History
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HistoryCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/licence-condition-codes:
+    get:
+      tags: [Licences]
+      operationId: listLicenceConditionCodes
+      summary: The licence conditions that may be recorded (DL-023; configuration)
+      x-itms-permission: licensing.licence.read
+      x-itms-scope: national
+      responses:
+        '200':
+          description: Codes
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CodeCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+
+  /v1/licences/{licenceId}/conditions:
+    post:
+      tags: [Licences]
+      operationId: addLicenceCondition
+      summary: Record a condition on a licence, with a reason (DL-023)
+      description: |
+        Refused for an unknown code (422 `CONDITION_UNKNOWN`), a condition already recorded (409 `CONDITION_EXISTS`) or
+        a cancelled or surrendered licence (409 `LICENCE_ENDED`). Publishes `itms.licence.changed`.
+      x-itms-permission: licensing.licence.condition
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/LicenceId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AddConditionRequest' }
+      responses:
+        '200':
+          description: Recorded
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Licence' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/licences/{licenceId}/conditions/{code}/removal:
+    post:
+      tags: [Licences]
+      operationId: removeLicenceCondition
+      summary: Remove a condition from a licence, with a reason (DL-023)
+      x-itms-permission: licensing.licence.condition
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/LicenceId'
+        - name: code
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/Code' }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RejectRequest' }
+      responses:
+        '200':
+          description: Removed
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Licence' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -466,6 +788,16 @@ components:
       schema: { type: string, format: date }
     RangeId:
       name: rangeId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    TransferId:
+      name: transferId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    LicenceId:
+      name: licenceId
       in: path
       required: true
       schema: { type: string, format: uuid }
@@ -677,6 +1009,171 @@ components:
       required: [items]
       properties:
         items: { type: array, items: { $ref: '#/components/schemas/UsedNumber' } }
+    Ref:
+      type: string
+      pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{0,59}$'
+    Code:
+      type: string
+      pattern: '^[A-Z][A-Z0-9_]{0,39}$'
+    Gearbox:
+      type: string
+      enum: [MANUAL, AUTOMATIC]
+    TransferStatus:
+      type: string
+      enum: [TRANSFERRED, REVERSED, USED]
+    TransferRequest:
+      type: object
+      additionalProperties: false
+      required: [examinationFileRef, trafficFileNumber, classCode, gearbox, passedOn, region]
+      properties:
+        examinationFileRef: { $ref: '#/components/schemas/Ref' }
+        trafficFileNumber: { $ref: '#/components/schemas/Ref' }
+        classCode: { $ref: '#/components/schemas/ClassCode' }
+        gearbox: { $ref: '#/components/schemas/Gearbox' }
+        passedOn: { type: string, format: date }
+        region: { $ref: '#/components/schemas/Region' }
+    Transfer:
+      type: object
+      additionalProperties: false
+      required: [id, examinationFileRef, trafficFileNumber, classCode, gearbox, passedOn, region, status, receivedAt]
+      properties:
+        id: { type: string, format: uuid }
+        examinationFileRef: { type: string }
+        trafficFileNumber: { type: string }
+        classCode: { type: string }
+        gearbox: { $ref: '#/components/schemas/Gearbox' }
+        passedOn: { type: string, format: date }
+        region: { type: string }
+        status: { $ref: '#/components/schemas/TransferStatus' }
+        licenceId: { oneOf: [ { type: string, format: uuid }, { type: 'null' } ] }
+        receivedAt: { type: string, format: date-time }
+        reversalReason: { oneOf: [ { type: string }, { type: 'null' } ] }
+        changedAt: { oneOf: [ { type: string, format: date-time }, { type: 'null' } ] }
+    TransferCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Transfer' } }
+    ConditionRequest:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        code: { $ref: '#/components/schemas/Code' }
+        note: { oneOf: [ { type: string, maxLength: 200 }, { type: 'null' } ] }
+    IssueRequest:
+      type: object
+      additionalProperties: false
+      required: [trafficFileNumber, region, transferIds, customerCategory]
+      properties:
+        trafficFileNumber: { $ref: '#/components/schemas/Ref' }
+        region: { $ref: '#/components/schemas/Region' }
+        transferIds:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items: { type: string, format: uuid }
+        customerCategory: { $ref: '#/components/schemas/CustomerCategory' }
+        residencyExpiresOn: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
+        conditions:
+          oneOf:
+            - { type: array, maxItems: 20, items: { $ref: '#/components/schemas/ConditionRequest' } }
+            - { type: 'null' }
+    AddConditionRequest:
+      type: object
+      additionalProperties: false
+      required: [code, reason]
+      properties:
+        code: { $ref: '#/components/schemas/Code' }
+        note: { oneOf: [ { type: string, maxLength: 200 }, { type: 'null' } ] }
+        reason: { type: string, minLength: 3, maxLength: 500 }
+    RequestKind:
+      type: string
+      enum: [ISSUE]
+    LicenceRequest:
+      type: object
+      additionalProperties: false
+      required: [id, kind, status, trafficFileNumber, region, amountMinor, transferIds, requestedAt]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { $ref: '#/components/schemas/RequestKind' }
+        status: { type: string, enum: [AWAITING_PAYMENT, COMPLETED] }
+        licenceId: { oneOf: [ { type: string, format: uuid }, { type: 'null' } ] }
+        trafficFileNumber: { type: string }
+        region: { type: string }
+        payableId: { oneOf: [ { type: string, format: uuid }, { type: 'null' } ] }
+        amountMinor: { type: integer, format: int64 }
+        currency: { oneOf: [ { type: string }, { type: 'null' } ] }
+        transferIds: { type: array, items: { type: string, format: uuid } }
+        requestedAt: { type: string, format: date-time }
+        completedAt: { oneOf: [ { type: string, format: date-time }, { type: 'null' } ] }
+    LicenceClass:
+      type: object
+      additionalProperties: false
+      required: [classCode, classVersionId, issuedOn, status, automaticOnly]
+      properties:
+        classCode: { type: string }
+        classVersionId: { type: string, format: uuid }
+        issuedOn: { type: string, format: date }
+        status: { type: string, enum: [ACTIVE, SUSPENDED, CANCELLED] }
+        automaticOnly: { type: boolean, description: Tested in an automatic vehicle (DL-022) }
+    Condition:
+      type: object
+      additionalProperties: false
+      required: [code, since]
+      properties:
+        code: { type: string }
+        note: { oneOf: [ { type: string }, { type: 'null' } ] }
+        since: { type: string, format: date }
+    Licence:
+      type: object
+      additionalProperties: false
+      required: [id, licenceNumber, trafficFileNumber, region, customerCategory, status, issuedOn, expiresOn,
+                 probationary, classes, conditions, version]
+      properties:
+        id: { type: string, format: uuid }
+        licenceNumber: { type: string }
+        trafficFileNumber: { type: string }
+        region: { type: string }
+        customerCategory: { type: string }
+        status: { type: string, enum: [ACTIVE, EXPIRED, SUSPENDED, CANCELLED, SURRENDERED] }
+        issuedOn: { type: string, format: date }
+        expiresOn: { type: string, format: date }
+        probationUntil: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
+        probationary: { type: boolean }
+        residencyExpiresOn: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
+        suspendedUntil: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
+        classes: { type: array, items: { $ref: '#/components/schemas/LicenceClass' } }
+        conditions: { type: array, items: { $ref: '#/components/schemas/Condition' } }
+        version: { type: integer, format: int64 }
+    LicenceCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Licence' } }
+    HistoryEntry:
+      type: object
+      additionalProperties: false
+      required: [event, actorId, detail, at]
+      properties:
+        event: { type: string }
+        actorId: { type: string }
+        detail: { type: object }
+        at: { type: string, format: date-time }
+    HistoryCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/HistoryEntry' } }
+    CodeCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { type: string } }
     Problem:
       type: object
       required: [status, code]
@@ -690,3 +1187,17 @@ components:
         correlationId: { type: string }
         requirementRefs: { type: array, items: { type: string } }
         errors: { type: array, items: { type: object } }
+        nextStep:
+          type: string
+          description: '`ELIGIBILITY_BLOCKED` only (DL-050): the next step of the first reason, as a code'
+        blocks:
+          type: array
+          description: '`ELIGIBILITY_BLOCKED` only (DL-050): every reason the transaction is blocked, as the customer may see it'
+          items:
+            type: object
+            additionalProperties: false
+            required: [reasonCode, nextStep, message]
+            properties:
+              reasonCode: { type: string, description: 'A disclosed hold type code, or `RESTRICTED`' }
+              nextStep: { type: string }
+              message: { type: string }

@@ -45,6 +45,35 @@ itms:
     iam:
       base-url: ${ITMS_IAM_URL:}
       cache-ttl: ${ITMS_IAM_CACHE_TTL:60s}
+  # Driving licences (DL-021…023, DL-050). BRD default probation 2 years (DL-050). One fees-service and
+  # hold-eligibility-service code per paid transaction; condition codes are the list DL-023 gives examples of (Q-076).
+  licensing:
+    probation-months: ${ITMS_LICENSING_PROBATION_MONTHS:24}
+    consumer-enabled: ${ITMS_LICENSING_CONSUMER_ENABLED:false}
+    payment-topic: ${ITMS_LICENSING_PAYMENT_TOPIC:itms.payment-service.events.v1}
+    service-codes:
+      "[ISSUE]": LIC_ISSUE
+    condition-codes: ${ITMS_LICENSING_CONDITION_CODES:CORRECTIVE_LENSES,HEARING_AID,ADAPTED_VEHICLE}
+  # Calls to other services with this service's own client-credentials account (ADR-034).
+  clients:
+    fees:
+      base-url: ${ITMS_FEES_URL:http://localhost:8086}
+      token-uri: ${ITMS_OIDC_TOKEN_URI:http://localhost:8180/realms/itms/protocol/openid-connect/token}
+      client-id: ${ITMS_SERVICE_CLIENT_ID:itms-licensing-service}
+      client-secret: ${ITMS_SERVICE_CLIENT_SECRET:}
+      timeout: ${ITMS_FEES_TIMEOUT:3s}
+    payments:
+      base-url: ${ITMS_PAYMENTS_URL:http://localhost:8094}
+      token-uri: ${ITMS_OIDC_TOKEN_URI:http://localhost:8180/realms/itms/protocol/openid-connect/token}
+      client-id: ${ITMS_SERVICE_CLIENT_ID:itms-licensing-service}
+      client-secret: ${ITMS_SERVICE_CLIENT_SECRET:}
+      timeout: ${ITMS_PAYMENTS_TIMEOUT:3s}
+    holds:
+      base-url: ${ITMS_HOLDS_URL:http://localhost:8084}
+      token-uri: ${ITMS_OIDC_TOKEN_URI:http://localhost:8180/realms/itms/protocol/openid-connect/token}
+      client-id: ${ITMS_SERVICE_CLIENT_ID:itms-licensing-service}
+      client-secret: ${ITMS_SERVICE_CLIENT_SECRET:}
+      timeout: ${ITMS_HOLDS_TIMEOUT:3s}
   # API_SPECIFICATION §2, ADR-032: submitting and deciding licence class versions need an Idempotency-Key; a retry with
   # the same key and request replays the stored response.
   idempotency:
@@ -56,6 +85,11 @@ itms:
       - /v1/licence-number-ranges
       - /v1/licence-number-ranges/*/approvals
       - /v1/licence-number-ranges/*/rejections
+      - /v1/examination-transfers
+      - /v1/examination-transfers/*/reversal
+      - /v1/licence-issues
+      - /v1/licences/*/conditions
+      - /v1/licences/*/conditions/*/removal
     retention: ${ITMS_IDEMPOTENCY_RETENTION:24h}
     lock-timeout: ${ITMS_IDEMPOTENCY_LOCK_TIMEOUT:30s}
     cleanup-interval: ${ITMS_IDEMPOTENCY_CLEANUP_INTERVAL:15m}

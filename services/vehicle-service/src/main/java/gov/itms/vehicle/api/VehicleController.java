@@ -3,6 +3,7 @@ package gov.itms.vehicle.api;
 import gov.itms.vehicle.application.Ports;
 import gov.itms.vehicle.application.VehicleService;
 import gov.itms.vehicle.domain.Plates;
+import gov.itms.vehicle.domain.Records;
 import gov.itms.vehicle.domain.Registration;
 import gov.itms.vehicle.domain.Vehicle;
 import jakarta.validation.Valid;
@@ -54,8 +55,9 @@ class VehicleController {
         }
     }
 
-    record CreateRequest(@NotBlank @Size(max = 17) String vin, @NotNull @Valid SpecDto spec,
-                         @NotBlank String ownerFileNumber, @NotBlank String region) {
+    /** {@code spec} and {@code vin} may be left out when {@code customsCertificateNo} pre-fills them (VL-002). */
+    record CreateRequest(@Size(max = 17) String vin, @Valid SpecDto spec, @NotBlank String ownerFileNumber,
+                         @NotBlank String region, @Size(max = 60) String customsCertificateNo) {
     }
 
     record VehicleDto(String vin, SpecDto spec, String ownerFileNumber, String region, Vehicle.Status status,
@@ -80,14 +82,17 @@ class VehicleController {
         }
     }
 
-    record RegistrationRequestBody(@NotBlank String customerCategory) {
+    /** {@code plateId}: the owner's own retained number (VL-035); {@code cardDelivery}: VL-022. */
+    record RegistrationRequestBody(@NotBlank String customerCategory, UUID plateId,
+                                   Records.Delivery cardDelivery, @Size(max = 300) String deliveryAddress) {
     }
 
     record RequestDto(UUID id, Registration.Kind kind, Registration.Status status, UUID payableId, long amountMinor,
-                      String currency, LocalDate newExpiry, Instant createdAt) {
+                      String currency, LocalDate newExpiry, Instant createdAt, Map<String, String> details,
+                      String payerFileNumber) {
         static RequestDto of(Registration.Request r) {
             return new RequestDto(r.id(), r.kind(), r.status(), r.payableId(), r.amountMinor(), r.currency(),
-                    r.newExpiry(), r.createdAt());
+                    r.newExpiry(), r.createdAt(), r.payload(), r.payerFile());
         }
     }
 
@@ -121,8 +126,8 @@ class VehicleController {
     @PostMapping("/v1/vehicles")
     @PreAuthorize("hasAuthority('vehicle.create')")
     ResponseEntity<VehicleDto> create(@Valid @RequestBody CreateRequest body) {
-        Vehicle v = vehicles.create(body.vin(), body.spec().toDomain(), body.ownerFileNumber(), body.region(),
-                callers.current());
+        Vehicle v = vehicles.create(body.vin(), body.spec() == null ? null : body.spec().toDomain(),
+                body.ownerFileNumber(), body.region(), body.customsCertificateNo(), callers.current());
         return ResponseEntity.created(URI.create("/v1/vehicles/" + v.vin())).body(VehicleDto.of(v, today()));
     }
 
@@ -149,7 +154,8 @@ class VehicleController {
     @PostMapping("/v1/vehicles/{vin}/registrations")
     @PreAuthorize("hasAuthority('vehicle.register')")
     ResponseEntity<RequestDto> register(@PathVariable String vin, @Valid @RequestBody RegistrationRequestBody body) {
-        Registration.Request r = vehicles.startFirstRegistration(vin, body.customerCategory(), callers.current());
+        Registration.Request r = vehicles.startFirstRegistration(vin, body.customerCategory(), body.plateId(),
+                body.cardDelivery(), body.deliveryAddress(), callers.current());
         return ResponseEntity.status(201).body(RequestDto.of(r));
     }
 

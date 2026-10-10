@@ -69,6 +69,39 @@ itms:
       - { code: DIPLOMATIC, validity-months: 12, inspection-exempt-years: 3, plate-category: DIPLOMATIC }
       - { code: CLASSIC, validity-months: 12, inspection-exempt-years: 0, plate-category: CLASSIC }
       - { code: HEAVY_EQUIPMENT, validity-months: 12, inspection-exempt-years: 0, plate-category: HEAVY }
+    # Increment 2 transactions (ADR-059). BRD defaults: reservation 10 working days (VL-033), retention 12 months
+    # (VL-039). Weekend, trial plate and permit periods, required approvals are interim answers (Q-075).
+    services:
+      reservation-working-days: ${ITMS_VEHICLES_RESERVATION_WORKING_DAYS:10}
+      weekend: ${ITMS_VEHICLES_WEEKEND:FRIDAY,SATURDAY}
+      retention-months: ${ITMS_VEHICLES_RETENTION_MONTHS:12}
+      trial-plate-category: ${ITMS_VEHICLES_TRIAL_PLATE_CATEGORY:TRIAL}
+      trial-plate-max-days: ${ITMS_VEHICLES_TRIAL_PLATE_MAX_DAYS:30}
+      permit-max-days: ${ITMS_VEHICLES_PERMIT_MAX_DAYS:90}
+      require-customs-certificate: ${ITMS_VEHICLES_REQUIRE_CUSTOMS_CERTIFICATE:true}
+      auction-financial-item: ${ITMS_VEHICLES_AUCTION_FINANCIAL_ITEM:REV_PLATE_AUCTION}
+      auction-beneficiary: ${ITMS_VEHICLES_AUCTION_BENEFICIARY:AUTHORITY}
+      currency: ${ITMS_FEES_CURRENCY:XTS}
+      expiry:
+        enabled: ${ITMS_VEHICLES_EXPIRY_ENABLED:true}
+        interval: ${ITMS_VEHICLES_EXPIRY_INTERVAL:15m}
+      # fees-service service code per paid transaction kind.
+      fees:
+        "[TRANSFER]": VEH_TRANSFER
+        "[CHANGE]": VEH_CHANGE
+        "[CARD]": VEH_CARD_REPLACEMENT
+        "[DEREGISTER]": VEH_DEREGISTER
+        "[CERTIFICATE]": VEH_CERTIFICATE
+        "[TEMP_PERMIT]": VEH_TEMP_PERMIT
+        "[PLATE_RESERVATION]": PLATE_RESERVATION
+        "[PLATE_RETENTION]": PLATE_RETENTION
+        "[PLATE_SALE]": PLATE_SALE
+        "[PLATE_EXCHANGE]": PLATE_EXCHANGE
+        "[PLATE_REPLACEMENT]": PLATE_REPLACEMENT
+        "[TRIAL_PLATE]": TRIAL_PLATE
+      approvals:
+        - { category: PUBLIC_TRANSPORT, kind: PUBLIC_DECLARATION }
+        - { body-type: CASH_TRANSPORT, kind: SECURITY_INSPECTION }
   # Calls to other services with this service's own client-credentials account (ADR-034).
   clients:
     fees:
@@ -97,6 +130,42 @@ itms:
       - /v1/vehicles
       - /v1/vehicles/*/registrations
       - /v1/vehicles/*/renewals
+      - /v1/customs-certificates
+      - /v1/dealers/*/handovers
+      - /v1/dealers/*/registrations
+      - /v1/fleets/*/driver-assignments
+      - /v1/fleets/*/renewals
+      - /v1/plate-auctions
+      - /v1/plate-auctions/*/bids
+      - /v1/plate-auctions/*/close
+      - /v1/plate-orders
+      - /v1/plate-orders/*/status
+      - /v1/plate-reservations
+      - /v1/plates/*/loss-reports
+      - /v1/plates/*/retention-renewals
+      - /v1/plates/*/sales
+      - /v1/temporary-permits
+      - /v1/temporary-permits/*/close
+      - /v1/trial-plates
+      - /v1/trial-plates/*/cancel
+      - /v1/trial-plates/*/exchange
+      - /v1/vehicles/*/approvals
+      - /v1/vehicles/*/approvals/*/decision
+      - /v1/vehicles/*/bans
+      - /v1/vehicles/*/bans/*/lift
+      - /v1/vehicles/*/card-replacements
+      - /v1/vehicles/*/cards/*/status
+      - /v1/vehicles/*/certificates
+      - /v1/vehicles/*/changes
+      - /v1/vehicles/*/deregistrations
+      - /v1/vehicles/*/exit-permits
+      - /v1/vehicles/*/insurance-recovery-certificates
+      - /v1/vehicles/*/mortgages
+      - /v1/vehicles/*/mortgages/*/release
+      - /v1/vehicles/*/mortgages/*/transfer-consents
+      - /v1/vehicles/*/plate-exchanges
+      - /v1/vehicles/*/transfers
+      - /v1/vehicles/*/transfers/*/consent
     retention: ${ITMS_IDEMPOTENCY_RETENTION:24h}
     lock-timeout: ${ITMS_IDEMPOTENCY_LOCK_TIMEOUT:30s}
     cleanup-interval: ${ITMS_IDEMPOTENCY_CLEANUP_INTERVAL:15m}

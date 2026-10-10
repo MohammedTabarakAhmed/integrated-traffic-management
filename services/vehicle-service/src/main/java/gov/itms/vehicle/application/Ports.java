@@ -1,6 +1,7 @@
 package gov.itms.vehicle.application;
 
 import gov.itms.vehicle.domain.Plates;
+import gov.itms.vehicle.domain.Records;
 import gov.itms.vehicle.domain.Registration;
 import gov.itms.vehicle.domain.Vehicle;
 import java.time.Instant;
@@ -66,6 +67,137 @@ public final class Ports {
         Optional<Registration.Request> openRequest(UUID vehicleId);
 
         void updateRequest(Registration.Request request);
+    }
+
+    /** The vehicle file's other records and the plate trade (Increment 2; ADR-059). */
+    public interface RecordsRepository {
+
+        // vehicles
+        List<Vehicle> byOwner(String ownerFile, int limit);
+
+        // customs and dealer certificates (VL-002)
+        boolean insertCustoms(Records.CustomsCertificate certificate);
+
+        Optional<Records.CustomsCertificate> customs(String certificateNo);
+
+        void customsUsed(String certificateNo, UUID vehicleId);
+
+        // bans (VL-006)
+        void insertBan(Records.Ban ban);
+
+        void updateBan(Records.Ban ban);
+
+        Optional<Records.Ban> ban(UUID id);
+
+        List<Records.Ban> bans(UUID vehicleId);
+
+        // approvals (VL-018, VL-019)
+        void insertApproval(Records.Approval approval);
+
+        void updateApproval(Records.Approval approval);
+
+        Optional<Records.Approval> approval(UUID id);
+
+        List<Records.Approval> approvals(UUID vehicleId);
+
+        // certificates (VL-015, VL-017, VL-020)
+        String nextCertificateNumber(int year);
+
+        void insertCertificate(Records.Certificate certificate);
+
+        List<Records.Certificate> certificates(UUID vehicleId);
+
+        // mortgages (VL-021)
+        void insertMortgage(Records.Mortgage mortgage);
+
+        void updateMortgage(Records.Mortgage mortgage);
+
+        Optional<Records.Mortgage> mortgage(UUID id);
+
+        List<Records.Mortgage> activeMortgages(UUID vehicleId);
+
+        // cards (VL-014, VL-022)
+        int nextCardSerial(UUID vehicleId);
+
+        void insertCard(Records.Card card);
+
+        void updateCard(Records.Card card);
+
+        Optional<Records.Card> card(UUID id);
+
+        List<Records.Card> cards(UUID vehicleId);
+
+        // temporary permits (VL-016)
+        String nextPermitNumber(int year);
+
+        void insertPermit(Records.TemporaryPermit permit);
+
+        void updatePermit(Records.TemporaryPermit permit);
+
+        Optional<Records.TemporaryPermit> permit(UUID id);
+
+        // fleets (VL-026)
+        void endAssignment(UUID vehicleId, String by, Instant at);
+
+        void insertAssignment(Records.DriverAssignment assignment);
+
+        List<Records.DriverAssignment> assignments(String companyFile);
+
+        // plates (VL-033…VL-039)
+        Optional<Plates.Plate> livePlate(String seriesCode, long number);
+
+        List<Plates.Plate> platesHeldBy(String holderFile);
+
+        /** Live plates of {@code status} whose hold ended before {@code day}. */
+        List<Plates.Plate> holdsEndedBefore(Plates.Status status, LocalDate day, int limit);
+
+        void insertAuction(Plates.Auction auction);
+
+        void updateAuction(Plates.Auction auction);
+
+        Optional<Plates.Auction> auction(UUID id);
+
+        void insertLot(Plates.Lot lot);
+
+        void updateLot(Plates.Lot lot);
+
+        List<Plates.Lot> lots(UUID auctionId);
+
+        void insertBid(Plates.Bid bid);
+
+        Optional<Plates.Bid> highestBid(UUID auctionId, UUID plateId);
+
+        void insertOrderItem(Plates.OrderItem item);
+
+        List<Plates.OrderItem> pendingOrderItems(int limit);
+
+        void insertOrder(Plates.Order order, List<UUID> itemIds);
+
+        void updateOrder(Plates.Order order);
+
+        Optional<Plates.Order> order(UUID id);
+
+        List<Plates.OrderItem> orderItems(UUID orderId);
+
+        void itemSerial(UUID itemId, String serial);
+
+        void insertLoss(Plates.LossReport report);
+
+        void updateLoss(Plates.LossReport report);
+
+        Optional<Plates.LossReport> loss(UUID id);
+
+        void insertTrial(Plates.Trial trial);
+
+        void updateTrial(Plates.Trial trial);
+
+        Optional<Plates.Trial> trial(UUID id);
+
+        List<Plates.Trial> trialsEndedBefore(LocalDate day, int limit);
+
+        // requests
+        Optional<Registration.Request> openRequestFor(String subjectRef);
+
     }
 
     /** ICD-02: the insurers' policy query (VL-024). */

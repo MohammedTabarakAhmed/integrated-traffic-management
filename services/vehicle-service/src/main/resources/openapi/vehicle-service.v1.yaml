@@ -21,6 +21,14 @@ info:
     Plate series per region, plate category, colour code and design (VL-030); the next free standard number, skipping
     the series' premium numbers, is reserved for a first registration.
 
+    Increment 2 (ADR-059): customs/dealer certificates pre-fill vehicles (VL-002); banned vehicles (VL-006); transfer
+    of ownership with both parties' consent, fines, mortgage and buyer insurance (VL-012); change of details (VL-013);
+    card replacement, print and delivery (VL-014, VL-022); de-registration (VL-015); temporary entry/exit permits
+    (VL-016); insurance recovery and vehicle certificates (VL-017, VL-020); public vehicle declarations and
+    cash-transport security inspections (VL-018, VL-019); mortgages (VL-021); fleets (VL-026) and dealers (VL-027);
+    plate reservation, auctions, sale and exchange, factory orders, loss and replacement, trial plates and retention
+    (VL-033…VL-039). Every paid transaction is checked before its fee and completes on payment confirmation.
+
     The channel is the `X-Channel` header. Only GET/POST are used (INT-003).
 servers:
   - url: /
@@ -30,6 +38,8 @@ tags:
   - name: Vehicles
   - name: Registration
   - name: Plates
+  - name: Transactions
+  - name: Fleets
 
 paths:
   /v1/vehicles:
@@ -225,6 +235,1190 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
 
+  /v1/customs-certificates:
+    post:
+      tags: [Vehicles]
+      operationId: receiveCustomsCertificate
+      summary: Receive a customs clearance or dealer certificate from the feed (VL-002)
+      x-itms-permission: vehicle.customs.feed
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CustomsRequest' }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CustomsCertificate' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/customs-certificates/{certificateNo}:
+    get:
+      tags: [Vehicles]
+      operationId: getCustomsCertificate
+      summary: Read a received certificate to pre-fill a vehicle (VL-002)
+      x-itms-permission: vehicle.read
+      x-itms-scope: national
+      parameters:
+        - { name: certificateNo, in: path, required: true, schema: { type: string, pattern: '^[A-Z0-9][A-Z0-9-]{0,59}$' } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CustomsCertificate' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/vehicles/{vin}/bans:
+    post:
+      tags: [Vehicles]
+      operationId: banVehicle
+      summary: Ban a vehicle from use, e.g. total loss or security order (VL-006)
+      x-itms-permission: vehicle.ban.manage
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/Vin'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BanRequest' }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Ban' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/vehicles/{vin}/bans/{banId}/lift:
+    post:
+      tags: [Vehicles]
+      operationId: liftVehicleBan
+      summary: Lift a ban; never by who imposed it (VL-006)
+      x-itms-permission: vehicle.ban.manage
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/Vin'
+        - { name: banId, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LiftRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Ban' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/vehicles/{vin}/approvals:
+    post:
+      tags: [Vehicles]
+      operationId: submitVehicleApproval
+      summary: Submit a public vehicle declaration or cash-transport security inspection (VL-018, VL-019)
+      x-itms-permission: vehicle.service
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/Vin'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApprovalRequest' }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Approval' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/vehicles/{vin}/approvals/{approvalId}/decision:
+    post:
+      tags: [Vehicles]
+      operationId: decideVehicleApproval
+      summary: Approve or reject; never one's own submission (VL-018, VL-019)
+      x-itms-permission: vehicle.approve
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/Vin'
+        - { name: approvalId, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DecisionRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Approval' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/vehicles/{vin}/transfers:
+    post:
+      tags: [Transactions]
+      operationId: startTransfer
+      summary: Seller starts a transfer of ownership; waits for the buyer's consent (VL-012)
+      x-itms-permission: vehicle.service
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/Vin'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TransferRequest' }
+      responses:
+        '201': { $ref: '#/components/responses/Request' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/vehicles/{vin}/transfers/{requestId}/consent:
+    post:
+      tags: [Transactions]
+      operationId: consentTransfer
+      summary: Buyer consents; ban, mortgage, holds and insurance are checked, then the fee is asked (VL-012)
+      x-itms-permission: vehicle.service
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/Vin'
+        - { name: requestId, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200': { $ref: '#/components/responses/Request' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/vehicles/{vin}/changes:
+    post:
+      tags: [Transactions]
+      operationId: startChange
+      summary: Change colour, engine, body or use type after a passed inspection (VL-013)
+      x-itms-permission: vehicle.service
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/Vin'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChangeRequest' }
+      responses:
+        '201': { $ref: '#/components/responses/Request' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/vehicles/{vin}/card-replacements:
+    post:
+      tags: [Transactions]
+      operationId: replaceCard
+      summary: Replace a lost or damaged registration card; the old card is cancelled (VL-014, VL-022)
+      x-itms-permission: vehicle.service
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/Vin'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CardRequest' }
+      responses:
+        '201': { $ref: '#/components/responses/Request' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/vehicles/{vin}/cards:
+    get:
+      tags: [Transactions]
+      operationId: listCards
+      summary: Registration cards and their print and delivery status (VL-022)
+      x-itms-permission: vehicle.read
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/Vin'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Collection' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/vehicles/{vin}/cards/{cardId}/status:
+    post:
+      tags: [Transactions]
+      operationId: moveCard
+      summary: 'Print centre or courier: printed, dispatched, delivered, collected (VL-022)'
+      x-itms-permission: vehicle.card.manage
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/Vin'
+        - { name: cardId, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CardStatusRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Card' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/vehicles/{vin}/deregistrations:
+    post:
+      tags: [Transactions]
+      operationId: startDeregistration
+      summary: De-register for scrap, export or total loss; plates returned or retained (VL-015)
+      x-itms-permission: vehicle.service
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/Vin'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DeregistrationRequest' }
+      responses:
+        '201': { $ref: '#/components/responses/Request' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/vehicles/{vin}/certificates:
+    post:
+      tags: [Transactions]
+      operationId: requestVehicleCertificate
+      summary: Ownership, no-objection, registration history or clearance certificate (VL-020)
+      x-itms-permission: vehicle.service
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/Vin'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CertificateRequest' }
+      responses:
+        '201': { $ref: '#/components/responses/Request' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [Transactions]
+      operationId: listVehicleCertificates
+      summary: Certificates issued for the vehicle (VL-015, VL-017, VL-020)
+      x-itms-permission: vehicle.read
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/Vin'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Collection' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/vehicles/{vin}/insurance-recovery-certificates:
+    post:
+      tags: [Transactions]
+      operationId: issueInsuranceRecovery
+      summary: Insurance recovery certificate after total loss or theft (VL-017)
+      x-itms-permission: vehicle.insurance.recovery
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/Vin'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RecoveryRequest' }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Certificate' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/temporary-permits:
+    post:
+      tags: [Transactions]
+      operationId: startEntryPermit
+      summary: Temporary entry permit for a foreign vehicle (VL-016)
+      x-itms-permission: vehicle.service
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EntryRequest' }
+      responses:
+        '201': { $ref: '#/components/responses/Request' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/vehicles/{vin}/exit-permits:
+    post:
+      tags: [Transactions]
+      operationId: startExitPermit
+      summary: Temporary exit permit for a local vehicle (VL-016)
+      x-itms-permission: vehicle.service
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/Vin'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExitRequest' }
+      responses:
+        '201': { $ref: '#/components/responses/Request' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/temporary-permits/{permitId}:
+    get:
+      tags: [Transactions]
+      operationId: getTemporaryPermit
+      summary: A temporary entry or exit permit (VL-016)
+      x-itms-permission: vehicle.read
+      x-itms-scope: [region]
+      parameters:
+        - { name: permitId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Permit' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/temporary-permits/{permitId}/close:
+    post:
+      tags: [Transactions]
+      operationId: closeTemporaryPermit
+      summary: The vehicle left or came back (VL-016)
+      x-itms-permission: vehicle.service
+      x-itms-scope: [region]
+      parameters:
+        - { name: permitId, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Permit' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/vehicles/{vin}/mortgages:
+    post:
+      tags: [Transactions]
+      operationId: registerMortgage
+      summary: A bank registers a mortgage; it blocks transfer and de-registration (VL-021)
+      x-itms-permission: vehicle.mortgage.manage
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/Vin'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MortgageRequest' }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Mortgage' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/vehicles/{vin}/mortgages/{mortgageId}/release:
+    post:
+      tags: [Transactions]
+      operationId: releaseMortgage
+      summary: The bank releases its mortgage (VL-021)
+      x-itms-permission: vehicle.mortgage.manage
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/Vin'
+        - { name: mortgageId, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Mortgage' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/vehicles/{vin}/mortgages/{mortgageId}/transfer-consents:
+    post:
+      tags: [Transactions]
+      operationId: consentMortgageTransfer
+      summary: The bank consents to its mortgage moving with a transfer (VL-012, VL-021)
+      x-itms-permission: vehicle.mortgage.manage
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/Vin'
+        - { name: mortgageId, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MortgageConsentRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Mortgage' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/vehicles/{vin}/records:
+    get:
+      tags: [Vehicles]
+      operationId: getVehicleRecords
+      summary: Bans, approvals, mortgages, cards and certificates of the vehicle file (VL-005)
+      x-itms-permission: vehicle.read
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/Vin'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FileRecords' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/fleets/{fileNumber}/vehicles:
+    get:
+      tags: [Fleets]
+      operationId: listFleet
+      summary: A company's fleet list, as JSON or a text/csv download (VL-026)
+      x-itms-permission: vehicle.read
+      x-itms-scope: [region]
+      parameters:
+        - { name: fileNumber, in: path, required: true, schema: { type: string, pattern: '^[A-Z0-9][A-Z0-9-]{0,59}$' } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Collection' }
+            text/csv:
+              schema: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/fleets/{fileNumber}/renewals:
+    post:
+      tags: [Fleets]
+      operationId: bulkRenewal
+      summary: Renew many company vehicles; each is checked and charged on its own (VL-026)
+      x-itms-permission: vehicle.register
+      x-itms-scope: [region]
+      parameters:
+        - { name: fileNumber, in: path, required: true, schema: { type: string, pattern: '^[A-Z0-9][A-Z0-9-]{0,59}$' } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BulkRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Collection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/fleets/{fileNumber}/driver-assignments:
+    post:
+      tags: [Fleets]
+      operationId: assignDriver
+      summary: Assign a company vehicle to one of its drivers (VL-026)
+      x-itms-permission: vehicle.service
+      x-itms-scope: [region]
+      parameters:
+        - { name: fileNumber, in: path, required: true, schema: { type: string, pattern: '^[A-Z0-9][A-Z0-9-]{0,59}$' } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AssignmentRequest' }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Assignment' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [Fleets]
+      operationId: listDriverAssignments
+      summary: Current driver assignments of a company (VL-026)
+      x-itms-permission: vehicle.read
+      x-itms-scope: [region]
+      parameters:
+        - { name: fileNumber, in: path, required: true, schema: { type: string, pattern: '^[A-Z0-9][A-Z0-9-]{0,59}$' } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Collection' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/dealers/{fileNumber}/registrations:
+    post:
+      tags: [Fleets]
+      operationId: bulkFirstRegistration
+      summary: Start first registration of many new vehicles (VL-027)
+      x-itms-permission: vehicle.register
+      x-itms-scope: [region]
+      parameters:
+        - { name: fileNumber, in: path, required: true, schema: { type: string, pattern: '^[A-Z0-9][A-Z0-9-]{0,59}$' } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BulkRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Collection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/dealers/{fileNumber}/handovers:
+    post:
+      tags: [Fleets]
+      operationId: handoverVehicle
+      summary: Hand a new, unregistered vehicle from the dealer to its buyer (VL-027)
+      x-itms-permission: vehicle.service
+      x-itms-scope: [region]
+      parameters:
+        - { name: fileNumber, in: path, required: true, schema: { type: string, pattern: '^[A-Z0-9][A-Z0-9-]{0,59}$' } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/HandoverRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Vehicle' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/plates:
+    get:
+      tags: [Plates]
+      operationId: listPlatesHeld
+      summary: Plate numbers held by a traffic file (VL-031, VL-035)
+      x-itms-permission: vehicle.read
+      x-itms-scope: [region]
+      parameters:
+        - { name: holderFileNumber, in: query, required: true, schema: { type: string, pattern: '^[A-Z0-9][A-Z0-9-]{0,59}$' } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Collection' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/plates/{plateId}:
+    get:
+      tags: [Plates]
+      operationId: getPlate
+      summary: A plate number and its status (VL-031)
+      x-itms-permission: vehicle.read
+      x-itms-scope: [region]
+      parameters:
+        - { name: plateId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Plate' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/plate-reservations:
+    post:
+      tags: [Plates]
+      operationId: reservePlateNumber
+      summary: Reserve a chosen number for a fee; unpaid, it expires after the reservation period (VL-033)
+      x-itms-permission: vehicle.service
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReservationRequest' }
+      responses:
+        '201': { $ref: '#/components/responses/Request' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/plates/{plateId}/retention-renewals:
+    post:
+      tags: [Plates]
+      operationId: renewPlateRetention
+      summary: Renew the retention of a number held without a vehicle (VL-039)
+      x-itms-permission: vehicle.service
+      x-itms-scope: [region]
+      parameters:
+        - { name: plateId, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CategoryRequest' }
+      responses:
+        '201': { $ref: '#/components/responses/Request' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/plates/{plateId}/sales:
+    post:
+      tags: [Plates]
+      operationId: sellPlateNumber
+      summary: Sell a retained number to another person (VL-035)
+      x-itms-permission: vehicle.service
+      x-itms-scope: [region]
+      parameters:
+        - { name: plateId, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SaleRequest' }
+      responses:
+        '201': { $ref: '#/components/responses/Request' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/vehicles/{vin}/plate-exchanges:
+    post:
+      tags: [Plates]
+      operationId: exchangePlate
+      summary: Put the owner's retained number on this vehicle; its old number is retained (VL-035)
+      x-itms-permission: vehicle.service
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/Vin'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExchangeRequest' }
+      responses:
+        '201': { $ref: '#/components/responses/Request' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/plates/{plateId}/loss-reports:
+    post:
+      tags: [Plates]
+      operationId: reportPlateLoss
+      summary: Report a plate lost or stolen (police circular event) and replace it, same or new number (VL-037)
+      x-itms-permission: vehicle.service
+      x-itms-scope: [region]
+      parameters:
+        - { name: plateId, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LossRequest' }
+      responses:
+        '201': { $ref: '#/components/responses/Request' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/plate-auctions:
+    post:
+      tags: [Plates]
+      operationId: createPlateAuction
+      summary: Withdraw premium numbers into an online or partner auction (VL-034)
+      x-itms-permission: vehicle.plate.auction
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AuctionRequest' }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuctionView' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/plate-auctions/{auctionId}:
+    get:
+      tags: [Plates]
+      operationId: getPlateAuction
+      summary: An auction, its numbers and highest bids (VL-034)
+      x-itms-permission: vehicle.read
+      x-itms-scope: [region]
+      parameters:
+        - { name: auctionId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuctionView' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/plate-auctions/{auctionId}/bids:
+    post:
+      tags: [Plates]
+      operationId: bidOnPlate
+      summary: Bid online, or report a partner's bid (VL-034)
+      x-itms-permission: vehicle.service
+      x-itms-scope: [region]
+      parameters:
+        - { name: auctionId, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BidRequest' }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Bid' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/plate-auctions/{auctionId}/close:
+    post:
+      tags: [Plates]
+      operationId: closePlateAuction
+      summary: Close after the end; each winner is asked to pay the price (VL-034)
+      x-itms-permission: vehicle.plate.auction
+      x-itms-scope: [region]
+      parameters:
+        - { name: auctionId, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuctionView' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/plate-orders:
+    post:
+      tags: [Plates]
+      operationId: raisePlateOrder
+      summary: Put every plate waiting to be made into one factory order (VL-036)
+      x-itms-permission: vehicle.plate.manage
+      x-itms-scope: national
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OrderRequest' }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrderView' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/plate-orders/{orderId}:
+    get:
+      tags: [Plates]
+      operationId: getPlateOrder
+      summary: A manufacturing order and its plates (VL-036)
+      x-itms-permission: vehicle.plate.manage
+      x-itms-scope: national
+      parameters:
+        - { name: orderId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrderView' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/plate-orders/{orderId}/status:
+    post:
+      tags: [Plates]
+      operationId: updatePlateOrder
+      summary: 'Factory: in production, delivered with serial numbers, cancelled (VL-036)'
+      x-itms-permission: vehicle.plate.factory
+      x-itms-scope: national
+      parameters:
+        - { name: orderId, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FactoryRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrderView' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/trial-plates:
+    post:
+      tags: [Plates]
+      operationId: issueTrialPlate
+      summary: Issue a trial plate to a dealer (VL-038)
+      x-itms-permission: vehicle.service
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TrialRequest' }
+      responses:
+        '201': { $ref: '#/components/responses/Request' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/trial-plates/{trialId}:
+    get:
+      tags: [Plates]
+      operationId: getTrialPlate
+      summary: A trial plate (VL-038)
+      x-itms-permission: vehicle.read
+      x-itms-scope: [region]
+      parameters:
+        - { name: trialId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Trial' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/trial-plates/{trialId}/exchange:
+    post:
+      tags: [Plates]
+      operationId: exchangeTrialPlate
+      summary: Exchange a trial plate for the rest of its period (VL-038)
+      x-itms-permission: vehicle.service
+      x-itms-scope: [region]
+      parameters:
+        - { name: trialId, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Trial' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/trial-plates/{trialId}/cancel:
+    post:
+      tags: [Plates]
+      operationId: cancelTrialPlate
+      summary: Cancel a trial plate (VL-038)
+      x-itms-permission: vehicle.service
+      x-itms-scope: [region]
+      parameters:
+        - { name: trialId, in: path, required: true, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Trial' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -267,16 +1461,21 @@ components:
           schema:
             type: object
             additionalProperties: false
-            required: [id, kind, status, amountMinor, newExpiry, createdAt]
+            required: [id, kind, status, amountMinor, createdAt]
             properties:
               id: { type: string, format: uuid }
-              kind: { type: string, enum: [FIRST, RENEWAL] }
-              status: { type: string, enum: [AWAITING_PAYMENT, COMPLETED, CANCELLED] }
+              kind:
+                type: string
+                enum: [FIRST, RENEWAL, TRANSFER, CHANGE, CARD, DEREGISTER, CERTIFICATE, TEMP_PERMIT, PLATE_RESERVATION,
+                       PLATE_RETENTION, PLATE_SALE, PLATE_EXCHANGE, PLATE_REPLACEMENT, TRIAL_PLATE, AUCTION]
+              status: { type: string, enum: [AWAITING_CONSENT, AWAITING_PAYMENT, COMPLETED, CANCELLED] }
               payableId: { oneOf: [ { type: string, format: uuid }, { type: 'null' } ] }
               amountMinor: { type: integer }
               currency: { oneOf: [ { type: string }, { type: 'null' } ] }
-              newExpiry: { type: string, format: date }
+              newExpiry: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
               createdAt: { type: string, format: date-time }
+              details: { type: object, additionalProperties: { type: string } }
+              payerFileNumber: { oneOf: [ { type: string }, { type: 'null' } ] }
 
   schemas:
     Code:
@@ -308,12 +1507,14 @@ components:
     CreateRequest:
       type: object
       additionalProperties: false
-      required: [vin, spec, ownerFileNumber, region]
+      description: vin and spec may be left out when customsCertificateNo pre-fills them (VL-002).
+      required: [ownerFileNumber, region]
       properties:
-        vin: { type: string, pattern: '^[A-HJ-NPR-Za-hj-npr-z0-9]{17}$' }
-        spec: { $ref: '#/components/schemas/Spec' }
+        vin: { oneOf: [ { type: string, pattern: '^[A-HJ-NPR-Za-hj-npr-z0-9]{17}$' }, { type: 'null' } ] }
+        spec: { oneOf: [ { $ref: '#/components/schemas/Spec' }, { type: 'null' } ] }
         ownerFileNumber: { $ref: '#/components/schemas/Ref' }
         region: { $ref: '#/components/schemas/Code' }
+        customsCertificateNo: { oneOf: [ { $ref: '#/components/schemas/Ref' }, { type: 'null' } ] }
     Vehicle:
       type: object
       additionalProperties: false
@@ -367,6 +1568,11 @@ components:
       required: [customerCategory]
       properties:
         customerCategory: { $ref: '#/components/schemas/Code' }
+        plateId:
+          description: First registration only, the owner's own retained number (VL-035)
+          oneOf: [ { type: string, format: uuid }, { type: 'null' } ]
+        cardDelivery: { oneOf: [ { type: string, enum: [CENTRE, COURIER, DIGITAL] }, { type: 'null' } ] }
+        deliveryAddress: { oneOf: [ { type: string, maxLength: 300 }, { type: 'null' } ] }
     Series:
       type: object
       additionalProperties: false
@@ -382,6 +1588,320 @@ components:
         lastNumber: { type: integer, maximum: 99999999 }
         premiumPattern: { oneOf: [ { type: string, maxLength: 200 }, { type: 'null' } ] }
         active: { type: boolean }
+    CustomsRequest:
+      type: object
+      additionalProperties: false
+      required: [certificateNo, source, issuerCode, vin, spec, issuedOn]
+      properties:
+        certificateNo: { $ref: '#/components/schemas/Ref' }
+        source: { type: string, enum: [CUSTOMS, DEALER] }
+        issuerCode: { $ref: '#/components/schemas/Code' }
+        vin: { type: string, pattern: '^[A-HJ-NPR-Za-hj-npr-z0-9]{17}$' }
+        spec: { $ref: '#/components/schemas/Spec' }
+        issuedOn: { type: string, format: date }
+    CustomsCertificate:
+      type: object
+      properties:
+        certificateNo: { type: string }
+        source: { type: string }
+        issuerCode: { type: string }
+        vin: { type: string }
+        spec: { $ref: '#/components/schemas/Spec' }
+        issuedOn: { type: string, format: date }
+        used: { type: boolean }
+    BanRequest:
+      type: object
+      additionalProperties: false
+      required: [reasonCode, reference]
+      properties:
+        reasonCode: { $ref: '#/components/schemas/Code' }
+        reference: { $ref: '#/components/schemas/Ref' }
+    LiftRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 1, maxLength: 500 }
+    ApprovalRequest:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      properties:
+        kind: { type: string, enum: [PUBLIC_DECLARATION, SECURITY_INSPECTION] }
+        detail:
+          oneOf:
+            - type: object
+              maxProperties: 30
+              propertyNames: { pattern: '^[a-zA-Z][a-zA-Z0-9]{0,39}$' }
+              additionalProperties: { type: string, maxLength: 500 }
+            - type: 'null'
+    DecisionRequest:
+      type: object
+      additionalProperties: false
+      required: [approve]
+      properties:
+        approve: { type: boolean }
+        note: { oneOf: [ { type: string, maxLength: 500 }, { type: 'null' } ] }
+    TransferRequest:
+      type: object
+      additionalProperties: false
+      required: [buyerFileNumber, buyerAcceptsFines, sellerRetainsPlate, customerCategory]
+      properties:
+        buyerFileNumber: { $ref: '#/components/schemas/Ref' }
+        buyerAcceptsFines: { type: boolean }
+        sellerRetainsPlate: { type: boolean }
+        customerCategory: { $ref: '#/components/schemas/Code' }
+    ChangeRequest:
+      type: object
+      additionalProperties: false
+      required: [customerCategory]
+      properties:
+        colours: { oneOf: [ { type: array, minItems: 1, maxItems: 3, items: { $ref: '#/components/schemas/Code' } }, { type: 'null' } ] }
+        engineNo: { oneOf: [ { type: string, pattern: '^[A-Z0-9-]{1,40}$' }, { type: 'null' } ] }
+        bodyType: { oneOf: [ { $ref: '#/components/schemas/Code' }, { type: 'null' } ] }
+        category: { oneOf: [ { $ref: '#/components/schemas/Code' }, { type: 'null' } ] }
+        customerCategory: { $ref: '#/components/schemas/Code' }
+    CardRequest:
+      type: object
+      additionalProperties: false
+      required: [reason, delivery, customerCategory]
+      properties:
+        reason: { type: string, enum: [LOST, DAMAGED] }
+        delivery: { type: string, enum: [CENTRE, COURIER, DIGITAL] }
+        address: { oneOf: [ { type: string, maxLength: 300 }, { type: 'null' } ] }
+        customerCategory: { $ref: '#/components/schemas/Code' }
+    CardStatusRequest:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: { type: string, enum: [PRINTED, DISPATCHED, DELIVERED, COLLECTED, CANCELLED] }
+        trackingRef: { oneOf: [ { type: string, pattern: '^[A-Za-z0-9-]{1,60}$' }, { type: 'null' } ] }
+    DeregistrationRequest:
+      type: object
+      additionalProperties: false
+      required: [reason, retainPlate, customerCategory]
+      properties:
+        reason: { type: string, enum: [SCRAP, EXPORT, TOTAL_LOSS] }
+        retainPlate: { type: boolean }
+        destinationCountry: { oneOf: [ { type: string, pattern: '^[A-Z]{3}$' }, { type: 'null' } ] }
+        customerCategory: { $ref: '#/components/schemas/Code' }
+    CertificateRequest:
+      type: object
+      additionalProperties: false
+      required: [kind, customerCategory]
+      properties:
+        kind: { type: string, enum: [OWNERSHIP, NO_OBJECTION, REGISTRATION_HISTORY, CLEARANCE] }
+        customerCategory: { $ref: '#/components/schemas/Code' }
+    RecoveryRequest:
+      type: object
+      additionalProperties: false
+      required: [insurerCode, claimRef, reason]
+      properties:
+        insurerCode: { $ref: '#/components/schemas/Code' }
+        claimRef: { $ref: '#/components/schemas/Ref' }
+        reason: { type: string, enum: [TOTAL_LOSS, THEFT] }
+    EntryRequest:
+      type: object
+      additionalProperties: false
+      required: [vin, foreignPlate, country, holderFileNumber, borderPoint, validFrom, validTo, region, customerCategory]
+      properties:
+        vin: { type: string, pattern: '^[A-HJ-NPR-Za-hj-npr-z0-9]{17}$' }
+        foreignPlate: { type: string, pattern: '^[A-Z0-9 -]{1,20}$' }
+        country: { type: string, pattern: '^[A-Z]{3}$' }
+        holderFileNumber: { $ref: '#/components/schemas/Ref' }
+        borderPoint: { $ref: '#/components/schemas/Code' }
+        validFrom: { type: string, format: date }
+        validTo: { type: string, format: date }
+        region: { $ref: '#/components/schemas/Code' }
+        customerCategory: { $ref: '#/components/schemas/Code' }
+    ExitRequest:
+      type: object
+      additionalProperties: false
+      required: [country, borderPoint, validFrom, validTo, customerCategory]
+      properties:
+        country: { type: string, pattern: '^[A-Z]{3}$' }
+        borderPoint: { $ref: '#/components/schemas/Code' }
+        validFrom: { type: string, format: date }
+        validTo: { type: string, format: date }
+        customerCategory: { $ref: '#/components/schemas/Code' }
+    MortgageRequest:
+      type: object
+      additionalProperties: false
+      required: [bankCode, contractRef]
+      properties:
+        bankCode: { $ref: '#/components/schemas/Code' }
+        contractRef: { $ref: '#/components/schemas/Ref' }
+    MortgageConsentRequest:
+      type: object
+      additionalProperties: false
+      required: [transferId]
+      properties:
+        transferId: { type: string, format: uuid }
+    BulkRequest:
+      type: object
+      additionalProperties: false
+      required: [vins, customerCategory]
+      properties:
+        vins: { type: array, minItems: 1, maxItems: 200, items: { type: string, pattern: '^[A-HJ-NPR-Za-hj-npr-z0-9]{17}$' } }
+        customerCategory: { $ref: '#/components/schemas/Code' }
+    AssignmentRequest:
+      type: object
+      additionalProperties: false
+      required: [vin, driverFileNumber]
+      properties:
+        vin: { type: string, pattern: '^[A-HJ-NPR-Za-hj-npr-z0-9]{17}$' }
+        driverFileNumber: { $ref: '#/components/schemas/Ref' }
+        validFrom: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
+        validTo: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
+    HandoverRequest:
+      type: object
+      additionalProperties: false
+      required: [vin, buyerFileNumber]
+      properties:
+        vin: { type: string, pattern: '^[A-HJ-NPR-Za-hj-npr-z0-9]{17}$' }
+        buyerFileNumber: { $ref: '#/components/schemas/Ref' }
+    ReservationRequest:
+      type: object
+      additionalProperties: false
+      required: [seriesCode, number, holderFileNumber, customerCategory]
+      properties:
+        seriesCode: { $ref: '#/components/schemas/Code' }
+        number: { type: integer, minimum: 1 }
+        holderFileNumber: { $ref: '#/components/schemas/Ref' }
+        customerCategory: { $ref: '#/components/schemas/Code' }
+    CategoryRequest:
+      type: object
+      additionalProperties: false
+      required: [customerCategory]
+      properties:
+        customerCategory: { $ref: '#/components/schemas/Code' }
+    SaleRequest:
+      type: object
+      additionalProperties: false
+      required: [buyerFileNumber, customerCategory]
+      properties:
+        buyerFileNumber: { $ref: '#/components/schemas/Ref' }
+        customerCategory: { $ref: '#/components/schemas/Code' }
+    ExchangeRequest:
+      type: object
+      additionalProperties: false
+      required: [plateId, customerCategory]
+      properties:
+        plateId: { type: string, format: uuid }
+        customerCategory: { $ref: '#/components/schemas/Code' }
+    LossRequest:
+      type: object
+      additionalProperties: false
+      required: [kind, policeReference, replacement, customerCategory]
+      properties:
+        kind: { type: string, enum: [LOST, STOLEN] }
+        policeReference: { $ref: '#/components/schemas/Ref' }
+        replacement: { type: string, enum: [SAME, NEW] }
+        customerCategory: { $ref: '#/components/schemas/Code' }
+    AuctionRequest:
+      type: object
+      additionalProperties: false
+      required: [title, salesChannel, startsAt, endsAt, region, lots]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+        salesChannel: { type: string, enum: [ONLINE, PARTNER] }
+        partnerCode: { oneOf: [ { $ref: '#/components/schemas/Code' }, { type: 'null' } ] }
+        startsAt: { type: string, format: date-time }
+        endsAt: { type: string, format: date-time }
+        region: { $ref: '#/components/schemas/Code' }
+        lots:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: object
+            additionalProperties: false
+            required: [seriesCode, number, reserveMinor]
+            properties:
+              seriesCode: { $ref: '#/components/schemas/Code' }
+              number: { type: integer, minimum: 1 }
+              reserveMinor: { type: integer, minimum: 0 }
+    BidRequest:
+      type: object
+      additionalProperties: false
+      required: [plateId, bidderFileNumber, amountMinor]
+      properties:
+        plateId: { type: string, format: uuid }
+        bidderFileNumber: { $ref: '#/components/schemas/Ref' }
+        amountMinor: { type: integer, minimum: 1 }
+    OrderRequest:
+      type: object
+      additionalProperties: false
+      required: [factoryCode]
+      properties:
+        factoryCode: { $ref: '#/components/schemas/Code' }
+    FactoryRequest:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: { type: string, enum: [IN_PRODUCTION, DELIVERED, CANCELLED] }
+        serials:
+          oneOf:
+            - type: object
+              maxProperties: 500
+              propertyNames: { pattern: '^[0-9a-f-]{36}$' }
+              additionalProperties: { type: string, pattern: '^[A-Z0-9-]{1,40}$' }
+            - type: 'null'
+    TrialRequest:
+      type: object
+      additionalProperties: false
+      required: [dealerFileNumber, region, days, customerCategory]
+      properties:
+        dealerFileNumber: { $ref: '#/components/schemas/Ref' }
+        region: { $ref: '#/components/schemas/Code' }
+        days: { type: integer, minimum: 1, maximum: 366 }
+        customerCategory: { $ref: '#/components/schemas/Code' }
+    Ban:
+      type: object
+      description: 'A ban on the vehicle (VL-006)'
+    Approval:
+      type: object
+      description: 'An approval (VL-018, VL-019)'
+    Card:
+      type: object
+      description: 'A registration card (VL-022)'
+    Certificate:
+      type: object
+      description: 'An issued certificate (VL-020)'
+    Permit:
+      type: object
+      description: 'A temporary permit (VL-016)'
+    Mortgage:
+      type: object
+      description: 'A mortgage (VL-021)'
+    FileRecords:
+      type: object
+      description: 'bans, approvals, mortgages, cards, certificates (VL-005)'
+    Assignment:
+      type: object
+      description: 'A driver assignment (VL-026)'
+    Plate:
+      type: object
+      description: 'A plate number (VL-031)'
+    AuctionView:
+      type: object
+      description: 'auction, lots and highestBids (VL-034)'
+    Bid:
+      type: object
+      description: 'A bid (VL-034)'
+    OrderView:
+      type: object
+      description: 'order and items with serial numbers (VL-036)'
+    Trial:
+      type: object
+      description: 'A trial plate (VL-038)'
+    Collection:
+      type: object
+      description: 'items: a list'
+      properties:
+        items: { type: array, items: { type: object } }
     Problem:
       type: object
       required: [status, code]

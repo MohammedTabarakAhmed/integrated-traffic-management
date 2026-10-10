@@ -5,6 +5,7 @@ import gov.itms.platform.events.DomainEventRecorder;
 import gov.itms.platform.security.CurrentActor;
 import gov.itms.vehicle.domain.DomainException;
 import gov.itms.vehicle.domain.Plates;
+import gov.itms.vehicle.domain.Records;
 import gov.itms.vehicle.domain.Registration;
 import gov.itms.vehicle.domain.Vehicle;
 import gov.itms.vehicle.domain.Vin;
@@ -48,41 +49,95 @@ public class VehicleService {
     private final Ports.FeeQuotes fees;
     private final Ports.Payables payables;
     private final Ports.Eligibility eligibility;
+    private final Ports.RecordsRepository records;
+    private final RequestDesk desk;
+    private final List<PaidHandler> handlers = new java.util.concurrent.CopyOnWriteArrayList<>();
     private final VehicleRules rules;
     private final AuditRecorder audit;
     private final DomainEventRecorder events;
     private final Clock clock;
 
     public VehicleService(Ports.VehicleRepository repo, Ports.InsuranceRegister insurance, Ports.FeeQuotes fees,
-                          Ports.Payables payables, Ports.Eligibility eligibility, VehicleRules rules,
-                          AuditRecorder audit, DomainEventRecorder events, Clock clock) {
+                          Ports.Payables payables, Ports.Eligibility eligibility, Ports.RecordsRepository records,
+                          RequestDesk desk, VehicleRules rules, AuditRecorder audit, DomainEventRecorder events,
+                          Clock clock) {
         this.repo = repo;
         this.insurance = insurance;
         this.fees = fees;
         this.payables = payables;
         this.eligibility = eligibility;
+        this.records = records;
+        this.desk = desk;
         this.rules = rules;
         this.audit = audit;
         this.events = events;
         this.clock = clock;
     }
 
+    /** Increment 2 transactions complete through their handlers (ADR-059). */
+    public void addHandler(PaidHandler handler) {
+        handlers.add(handler);
+    }
+
     // ---- vehicle records
 
     @Transactional
     public Vehicle create(String vin, Vehicle.Spec spec, String ownerFileNumber, String region, Caller caller) {
+        return create(vin, spec, ownerFileNumber, region, null, caller);
+    }
+
+    /**
+     * With {@code certificateNo}, the vehicle is pre-filled from the customs clearance or dealer certificate received
+     * from the feed (VL-002): the VIN must match, the certificate is used once, and its data is taken when no
+     * {@code spec} is given.
+     */
+    @Transactional
+    public Vehicle create(String vin, Vehicle.Spec spec, String ownerFileNumber, String region, String certificateNo,
+                          Caller caller) {
         channelOf(caller);
         require(caller.grants().allowsInRegion(CREATE, region));
-        String checked = Vin.check(vin, rules.checkDigitRegions());
+        Records.CustomsCertificate certificate = null;
+        String givenVin = vin;
+        Vehicle.Spec givenSpec = spec;
+        if (certificateNo != null) {
+            certificate = records.customs(certificateNo).orElseThrow(() -> new DomainException(
+                    DomainException.Kind.NOT_FOUND, "CERTIFICATE_NOT_FOUND", "certificate not found",
+                    List.of("VL-002")));
+            if (certificate.usedBy() != null) {
+                throw DomainException.conflict("CERTIFICATE_USED", "the certificate was already used for a vehicle",
+                        List.of("VL-002"));
+            }
+            if (givenVin == null) {
+                givenVin = certificate.vin();
+            }
+            if (givenSpec == null) {
+                givenSpec = certificate.spec();
+            }
+        }
+        if (givenSpec == null) {
+            throw DomainException.validation("FIELD_INVALID", "spec is required without a certificate",
+                    List.of("VL-001", "VL-002"), "spec");
+        }
+        String checked = Vin.check(givenVin, rules.checkDigitRegions());
+        if (certificate != null && !certificate.vin().equals(checked)) {
+            throw DomainException.conflict("CERTIFICATE_VIN_MISMATCH", "the certificate is for another VIN",
+                    List.of("VL-002"));
+        }
         if (repo.activeVinExists(checked)) {
             throw DomainException.conflict("VIN_ACTIVE", "a vehicle with this VIN is already in the register",
                     List.of("VL-003"));
         }
         Instant now = clock.instant();
-        Vehicle v = Vehicle.create(UUID.randomUUID(), checked, spec, ownerFileNumber, region, now);
+        Vehicle v = Vehicle.create(UUID.randomUUID(), checked, givenSpec, ownerFileNumber, region, now);
+        if (certificate != null) {
+            v.linkCertificate(certificate.certificateNo());
+        }
         repo.insertVehicle(v);
+        if (certificate != null) {
+            records.customsUsed(certificate.certificateNo(), v.id());
+        }
         repo.history(v.id(), "CREATED", caller.actor().id(), Map.of("owner", ownerFileNumber, "category",
-                spec.category()), now);
+                givenSpec.category(), "certificate", certificateNo == null ? "" : certificateNo), now);
         audit.record("VEHICLE_CREATED", ENTITY, checked, null, snapshot(v), null);
         events.record("itms.vehicle.created", checked, snapshot(v));
         return v;
@@ -138,6 +193,17 @@ public class VehicleService {
     /** First registration: checks, reserves the next plate number, quotes the fee and registers the payable. */
     @Transactional
     public Registration.Request startFirstRegistration(String vin, String customerCategory, Caller caller) {
+        return startFirstRegistration(vin, customerCategory, null, null, null, caller);
+    }
+
+    /**
+     * First registration with the owner's own retained number ({@code heldPlateId}, VL-033/VL-034/VL-035) instead of
+     * the next standard one, and the card's delivery (VL-022). Besides insurance and inspection: no ban (VL-006), a
+     * customs or dealer certificate (VL-010, VL-002), the approvals the category needs (VL-018, VL-019).
+     */
+    @Transactional
+    public Registration.Request startFirstRegistration(String vin, String customerCategory, UUID heldPlateId,
+                                                       Records.Delivery delivery, String address, Caller caller) {
         String channel = channelOf(caller);
         Vehicle v = lockedVehicle(vin);
         require(caller.grants().allowsInRegion(REGISTER, v.region()));
@@ -146,14 +212,53 @@ public class VehicleService {
                     List.of("VL-010"), v.status().name());
         }
         requireNoOpenRequest(v);
+        desk.requireNotBanned(v);
+        if (desk.rules().requireCustomsCertificate() && v.customsCertificateNo() == null) {
+            throw DomainException.conflict("CUSTOMS_CERTIFICATE_REQUIRED",
+                    "first registration needs the customs clearance or dealer certificate", List.of("VL-010",
+                            "VL-002"));
+        }
+        for (Records.ApprovalKind needed : desk.rules().approvalsFor(v.spec().category(), v.spec().bodyType())) {
+            boolean approved = records.approvals(v.id()).stream().anyMatch(a -> a.kind() == needed
+                    && a.status() == Records.ApprovalStatus.APPROVED);
+            if (!approved) {
+                throw DomainException.conflict(needed.name() + "_REQUIRED", "the vehicle needs an approved "
+                        + needed.name().toLowerCase(java.util.Locale.ROOT).replace('_', ' ') + " before registration",
+                        List.of(needed == Records.ApprovalKind.PUBLIC_DECLARATION ? "VL-018" : "VL-019"),
+                        needed.name());
+            }
+        }
+        if (delivery == Records.Delivery.COURIER && (address == null || address.isBlank())) {
+            throw DomainException.validation("ADDRESS_REQUIRED", "courier delivery needs an address",
+                    List.of("VL-022"));
+        }
         LocalDate today = today();
         checkInsurance(v, today);
         checkInspection(v, today);
-        Plates.Plate plate = reservePlate(v);
+        Plates.Plate plate = heldPlateId == null ? desk.reserveNextPlate(v) : heldPlate(v, heldPlateId);
         LocalDate expiry = today.plusMonths(rules.validityMonths(v.spec().category(), v.ageYears(today)))
                 .minusDays(1);
+        Map<String, String> card = new LinkedHashMap<>();
+        card.put("delivery", (delivery == null ? Records.Delivery.CENTRE : delivery).name());
+        if (address != null) {
+            card.put("address", address);
+        }
         return request(v, Registration.Kind.FIRST, rules.firstRegistrationFee(), customerCategory, null, expiry,
-                plate.id(), channel, caller);
+                plate.id(), channel, caller, card);
+    }
+
+    /** The owner's own number, held without a vehicle and of the vehicle's plate category (VL-035). */
+    private Plates.Plate heldPlate(Vehicle v, UUID plateId) {
+        Plates.Plate p = repo.findPlate(plateId).orElseThrow(() -> new DomainException(
+                DomainException.Kind.NOT_FOUND, "PLATE_NOT_FOUND", "plate not found", List.of("VL-031")));
+        Plates.Series s = repo.findSeries(p.seriesCode()).orElseThrow();
+        if (p.status() != Plates.Status.RETAINED || p.vehicleId() != null
+                || !v.ownerFileNumber().equals(p.holderFileNumber())
+                || !s.plateCategory().equals(rules.plateCategoryOf(v.spec().category()))) {
+            throw DomainException.conflict("PLATE_NOT_OWNERS", "the number must be held by the owner without a"
+                    + " vehicle, and fit the vehicle's plate category", List.of("VL-035"));
+        }
+        return p;
     }
 
     /** Renewal: within the window, valid insurance (UAT-3), inspection when needed; then the fee. */
@@ -167,6 +272,7 @@ public class VehicleService {
                     v.status().name());
         }
         requireNoOpenRequest(v);
+        desk.requireNotBanned(v);
         LocalDate today = today();
         LocalDate opens = v.registrationExpiry().minusDays(rules.renewalWindowDays());
         if (today.isBefore(opens)) {
@@ -179,7 +285,7 @@ public class VehicleService {
         LocalDate base = v.registrationExpiry().isBefore(today) ? today.minusDays(1) : v.registrationExpiry();
         LocalDate expiry = base.plusMonths(rules.validityMonths(v.spec().category(), v.ageYears(today)));
         return request(v, Registration.Kind.RENEWAL, rules.renewalFee(), customerCategory, v.registrationExpiry(),
-                expiry, null, channel, caller);
+                expiry, null, channel, caller, Map.of("delivery", Records.Delivery.CENTRE.name()));
     }
 
     /**
@@ -198,7 +304,7 @@ public class VehicleService {
 
     private Registration.Request request(Vehicle v, Registration.Kind kind, String feeService, String customerCategory,
                                          LocalDate currentExpiry, LocalDate newExpiry, UUID plateId, String channel,
-                                         Caller caller) {
+                                         Caller caller, Map<String, String> payload) {
         Ports.FeeQuotes.Quote quote = fees.quote(feeService, v.region(), customerCategory, v.spec().category(),
                 currentExpiry);
         UUID id = UUID.randomUUID();
@@ -207,7 +313,7 @@ public class VehicleService {
         Instant now = clock.instant();
         Registration.Request r = new Registration.Request(id, v.id(), kind, Registration.Status.AWAITING_PAYMENT,
                 quote.id(), payableId, quote.total(), quote.currency(), newExpiry, plateId, caller.actor().id(),
-                channel, now, null);
+                channel, now, null, payload, null, v.ownerFileNumber());
         repo.insertRequest(r);
         Map<String, Object> detail = new LinkedHashMap<>();
         detail.put("requestId", id.toString());
@@ -238,17 +344,28 @@ public class VehicleService {
         Registration.Request r = found.get();
         Instant now = clock.instant();
         CurrentActor system = CurrentActor.system("vehicle-payment-consumer");
+        if (r.kind() != Registration.Kind.FIRST && r.kind() != Registration.Kind.RENEWAL) {
+            PaidHandler handler = handlers.stream().filter(h -> h.handles(r.kind())).findFirst()
+                    .orElseThrow(() -> new IllegalStateException("no handler for " + r.kind()));
+            repo.updateRequest(r.completed(now));
+            handler.completed(r, now, system);
+            return true;
+        }
         Vehicle v = repo.findForUpdate(r.vehicleId()).orElseThrow();
         if (r.kind() == Registration.Kind.FIRST) {
             Plates.Plate plate = repo.findPlate(r.plateId()).orElseThrow();
             Plates.Plate assigned = plate.moveTo(Plates.Status.ASSIGNED, v.id(), v.ownerFileNumber(), now);
             repo.updatePlate(assigned);
             v.registered(assigned.id(), assigned.display(), r.newExpiry());
+            desk.orderPlate(assigned.id(), "REGISTRATION");
         } else {
             v.renewed(r.newExpiry());
         }
         repo.updateVehicle(v);
         repo.updateRequest(r.completed(now));
+        String delivery = r.value("delivery");
+        desk.issueCard(v, delivery == null ? Records.Delivery.CENTRE : Records.Delivery.valueOf(delivery),
+                r.value("address"));
         Map<String, Object> detail = new LinkedHashMap<>(snapshot(v));
         detail.put("requestId", r.id().toString());
         repo.history(v.id(), r.kind() == Registration.Kind.FIRST ? "REGISTERED" : "RENEWED", system.userId(),
@@ -278,22 +395,6 @@ public class VehicleService {
                 Map.of("region", series.region(), "plateCategory", series.plateCategory(), "last",
                         series.lastNumber(), "active", series.active()), null);
         return series;
-    }
-
-    private Plates.Plate reservePlate(Vehicle v) {
-        String plateCategory = rules.plateCategoryOf(v.spec().category());
-        for (Plates.Series s : repo.activeSeries(v.region(), plateCategory)) {
-            Optional<Long> next = repo.nextFreeNumber(s);
-            if (next.isPresent()) {
-                Plates.Plate plate = new Plates.Plate(UUID.randomUUID(), s.code(), next.get(),
-                        s.display(next.get()), Plates.Status.AVAILABLE, null, null, clock.instant())
-                        .moveTo(Plates.Status.RESERVED, v.id(), v.ownerFileNumber(), clock.instant());
-                repo.insertPlate(plate);
-                return plate;
-            }
-        }
-        throw DomainException.conflict("NO_PLATE_AVAILABLE", "no standard plate number is free for this category",
-                List.of("VL-032"), plateCategory);
     }
 
     // ---- checks

@@ -283,6 +283,21 @@ routes:
       - /v1/vehicles
       - /v1/vehicles/*
       - /v1/plate-series
+      - /v1/plates
+      - /v1/plates/*
+      - /v1/plate-reservations
+      - /v1/plate-auctions
+      - /v1/plate-auctions/*
+      - /v1/plate-orders
+      - /v1/plate-orders/*
+      - /v1/trial-plates
+      - /v1/trial-plates/*
+      - /v1/customs-certificates
+      - /v1/customs-certificates/*
+      - /v1/temporary-permits
+      - /v1/temporary-permits/*
+      - /v1/fleets/*
+      - /v1/dealers/*
   - id: violation-service
     name: violation-service
     upstream_id: violation-service

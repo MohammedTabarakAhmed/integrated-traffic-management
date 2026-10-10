@@ -55,7 +55,7 @@ public final class Vehicle {
 
     private final UUID id;
     private final String vin;
-    private final Spec spec;
+    private Spec spec;
     private final Instant createdAt;
     private String ownerFileNumber;
     private String region;
@@ -63,6 +63,7 @@ public final class Vehicle {
     private LocalDate registrationExpiry;
     private UUID plateId;
     private String plateNumber;
+    private String customsCertificateNo;
     private long version;
 
     private Vehicle(UUID id, String vin, Spec spec, Instant createdAt) {
@@ -129,6 +130,63 @@ public final class Vehicle {
         registrationExpiry = newExpiry;
     }
 
+    /** The customs or dealer certificate the record was pre-filled from (VL-002, VL-010). */
+    public void linkCertificate(String certificateNo) {
+        customsCertificateNo = ref("customsCertificateNo", certificateNo);
+    }
+
+    /** Handover of a new, not yet registered vehicle from the dealer to its buyer (VL-027). */
+    public void handedOver(String buyerFile) {
+        if (status != Status.UNREGISTERED) {
+            throw DomainException.conflict("ALREADY_REGISTERED", "only a new, unregistered vehicle is handed over",
+                    List.of("VL-027"), status.name());
+        }
+        ownerFileNumber = ref("buyerFileNumber", buyerFile);
+    }
+
+    /** Ownership transfer paid (VL-012): the buyer owns the vehicle; the plate may change with it. */
+    public void transferred(String buyerFile, UUID plate, String number) {
+        requireRegistered("VL-012");
+        ownerFileNumber = ref("buyerFileNumber", buyerFile);
+        if (plate != null) {
+            plateId = plate;
+            plateNumber = number;
+        }
+    }
+
+    /** Change of colour, engine, body or use type after an inspection (VL-013). The VIN never changes. */
+    public void changed(Spec newSpec) {
+        if (status == Status.DEREGISTERED) {
+            throw DomainException.conflict("VEHICLE_DEREGISTERED", "the vehicle is de-registered", List.of("VL-013"));
+        }
+        spec = Objects.requireNonNull(newSpec);
+    }
+
+    /** Another plate on the vehicle (VL-035 exchange, VL-037 replacement with a new number). */
+    public void plateChanged(UUID plate, String number) {
+        requireRegistered("VL-035");
+        plateId = Objects.requireNonNull(plate);
+        plateNumber = Objects.requireNonNull(number);
+    }
+
+    /** De-registered for scrap, export or total loss (VL-015): final. */
+    public void deregistered() {
+        if (status == Status.DEREGISTERED) {
+            throw DomainException.conflict("VEHICLE_DEREGISTERED", "the vehicle is already de-registered",
+                    List.of("VL-015"));
+        }
+        status = Status.DEREGISTERED;
+        plateId = null;
+        plateNumber = null;
+    }
+
+    private void requireRegistered(String requirement) {
+        if (status != Status.REGISTERED) {
+            throw DomainException.conflict("NOT_REGISTERED", "the vehicle is " + status, List.of(requirement),
+                    status.name());
+        }
+    }
+
     public void saved() {
         version++;
     }
@@ -190,6 +248,10 @@ public final class Vehicle {
 
     public String plateNumber() {
         return plateNumber;
+    }
+
+    public String customsCertificateNo() {
+        return customsCertificateNo;
     }
 
     public long version() {

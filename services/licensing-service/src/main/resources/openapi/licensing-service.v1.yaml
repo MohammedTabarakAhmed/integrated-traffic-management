@@ -3,7 +3,7 @@ info:
   title: ITMS Licensing Service
   version: 1.0.0
   description: |
-    Driving licences (DL-020..DL-023, DL-050..DL-065). This version covers the licence class catalogue (slice 3.1).
+    Driving licences (DL-020..DL-023, DL-050..DL-065). This version covers the licence class catalogue (slice 3.1) and licence number ranges (slice 3.2).
 
     Licence classes (DL-020, DL-062; BRD §6.2): a class (for example `LIGHT`) has rules per customer category —
     minimum age, optional maximum age, the required tests in order (test type codes of examination-service, DL-043),
@@ -16,7 +16,14 @@ info:
     past. Approving a version ends the previous approved version of the class the day before; an approved version that
     starts on or after the new start date is an overlap (409). Versions never change otherwise and are never deleted.
 
-    Classes are national configuration, so every operation is `national` in scope.
+    Classes are national configuration, so their operations are `national` in scope.
+
+    Licence numbers (DL-061; format per region, Q-022): a range of a region has a prefix, a width (digits, padded with
+    zeros) and first and last numbers. A range is submitted PENDING (`licensing.number-range.submit`) and approved
+    (ACTIVE) or rejected once by someone else (`licensing.number-range.approve`); the maker may withdraw their own.
+    Ranges with the same prefix never overlap, in any region, so licence numbers are unique nationally. Licence issue
+    takes the next number of the region from its earliest approved active range with numbers left. Every number
+    handed out is kept; the report shows total, used and available numbers. Range operations are scoped to the region.
     The channel is the `X-Channel` header. Submitting and deciding need an `Idempotency-Key` (ADR-032).
     Only GET/POST are used (INT-003). Request input (SEC-022) is hardened once in itms-platform.
 servers:
@@ -25,6 +32,7 @@ security:
   - bearerAuth: []
 tags:
   - name: Licence classes
+  - name: Licence numbers
 
 paths:
   /v1/licence-class-versions:
@@ -241,6 +249,198 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
 
+  /v1/licence-number-ranges:
+    post:
+      tags: [Licence numbers]
+      operationId: submitLicenceNumberRange
+      summary: Submit a licence number range of a region for approval (DL-061)
+      description: |
+        Refused when: no known `X-Channel` (422 `CHANNEL_REQUIRED`); a field is malformed (422 `FIELD_INVALID`); the
+        numbers are out of bounds (422 `NUMBER_RANGE_INVALID`) or do not fit the width (422 `NUMBER_WIDTH_INVALID`);
+        a pending or active range with the same prefix overlaps, in any region (409 `NUMBER_RANGE_OVERLAP`).
+      x-itms-permission: licensing.number-range.submit
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SubmitNumberRangeRequest' }
+      responses:
+        '201':
+          description: Submitted (or, on a retry with the same Idempotency-Key, the stored response)
+          headers:
+            Location: { schema: { type: string } }
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NumberRange' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [Licence numbers]
+      operationId: listLicenceNumberRanges
+      summary: Licence number ranges of a region, or of every region the caller's grants reach
+      x-itms-permission: licensing.number-range.read
+      x-itms-scope: [region]
+      parameters:
+        - name: region
+          in: query
+          schema: { $ref: '#/components/schemas/Region' }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/NumberRangeStatus' }
+      responses:
+        '200':
+          description: Ranges
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NumberRangeCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/licence-number-ranges/{rangeId}:
+    get:
+      tags: [Licence numbers]
+      operationId: getLicenceNumberRange
+      summary: A licence number range with its used and available numbers
+      x-itms-permission: licensing.number-range.read
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/RangeId'
+      responses:
+        '200':
+          description: Range
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NumberRange' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/licence-number-ranges/{rangeId}/approvals:
+    post:
+      tags: [Licence numbers]
+      operationId: approveLicenceNumberRange
+      summary: Approve a pending licence number range (DL-061, CC-002)
+      description: |
+        Refused when the approver submitted it (403 `SAME_MAKER_CHECKER`), it is already decided (409
+        `NUMBER_RANGE_DECIDED`) or a range with the same prefix now overlaps (409 `NUMBER_RANGE_OVERLAP`).
+      x-itms-permission: licensing.number-range.approve
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/RangeId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DecisionRequest' }
+      responses:
+        '200':
+          description: Approved; numbers are handed out from it
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NumberRange' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/licence-number-ranges/{rangeId}/rejections:
+    post:
+      tags: [Licence numbers]
+      operationId: rejectLicenceNumberRange
+      summary: Reject a pending licence number range, or withdraw one's own
+      description: |
+        A checker (`licensing.number-range.approve`) rejects; the maker may withdraw their own pending range. Refused
+        when it is already decided (409 `NUMBER_RANGE_DECIDED`).
+      x-itms-permission: licensing.number-range.approve
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/RangeId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RejectRequest' }
+      responses:
+        '200':
+          description: Rejected or withdrawn
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NumberRange' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/licence-number-ranges/{rangeId}/numbers:
+    get:
+      tags: [Licence numbers]
+      operationId: listUsedLicenceNumbers
+      summary: Numbers handed out from a range, in order, with what they went to (DL-061)
+      x-itms-permission: licensing.number-range.read
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/RangeId'
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+      responses:
+        '200':
+          description: Used numbers
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UsedNumberCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/licence-number-reports/{region}:
+    get:
+      tags: [Licence numbers]
+      operationId: getLicenceNumberReport
+      summary: Available and used licence numbers of a region, per range and in total (DL-061)
+      description: Rejected ranges are left out; pending ranges show but count as not yet available.
+      x-itms-permission: licensing.number-range.read
+      x-itms-scope: [region]
+      parameters:
+        - name: region
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/Region' }
+      responses:
+        '200':
+          description: Report
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NumberReport' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -264,6 +464,11 @@ components:
       in: query
       description: The date to read for (YYYY-MM-DD); today when absent
       schema: { type: string, format: date }
+    RangeId:
+      name: rangeId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -400,6 +605,78 @@ components:
         customerCategory: { type: string }
         gearboxRecorded: { type: boolean }
         rule: { $ref: '#/components/schemas/CategoryRule' }
+    Region:
+      type: string
+      pattern: '^[A-Z][A-Z0-9_]{0,39}$'
+    NumberRangeStatus:
+      type: string
+      enum: [PENDING, ACTIVE, REJECTED]
+    SubmitNumberRangeRequest:
+      type: object
+      additionalProperties: false
+      required: [region, width, firstNumber, lastNumber, reason]
+      properties:
+        region: { $ref: '#/components/schemas/Region' }
+        prefix:
+          type: string
+          pattern: '^[A-Z0-9]{0,5}$'
+          description: Shown before the number; empty when absent
+        width: { type: integer, minimum: 1, maximum: 12, description: Digits shown, padded with zeros }
+        firstNumber: { type: integer, format: int64, minimum: 1, maximum: 999999999999 }
+        lastNumber: { type: integer, format: int64, minimum: 1, maximum: 999999999999 }
+        reason: { type: string, minLength: 3, maxLength: 500 }
+    NumberRange:
+      type: object
+      additionalProperties: false
+      required: [id, region, prefix, width, firstNumber, lastNumber, nextNumber, status, total, used, available,
+                 submitted]
+      properties:
+        id: { type: string, format: uuid }
+        region: { type: string }
+        prefix: { type: string }
+        width: { type: integer }
+        firstNumber: { type: integer, format: int64 }
+        lastNumber: { type: integer, format: int64 }
+        nextNumber: { type: integer, format: int64 }
+        status: { $ref: '#/components/schemas/NumberRangeStatus' }
+        total: { type: integer, format: int64 }
+        used: { type: integer, format: int64 }
+        available: { type: integer, format: int64 }
+        submitted: { $ref: '#/components/schemas/Decision' }
+        decided: { oneOf: [ { $ref: '#/components/schemas/Decision' }, { type: 'null' } ] }
+    NumberRangeCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/NumberRange' } }
+    NumberReport:
+      type: object
+      additionalProperties: false
+      required: [region, ranges, total, used, available]
+      properties:
+        region: { type: string }
+        ranges: { type: array, items: { $ref: '#/components/schemas/NumberRange' } }
+        total: { type: integer, format: int64, description: Numbers in the active ranges }
+        used: { type: integer, format: int64 }
+        available: { type: integer, format: int64 }
+    UsedNumber:
+      type: object
+      additionalProperties: false
+      required: [licenceNumber, rangeId, region, number, allocatedAt, allocatedTo]
+      properties:
+        licenceNumber: { type: string }
+        rangeId: { type: string, format: uuid }
+        region: { type: string }
+        number: { type: integer, format: int64 }
+        allocatedAt: { type: string, format: date-time }
+        allocatedTo: { type: string, description: The licence or permit the number went to }
+    UsedNumberCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/UsedNumber' } }
     Problem:
       type: object
       required: [status, code]

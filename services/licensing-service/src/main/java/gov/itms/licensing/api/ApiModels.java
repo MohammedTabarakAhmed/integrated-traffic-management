@@ -1,8 +1,11 @@
 package gov.itms.licensing.api;
 
 import gov.itms.licensing.application.LicenceClassService;
+import gov.itms.licensing.application.LicenceNumberRepository;
+import gov.itms.licensing.application.LicenceNumberService;
 import gov.itms.licensing.domain.Channel;
 import gov.itms.licensing.domain.LicenceClassVersion;
+import gov.itms.licensing.domain.LicenceNumberRange;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -79,6 +82,41 @@ final class ApiModels {
         static ResolvedRuleDto of(String customerCategory, LicenceClassService.ResolvedRule r) {
             return new ResolvedRuleDto(r.version().spec().classCode(), r.version().id(), r.version().versionNo(),
                     customerCategory, r.version().spec().gearboxRecorded(), CategoryRuleDto.of(r.rule()));
+        }
+    }
+
+    record SubmitNumberRangeRequest(@NotBlank String region, String prefix, @NotNull Integer width,
+                                    @NotNull Long firstNumber, @NotNull Long lastNumber,
+                                    @NotBlank @Size(min = 3, max = 500) String reason) {
+
+        LicenceNumberRange.Spec toDomain() {
+            return new LicenceNumberRange.Spec(region, prefix, width, firstNumber, lastNumber);
+        }
+    }
+
+    record NumberRangeDto(UUID id, String region, String prefix, int width, long firstNumber, long lastNumber,
+                          long nextNumber, LicenceNumberRange.Status status, long total, long used, long available,
+                          DecisionDto submitted, DecisionDto decided) {
+        static NumberRangeDto of(LicenceNumberRange r) {
+            LicenceNumberRange.Spec s = r.spec();
+            return new NumberRangeDto(r.id(), s.region(), s.prefix(), s.width(), s.firstNumber(), s.lastNumber(),
+                    r.nextNumber(), r.status(), r.total(), r.used(), r.available(), DecisionDto.of(r.submitted()),
+                    DecisionDto.of(r.decided()));
+        }
+    }
+
+    record NumberReportDto(String region, List<NumberRangeDto> ranges, long total, long used, long available) {
+        static NumberReportDto of(LicenceNumberService.Report r) {
+            return new NumberReportDto(r.region(), r.ranges().stream().map(u -> NumberRangeDto.of(u.range())).toList(),
+                    r.totals().total(), r.totals().used(), r.totals().available());
+        }
+    }
+
+    record UsedNumberDto(String licenceNumber, UUID rangeId, String region, long number, Instant allocatedAt,
+                         String allocatedTo) {
+        static UsedNumberDto of(LicenceNumberRepository.UsedNumber u) {
+            return new UsedNumberDto(u.licenceNumber(), u.rangeId(), u.region(), u.number(), u.allocatedAt(),
+                    u.allocatedTo());
         }
     }
 

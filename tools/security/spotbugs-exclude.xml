@@ -48,6 +48,7 @@
       <And><Class name="gov.itms.vehicle.application.VehicleService"/><Field name="repo"/></And>
       <And><Class name="gov.itms.violation.application.ViolationService"/><Field name="repo"/></And>
       <And><Class name="gov.itms.licensing.application.LicenceClassService"/><Field name="classes"/></And>
+      <And><Class name="gov.itms.licensing.application.LicenceNumberService"/><Field name="ranges"/></And>
     </Or>
   </Match>
 

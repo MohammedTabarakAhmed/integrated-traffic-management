@@ -11,6 +11,7 @@ import com.atlassian.oai.validator.model.Request;
 import com.atlassian.oai.validator.model.SimpleRequest;
 import com.atlassian.oai.validator.model.SimpleResponse;
 import com.atlassian.oai.validator.report.ValidationReport;
+import gov.itms.licensing.application.LicenceNumberService;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -31,6 +32,9 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.dao.DataAccessException;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -69,6 +73,8 @@ class LicensingApiIT {
     ObjectMapper json;
     @Autowired
     JdbcClient db;
+    @Autowired
+    LicenceNumberService numbers;
 
     @BeforeAll
     static void loadContract() {
@@ -302,6 +308,52 @@ class LicensingApiIT {
                         + "('LICENCE_CLASS_WITHDRAWN', 'LICENCE_CLASS_REJECTED') order by action")
                 .param("a", a).param("b", b).query(String.class).list())
                 .containsExactly("LICENCE_CLASS_REJECTED", "LICENCE_CLASS_WITHDRAWN");
+    }
+
+    @Test
+    @Tag("DL-061")
+    @DisplayName("number range: maker-checker, overlap refused, numbers handed out in order, report and guard")
+    void numberRanges() throws Exception {
+        RequestPostProcessor rangeMaker = user("u-maker", "maker", "LICENCE_NUMBER_MAKER",
+                "licensing.number-range.submit", "licensing.number-range.read");
+        RequestPostProcessor rangeChecker = user("u-checker", "checker", "LICENCE_NUMBER_CHECKER",
+                "licensing.number-range.approve", "licensing.number-range.read");
+        Map<String, Object> range = new HashMap<>(Map.of("region", "IT_NORTH", "prefix", "IT", "width", 7,
+                "firstNumber", 1, "lastNumber", 3, "reason", "first range"));
+        MvcResult created = postAs("/v1/licence-number-ranges", range, rangeMaker);
+        assertThat(created.getResponse().getStatus()).isEqualTo(201);
+        String id = body(created).get("id").asString();
+        assertThat(postAs("/v1/licence-number-ranges/" + id + "/approvals", Map.of(), rangeMaker).getResponse()
+                .getStatus()).as("no approve permission").isEqualTo(403);
+        JsonNode approved = body(postAs("/v1/licence-number-ranges/" + id + "/approvals", Map.of(), rangeChecker));
+        assertThat(approved.get("status").asString()).isEqualTo("ACTIVE");
+
+        range.put("region", "IT_SOUTH");
+        range.put("firstNumber", 3);
+        range.put("lastNumber", 9);
+        assertThat(code(postAs("/v1/licence-number-ranges", range, rangeMaker))).isEqualTo("NUMBER_RANGE_OVERLAP");
+
+        SecurityContextHolder.getContext().setAuthentication(new JwtAuthenticationToken(Jwt.withTokenValue("t")
+                .header("alg", "none").subject("u-officer").claim("preferred_username", "officer").build()));
+        try {
+            assertThat(numbers.allocate("IT_NORTH", "licence-a").licenceNumber()).isEqualTo("IT0000001");
+            assertThat(numbers.allocate("IT_NORTH", "licence-b").licenceNumber()).isEqualTo("IT0000002");
+        } finally {
+            SecurityContextHolder.clearContext();
+        }
+
+        JsonNode report = body(getAs("/v1/licence-number-reports/IT_NORTH", rangeChecker));
+        assertThat(report.get("total").asLong()).isEqualTo(3);
+        assertThat(report.get("used").asLong()).isEqualTo(2);
+        assertThat(report.get("available").asLong()).isEqualTo(1);
+        JsonNode used = body(getAs("/v1/licence-number-ranges/" + id + "/numbers?limit=10", rangeChecker));
+        assertThat(used.get("items")).hasSize(2);
+        assertThat(used.get("items").get(1).get("allocatedTo").asString()).isEqualTo("licence-b");
+
+        assertThatThrownBy(() -> db.sql("update licence_number_range set next_number = 1 where id = :id")
+                .param("id", UUID.fromString(id)).update()).isInstanceOf(DataAccessException.class);
+        assertThatThrownBy(() -> db.sql("delete from licence_number where allocated_to = 'licence-a'").update())
+                .isInstanceOf(DataAccessException.class);
     }
 
     @Test

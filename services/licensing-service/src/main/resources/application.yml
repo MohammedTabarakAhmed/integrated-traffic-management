@@ -53,6 +53,9 @@ itms:
       - /v1/licence-class-versions
       - /v1/licence-class-versions/*/approvals
       - /v1/licence-class-versions/*/rejections
+      - /v1/licence-number-ranges
+      - /v1/licence-number-ranges/*/approvals
+      - /v1/licence-number-ranges/*/rejections
     retention: ${ITMS_IDEMPOTENCY_RETENTION:24h}
     lock-timeout: ${ITMS_IDEMPOTENCY_LOCK_TIMEOUT:30s}
     cleanup-interval: ${ITMS_IDEMPOTENCY_CLEANUP_INTERVAL:15m}

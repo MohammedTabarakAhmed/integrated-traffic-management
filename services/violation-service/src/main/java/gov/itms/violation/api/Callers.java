@@ -8,6 +8,7 @@ import gov.itms.violation.application.Caller;
 import gov.itms.violation.domain.Actor;
 import gov.itms.violation.domain.Channel;
 import java.util.Arrays;
+import java.util.OptionalLong;
 import org.springframework.stereotype.Component;
 
 /** The current request's {@link Caller}: actor, channel and the grants that reach a region (CC-001). */
@@ -35,6 +36,11 @@ class Callers {
             @Override
             public boolean holds(String permission) {
                 return authorisation.grants().stream().anyMatch(g -> g.permissions().contains(permission));
+            }
+
+            @Override
+            public OptionalLong approvalLimit(String limitType, String currency, String region) {
+                return authorisation.approvalLimit(limitType, currency, new ScopeTarget(region, null, null));
             }
         }, current.correlationId());
     }

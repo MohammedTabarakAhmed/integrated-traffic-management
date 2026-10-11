@@ -52,6 +52,8 @@ public class ViolationService {
     public static final String RECORD = "violation.record";
     public static final String READ = "violation.read";
     public static final String CANCEL = "violation.cancel";
+    /** CC-003 approval limit type of a fine reduction (iam-service approval limits). */
+    public static final String FINE_REDUCTION_LIMIT = "FINE_REDUCTION_AMOUNT";
     static final String ENTITY = "Violation";
 
     /**
@@ -231,16 +233,24 @@ public class ViolationService {
      */
     @Transactional
     public boolean confirmIfDue(String number) {
-        return confirm(number, false);
+        return confirm(number, null);
     }
 
     /** VF-051: a rejected objection confirms the violation at once (Q-001). */
     @Transactional
     public boolean confirmAfterRejection(String number) {
-        return confirm(number, true);
+        return confirm(number, "OBJECTION_REJECTED");
     }
 
-    private boolean confirm(String number, boolean objectionRejected) {
+    /** VF-051: an objection accepted with a reduced fine leaves the violation standing; it is confirmed (Q-082 a). */
+    @Transactional
+    public boolean confirmAfterReduction(String number) {
+        return confirm(number, "OBJECTION_REDUCED");
+    }
+
+    /** {@code decidedBy} is the objection outcome that confirms at once; null confirms when the window lapsed. */
+    private boolean confirm(String number, String decidedBy) {
+        boolean objectionRejected = decidedBy != null;
         if (settings.pointsAt() != Settings.PointsAt.CONFIRMATION) {
             return false;
         }
@@ -258,7 +268,7 @@ public class ViolationService {
         detail.put("violationNumber", number);
         detail.put("fileNumber", file);
         detail.put("points", v.blackPoints());
-        detail.put("confirmedBy", objectionRejected ? "OBJECTION_REJECTED" : "OBJECTION_WINDOW_LAPSED");
+        detail.put("confirmedBy", objectionRejected ? decidedBy : "OBJECTION_WINDOW_LAPSED");
         audit.recordAs(system, "VIOLATION_CONFIRMED", ENTITY, number, null, detail, "VF-030");
         events.recordAs(system, "itms.violation.confirmed", number, detail);
         addPoints(v, file, v.occurredOn(settings.zone()), system);
@@ -372,6 +382,58 @@ public class ViolationService {
         }
     }
 
+    /** CC-001: the objection's reviewer must reach the violation's region. */
+    @Transactional(readOnly = true)
+    public void requireReviewer(String number, Caller caller) {
+        Violation v = repo.findByNumber(number).orElseThrow(() -> notFound(number));
+        require(caller.grants().allowsInRegion(ObjectionService.REVIEW, v.report().region()));
+    }
+
+    /**
+     * VF-051, CC-003: an objection accepted with a reduction. The open payable is cancelled and a new one registered at
+     * {@code reducedFineMinor}; the amount taken off must lie within the reviewer's FINE_REDUCTION_AMOUNT approval
+     * limit for the violation's region. The recorded fine stays as the fact it was (VF-020).
+     */
+    @Transactional
+    public Violation reduceFromObjection(String number, long reducedFineMinor, String reason, Caller caller) {
+        channelOf(caller);
+        Violation v = repo.findForUpdate(number).orElseThrow(() -> notFound(number));
+        String region = v.report().region();
+        require(caller.grants().allowsInRegion(ObjectionService.REVIEW, region));
+        if (v.status() != Violation.Status.OPEN) {
+            throw DomainException.conflict("VIOLATION_CLOSED", "the violation is " + v.status(), List.of("VF-051"),
+                    v.status().name());
+        }
+        if (v.payableId() == null || reducedFineMinor <= 0 || reducedFineMinor >= v.fineMinor()) {
+            throw DomainException.validation("REDUCED_FINE_INVALID",
+                    "the reduced fine must be above zero and below the fine", List.of("VF-051"),
+                    String.valueOf(v.fineMinor()));
+        }
+        long reduction = v.fineMinor() - reducedFineMinor;
+        long limit = caller.grants().approvalLimit(FINE_REDUCTION_LIMIT, settings.currency(), region).orElse(-1);
+        if (limit < 0 || reduction > limit) {
+            throw new DomainException(DomainException.Kind.OUT_OF_SCOPE, "APPROVAL_LIMIT_EXCEEDED",
+                    "the reduction exceeds the reviewer's approval limit", List.of("VF-051", "CC-003"),
+                    String.valueOf(Math.max(limit, 0)));
+        }
+        CatalogueEntry entry = repo.catalogueVersions(v.catalogueCode()).stream()
+                .filter(e -> e.versionNo() == v.catalogueVersion()).findFirst()
+                .orElseThrow(() -> new IllegalStateException("catalogue version of " + number + " is missing"));
+        UUID original = v.payableId();
+        payables.cancel(original, "fine reduced on objection");
+        v.payableRegistered(payables.registerReduced(number, v.report().responsibleFileNumber(), region,
+                settings.currency(), reducedFineMinor, entry.financialItem(), entry.beneficiary(),
+                entry.descriptionEn()));
+        repo.updateViolation(v);
+        audit.record("VIOLATION_FINE_REDUCED", ENTITY, number,
+                Map.of("amountMinor", v.fineMinor(), "payableId", original.toString()),
+                Map.of("amountMinor", reducedFineMinor, "payableId", v.payableId().toString()), reason);
+        events.record("itms.violation.fine-reduced", number, Map.of("violationNumber", number,
+                "fineMinor", v.fineMinor(), "reducedFineMinor", reducedFineMinor, "currency", settings.currency(),
+                "recipientId", v.report().responsibleFileNumber()));
+        return v;
+    }
+
     @Transactional
     public List<Violation> byFile(String fileNumber, Violation.Status status, int limit, Caller caller) {
         require(caller.grants().holds(READ));
@@ -411,6 +473,11 @@ public class ViolationService {
         channelOf(caller);
         Violation v = repo.findForUpdate(number).orElseThrow(() -> notFound(number));
         require(caller.grants().allowsInRegion(permission, v.report().region()));
+        if (repo.inInstalmentPlan(v.id())) {
+            // Q-083 (d): the plan's instalments already charge this fine; it is not cancelled on its own.
+            throw DomainException.conflict("VIOLATION_IN_INSTALMENT_PLAN",
+                    "a violation in an instalment plan cannot be cancelled", List.of("VF-021", "VF-071"));
+        }
         if (reasonCode == null || !settings.cancelReasons().contains(reasonCode)) {
             throw DomainException.validation("CANCEL_REASON_INVALID", "choose a cancellation reason from the list",
                     List.of("VF-021"), String.join(", ", settings.cancelReasons().stream().sorted().toList()));
@@ -512,7 +579,7 @@ public class ViolationService {
         Instant now = clock.instant();
         if (!policy.enabled() || v == null || v.status() != Violation.Status.OPEN
                 || v.recordedAt().isAfter(now.minus(policy.after())) || repo.activeUnpaidHold(v.id()).isPresent()
-                || repo.underObjection(v.id())) {
+                || repo.underObjection(v.id()) || repo.coveredByPlan(v.id())) {
             return false;
         }
         UnpaidHold.Subject subject = UnpaidHold.subjectOf(v);
@@ -535,14 +602,32 @@ public class ViolationService {
                 .map(UnpaidHold::violationNumber).toList();
     }
 
-    /** Lifts the unpaid hold of a paid or cancelled violation (VF-023); hold-eligibility-service errors propagate. */
+    /**
+     * Lifts the unpaid hold of a paid or cancelled violation, or of one an ACTIVE instalment plan covers (VF-023,
+     * VF-073); hold-eligibility-service errors propagate.
+     */
     @Transactional
     public boolean liftIfSettled(String number) {
         Violation v = repo.findForUpdate(number).orElse(null);
-        if (v == null || v.status() == Violation.Status.OPEN) {
+        if (v == null || v.status() == Violation.Status.OPEN && !repo.coveredByPlan(v.id())) {
             return false;
         }
         return liftUnpaidHold(v, CurrentActor.system("violation-unpaid-holds"));
+    }
+
+    /** VF-073: lifts at once when an ACTIVE plan covers the violation; if that fails the job lifts it later. */
+    @Transactional
+    public void tryLiftCovered(String number) {
+        Violation v = repo.findForUpdate(number).orElse(null);
+        if (v != null && v.status() == Violation.Status.OPEN && repo.coveredByPlan(v.id())) {
+            tryLiftUnpaidHold(v, CurrentActor.system("violation-instalments"));
+        }
+    }
+
+    /** True while the violation is in an instalment plan that is not completed (VF-071). */
+    @Transactional(readOnly = true)
+    public boolean inInstalmentPlan(Violation v) {
+        return repo.inInstalmentPlan(v.id());
     }
 
     /** Lifts at once when a violation is paid or cancelled; if that fails the job lifts it on its next run. */

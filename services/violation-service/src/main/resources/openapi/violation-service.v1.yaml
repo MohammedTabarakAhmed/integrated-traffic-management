@@ -32,6 +32,74 @@ tags:
   - name: Black points
 
 paths:
+  /v1/instalment-plans:
+    post:
+      tags: [Violations]
+      summary: Open an own instalment plan for open violations of one traffic file (VF-071, VF-073)
+      description: |
+        The violations must be OPEN, charged to `fileNumber`, payable, not under objection, not cross-border and in no
+        other plan; their total (reduced fines count at the reduced amount) must reach the configured minimum
+        (`INSTALMENT_TOTAL_TOO_LOW`) and `months` lie in the configured range (`INSTALMENT_MONTHS_INVALID`). Their
+        payables are cancelled and one VIOLATION payable per monthly instalment is registered at payment-service with
+        item reference `<plan number>-<nn>`; the first is due one month after today. The violations stay OPEN, and
+        their unpaid holds (VF-023) are lifted while the plan is ACTIVE. An instalment unpaid after its due date plus
+        the grace period makes the plan LATE (`itms.violation.instalment-missed`) and the holds return; paying the
+        late instalments makes it ACTIVE again. The last payment completes the plan and marks the violations PAID.
+      operationId: createInstalmentPlan
+      x-itms-permission: violation.instalment.create
+      x-itms-scope: [region]
+      parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [fileNumber, region, violationNumbers, months]
+              properties:
+                fileNumber: { type: string, maxLength: 60 }
+                region: { type: string, maxLength: 40 }
+                violationNumbers: { type: array, minItems: 1, maxItems: 50, items: { type: string, maxLength: 30 } }
+                months: { type: integer, minimum: 1, maximum: 60 }
+      responses:
+        '201': { description: Plan opened, content: { application/json: { schema: { $ref: '#/components/schemas/InstalmentPlan' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [Violations]
+      summary: List a traffic file's instalment plans in the caller's regions (VF-071, CC-001)
+      operationId: listInstalmentPlans
+      x-itms-permission: violation.read
+      x-itms-scope: [region]
+      parameters:
+        - { name: fileNumber, in: query, required: true, schema: { type: string, maxLength: 60 } }
+        - { name: limit, in: query, schema: { type: integer, default: 20, minimum: 1, maximum: 100 } }
+      responses:
+        '200': { description: The file's plans, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/InstalmentPlan' } } } } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /v1/instalment-plans/{number}:
+    get:
+      tags: [Violations]
+      summary: Read an instalment plan with its schedule (VF-071, VF-073)
+      operationId: getInstalmentPlan
+      x-itms-permission: violation.read
+      x-itms-scope: [region]
+      parameters:
+        - { name: number, in: path, required: true, schema: { type: string, pattern: '^IP-[0-9]{4}-[0-9]{9}$' } }
+      responses:
+        '200': { description: The plan, content: { application/json: { schema: { $ref: '#/components/schemas/InstalmentPlan' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
   /v1/violation-books:
     post:
       tags: [Violations]
@@ -377,8 +445,9 @@ paths:
       tags: [Violations]
       operationId: listPendingObjections
       summary: List objections awaiting supervisor review (VF-051)
+      description: Only objections to violations in regions the caller's review grant reaches are listed (CC-001).
       x-itms-permission: violation.objection.review
-      x-itms-scope: national
+      x-itms-scope: [region]
       parameters:
         - { name: limit, in: query, schema: { type: integer, default: 100, minimum: 1, maximum: 500 } }
       responses:
@@ -393,8 +462,14 @@ paths:
       tags: [Violations]
       operationId: decideObjection
       summary: Decide or refer a pending objection (VF-051)
+      description: |
+        ACCEPT cancels the violation; REDUCE accepts the objection by lowering the fine to `reducedFineMinor` (above
+        zero, below the fine), within the caller's `FINE_REDUCTION_AMOUNT` approval limit for the violation's region
+        (CC-003; `APPROVAL_LIMIT_EXCEEDED` otherwise); the open payable is replaced at the reduced amount and the
+        violation is confirmed (Q-082 a). REDUCE is refused for a cross-border violation (Q-082 b). REJECT lets the
+        violation stand; REFER_TO_COURT keeps payment paused.
       x-itms-permission: violation.objection.review
-      x-itms-scope: national
+      x-itms-scope: [region]
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -407,8 +482,9 @@ paths:
               additionalProperties: false
               required: [decision, reason]
               properties:
-                decision: { type: string, enum: [ACCEPT, REJECT, REFER_TO_COURT] }
+                decision: { type: string, enum: [ACCEPT, REDUCE, REJECT, REFER_TO_COURT] }
                 reason: { type: string, minLength: 3, maxLength: 500 }
+                reducedFineMinor: { type: integer, format: int64, minimum: 1, description: 'Required with REDUCE only' }
       responses:
         '200': { description: Objection decision recorded, content: { application/json: { schema: { $ref: '#/components/schemas/Objection' } } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
@@ -536,6 +612,35 @@ components:
             Partner state that registered the vehicle; the violation is then sent to that state (XB-001). PARTNER
             violations are never recorded here; they arrive by exchange (XB-002).
           oneOf: [ { type: string, pattern: '^[A-Z0-9]{2,12}$' }, { type: 'null' } ]
+    InstalmentPlan:
+      type: object
+      required: [number, fileNumber, region, currency, totalMinor, months, graceDays, status, createdBy, createdAt,
+                 violationNumbers, instalments]
+      properties:
+        number: { type: string }
+        fileNumber: { type: string }
+        region: { type: string }
+        currency: { type: string }
+        totalMinor: { type: integer, format: int64 }
+        months: { type: integer }
+        graceDays: { type: integer }
+        status: { type: string, enum: [ACTIVE, LATE, COMPLETED] }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        closedAt: { type: [string, 'null'], format: date-time }
+        violationNumbers: { type: array, items: { type: string } }
+        instalments:
+          type: array
+          items:
+            type: object
+            required: [seq, dueDate, amountMinor, itemRef, paid]
+            properties:
+              seq: { type: integer }
+              dueDate: { type: string, format: date }
+              amountMinor: { type: integer, format: int64 }
+              itemRef: { type: string, description: 'Item reference of the instalment payable at payment-service' }
+              paid: { type: boolean }
+              paidAt: { type: [string, 'null'], format: date-time }
     Objection:
       type: object
       required: [id, violationId, violationNumber, submittedBy, submittedAt, reasonCode, explanation, evidenceIds,
@@ -552,8 +657,9 @@ components:
         status: { type: string, enum: [PENDING, ACCEPTED, REJECTED, COURT] }
         decidedBy: { type: [string, 'null'] }
         decidedAt: { type: [string, 'null'], format: date-time }
-        decision: { type: [string, 'null'], enum: [ACCEPT, REJECT, REFER_TO_COURT, null] }
+        decision: { type: [string, 'null'], enum: [ACCEPT, REDUCE, REJECT, REFER_TO_COURT, null] }
         decisionReason: { type: [string, 'null'] }
+        reducedFineMinor: { type: [integer, 'null'], format: int64, description: 'The new fine of a REDUCE decision' }
     PaperBook:
       type: object
       required: [serial, region, officerId, status, issuedAt]

@@ -78,6 +78,16 @@ itms:
     # the renter becomes responsible. Fail closed: if rental-service cannot answer, recording is refused (503) and
     # retried by the caller (device intake resends by source key; Q-081).
     rental-transfer-enabled: ${ITMS_VIOLATIONS_RENTAL_TRANSFER_ENABLED:true}
+    # VF-071, VF-073 (ADR-062, Q-083 interim): own instalment plans. Minimum total in minor units (BRD 5,000 local
+    # currency), 3 to 12 monthly instalments (BRD; a rules-service table later, BQ-4) and the grace days after a due
+    # date before the plan is LATE and the unpaid holds return.
+    instalments:
+      minimum-total-minor: ${ITMS_VIOLATIONS_INSTALMENT_MINIMUM_TOTAL:500000}
+      min-months: ${ITMS_VIOLATIONS_INSTALMENT_MIN_MONTHS:3}
+      max-months: ${ITMS_VIOLATIONS_INSTALMENT_MAX_MONTHS:12}
+      grace-days: ${ITMS_VIOLATIONS_INSTALMENT_GRACE_DAYS:15}
+      lapse-interval: ${ITMS_VIOLATIONS_INSTALMENT_LAPSE_INTERVAL:PT1H}
+      lapse-initial-delay: ${ITMS_VIOLATIONS_INSTALMENT_LAPSE_INITIAL_DELAY:PT2M}
     consumer-enabled: ${ITMS_VIOLATIONS_CONSUMER_ENABLED:false}
     payment-topic: ${ITMS_VIOLATIONS_PAYMENT_TOPIC:itms.payment-service.events.v1}
     # Increment 9: partner-state violations, payments abroad, forwarded objections and decisions (XB-002..XB-005).
@@ -115,6 +125,7 @@ itms:
   idempotency:
     enabled: true
     paths:
+      - /v1/instalment-plans
       - /v1/violation-books
       - /v1/violation-books/*/entries
       - /v1/violation-books/*/reconciliation

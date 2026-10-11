@@ -257,6 +257,9 @@ class JdbcViolationRepository implements Ports.ViolationRepository {
                                            where h.violation_id = violation.id and h.lifted_at is null)
                            and not exists (select 1 from violation_objection o
                                            where o.violation_id = violation.id and o.status in ('PENDING', 'COURT'))
+                           and not exists (select 1 from instalment_plan_violation pv
+                                           join instalment_plan p on p.id = pv.plan_id
+                                           where pv.violation_id = violation.id and p.status = 'ACTIVE')
                          order by recorded_at limit :l""")
                 .param("c", ts(recordedBefore)).param("l", limit)
                 .query(JdbcViolationRepository::mapViolation).list();
@@ -290,10 +293,39 @@ class JdbcViolationRepository implements Ports.ViolationRepository {
     }
 
     @Override
+    public boolean inInstalmentPlan(UUID violationId) {
+        return jdbc.sql("""
+                        select exists (select 1 from instalment_plan_violation pv
+                                         join instalment_plan p on p.id = pv.plan_id
+                                        where pv.violation_id = :v and p.status <> 'COMPLETED')""")
+                .param("v", violationId).query(Boolean.class).single();
+    }
+
+    @Override
+    public boolean coveredByPlan(UUID violationId) {
+        return jdbc.sql("""
+                        select exists (select 1 from instalment_plan_violation pv
+                                         join instalment_plan p on p.id = pv.plan_id
+                                        where pv.violation_id = :v and p.status = 'ACTIVE')""")
+                .param("v", violationId).query(Boolean.class).single();
+    }
+
+    @Override
+    public java.util.OptionalLong reducedFine(UUID violationId) {
+        return jdbc.sql("""
+                        select reduced_fine_minor from violation_objection
+                         where violation_id = :v and decision = 'REDUCE'""")
+                .param("v", violationId).query(Long.class).optional()
+                .map(java.util.OptionalLong::of).orElse(java.util.OptionalLong.empty());
+    }
+
+    @Override
     public List<UnpaidHold> settledWithActiveHold(int limit) {
         return jdbc.sql(UNPAID_HOLD_SELECT + """
                           join violation v on v.id = h.violation_id
-                         where h.lifted_at is null and v.status <> 'OPEN'
+                         where h.lifted_at is null and (v.status <> 'OPEN' or exists (
+                               select 1 from instalment_plan_violation pv join instalment_plan p on p.id = pv.plan_id
+                                where pv.violation_id = v.id and p.status = 'ACTIVE'))
                          order by h.placed_at limit :l""")
                 .param("l", limit).query(JdbcViolationRepository::mapUnpaidHold).list();
     }

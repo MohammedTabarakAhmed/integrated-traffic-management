@@ -5,6 +5,7 @@ import gov.itms.violation.domain.Objection;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 import java.net.URI;
 import java.time.Instant;
@@ -27,16 +28,18 @@ class ObjectionController {
                       @Size(max = 20) List<@NotBlank @Size(max = 64) String> evidenceIds) {
     }
 
-    record DecisionBody(@NotNull Objection.Decision decision, @NotBlank @Size(min = 3, max = 500) String reason) {
+    record DecisionBody(@NotNull Objection.Decision decision, @NotBlank @Size(min = 3, max = 500) String reason,
+                        @Positive Long reducedFineMinor) {
     }
 
     record ObjectionDto(UUID id, UUID violationId, String violationNumber, String submittedBy, Instant submittedAt,
                         String reasonCode, String explanation, List<String> evidenceIds, Objection.Status status,
-                        String decidedBy, Instant decidedAt, Objection.Decision decision, String decisionReason) {
+                        String decidedBy, Instant decidedAt, Objection.Decision decision, String decisionReason,
+                        Long reducedFineMinor) {
         static ObjectionDto of(Objection o) {
             return new ObjectionDto(o.id(), o.violationId(), o.violationNumber(), o.submittedBy(), o.submittedAt(),
                     o.reasonCode(), o.explanation(), o.evidenceIds(), o.status(), o.decidedBy(), o.decidedAt(),
-                    o.decision(), o.decisionReason());
+                    o.decision(), o.decisionReason(), o.reducedFineMinor());
         }
     }
 
@@ -68,6 +71,7 @@ class ObjectionController {
     @PostMapping("/v1/objections/{id}/decisions")
     @PreAuthorize("hasAuthority('violation.objection.review')")
     ObjectionDto decide(@PathVariable UUID id, @Valid @RequestBody DecisionBody body) {
-        return ObjectionDto.of(objections.decide(id, body.decision(), body.reason(), callers.current()));
+        return ObjectionDto.of(objections.decide(id, body.decision(), body.reason(), body.reducedFineMinor(),
+                callers.current()));
     }
 }

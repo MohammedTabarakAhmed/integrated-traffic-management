@@ -9,6 +9,8 @@ import gov.itms.violation.domain.Violation;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -20,6 +22,9 @@ public class ObjectionService {
 
     public static final String SUBMIT = "violation.objection.submit";
     public static final String REVIEW = "violation.objection.review";
+
+    private static final int QUEUE_BATCH = 500;
+    private static final int QUEUE_SCAN_LIMIT = 20_000;
 
     private final Ports.Objections objections;
     private final Ports.CrossborderLinks links;
@@ -61,9 +66,14 @@ public class ObjectionService {
             throw DomainException.conflict("VIOLATION_NOT_OPEN", "only an open violation can be challenged",
                     List.of("VF-050"));
         }
+        if (violations.inInstalmentPlan(violation)) {
+            // Q-083 (e): the customer accepted the fine by choosing to pay it in instalments.
+            throw DomainException.conflict("VIOLATION_IN_INSTALMENT_PLAN",
+                    "a violation in an instalment plan cannot be challenged", List.of("VF-050", "VF-071"));
+        }
         List<String> evidence = evidenceIds == null ? List.of() : List.copyOf(evidenceIds);
-        Objection objection = new Objection(UUID.randomUUID(), violation.id(), number, caller.actor().id(), now,
-                reasonCode, explanation, evidence, Objection.Status.PENDING, null, null, null, null);
+        Objection objection = Objection.submitted(UUID.randomUUID(), violation.id(), number, caller.actor().id(), now,
+                reasonCode, explanation, evidence);
         if (!objections.insert(objection)) {
             throw DomainException.conflict("OBJECTION_EXISTS", "an objection has already been submitted",
                     List.of("VF-050"));
@@ -102,9 +112,8 @@ public class ObjectionService {
         }
         String text = explanation == null || explanation.isBlank() ? "objection from partner state " + partner
                 : explanation.length() > 1000 ? explanation.substring(0, 1000) : explanation;
-        if (refusal == null && !objections.insert(new Objection(UUID.randomUUID(), violation.id(), number,
-                "partner:" + partner, now, "PARTNER_OBJECTION", text, List.of(), Objection.Status.PENDING, null,
-                null, null, null))) {
+        if (refusal == null && !objections.insert(Objection.submitted(UUID.randomUUID(), violation.id(), number,
+                "partner:" + partner, now, "PARTNER_OBJECTION", text, List.of()))) {
             refusal = "OBJECTION_EXISTS";
         }
         if (refusal != null) {
@@ -151,11 +160,40 @@ public class ObjectionService {
             throw DomainException.validation("PAGE_INVALID", "limit must be 1..500", List.of("VF-051"));
         }
         // Objections to partner-state violations are decided by the issuing state (XB-005), not in this queue.
-        return objections.pendingLocal(limit);
+        // CC-001: the reviewer sees only objections to violations in regions their review grant reaches.
+        List<Objection> page = new ArrayList<>();
+        Instant after = null;
+        UUID afterId = null;
+        for (int scanned = 0; page.size() < limit && scanned < QUEUE_SCAN_LIMIT; scanned += QUEUE_BATCH) {
+            List<Ports.Objections.Queued> batch = objections.pendingLocal(QUEUE_BATCH, after, afterId);
+            for (Ports.Objections.Queued q : batch) {
+                if (page.size() < limit && caller.grants().allowsInRegion(REVIEW, q.region())) {
+                    page.add(q.objection());
+                }
+            }
+            if (batch.size() < QUEUE_BATCH) {
+                break;
+            }
+            Objection last = batch.get(batch.size() - 1).objection();
+            after = last.submittedAt();
+            afterId = last.id();
+        }
+        return page;
     }
 
     @Transactional
     public Objection decide(UUID id, Objection.Decision decision, String reason, Caller caller) {
+        return decide(id, decision, reason, null, caller);
+    }
+
+    /**
+     * Decides a pending objection (VF-051): ACCEPT cancels the violation, REDUCE lowers its fine to
+     * {@code reducedFineMinor} within the reviewer's FINE_REDUCTION_AMOUNT approval limit (CC-003), REJECT lets it
+     * stand, REFER_TO_COURT leaves payment paused.
+     */
+    @Transactional
+    public Objection decide(UUID id, Objection.Decision decision, String reason, Long reducedFineMinor,
+                            Caller caller) {
         if (!caller.grants().holds(REVIEW)) {
             throw new DomainException(DomainException.Kind.OUT_OF_SCOPE, "OBJECTION_REVIEW_FORBIDDEN",
                     "cannot decide an objection", List.of("VF-051"));
@@ -167,9 +205,20 @@ public class ObjectionService {
             throw DomainException.conflict("OBJECTION_DECIDED_BY_PARTNER",
                     "the partner state that issued the violation decides this objection", List.of("XB-005"));
         }
-        Objection result = current.decide(decision, caller.actor().id(), clock.instant(), reason);
+        violations.requireReviewer(current.violationNumber(), caller);
+        if (decision == Objection.Decision.REDUCE && links.byNumber(current.violationNumber()).isPresent()) {
+            // Q-082 (b): the fine of a violation sent to a partner state is collected there; no reduction here.
+            throw DomainException.conflict("REDUCTION_NOT_FOR_CROSSBORDER",
+                    "the fine of a cross-border violation cannot be reduced here", List.of("VF-051", "XB-001"));
+        }
+        Objection result = current.decide(decision, caller.actor().id(), clock.instant(), reason, reducedFineMinor);
         objections.saveDecision(result);
-        if (decision == Objection.Decision.ACCEPT) {
+        if (decision == Objection.Decision.REDUCE) {
+            // The original payable is replaced by one at the reduced fine, with no objection hold (VF-051, VF-052).
+            violations.reduceFromObjection(current.violationNumber(), reducedFineMinor, reason, caller);
+            // Q-082 (a): the violation stands at the lower fine, so it is confirmed and its points added (VF-030).
+            violations.confirmAfterReduction(current.violationNumber());
+        } else if (decision == Objection.Decision.ACCEPT) {
             // The accepted challenge withdraws the original payable and cancels its point entry.
             violations.cancelFromObjection(current.violationNumber(), "OBJECTION_ACCEPTED", reason, caller);
             violations.resumeAfterObjection(current.violationNumber(), "objection accepted", caller);
@@ -178,10 +227,21 @@ public class ObjectionService {
             // Q-001: a rejected objection confirms the violation; its black points are added now (VF-030).
             violations.confirmAfterRejection(current.violationNumber());
         }
+        Map<String, Object> after = new LinkedHashMap<>();
+        after.put("status", result.status().name());
+        after.put("decision", decision.name());
+        if (reducedFineMinor != null) {
+            after.put("reducedFineMinor", reducedFineMinor);
+        }
         audit.record("VIOLATION_OBJECTION_DECIDED", "Violation", current.violationNumber(),
-                Map.of("status", "PENDING"), Map.of("status", result.status().name()), reason);
-        events.record("itms.violation.objection-decided", current.violationNumber(),
-                Map.of("violationNumber", current.violationNumber(), "decision", decision.name()));
+                Map.of("status", "PENDING"), after, reason);
+        Map<String, Object> event = new LinkedHashMap<>();
+        event.put("violationNumber", current.violationNumber());
+        event.put("decision", decision.name());
+        if (reducedFineMinor != null) {
+            event.put("reducedFineMinor", reducedFineMinor);
+        }
+        events.record("itms.violation.objection-decided", current.violationNumber(), event);
         return result;
     }
 }

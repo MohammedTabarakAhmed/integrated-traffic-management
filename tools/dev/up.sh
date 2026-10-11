@@ -115,12 +115,14 @@ echo "== Building service jars"
 mvn -B -ntp -q package -DskipTests -pl services/iam-service,services/reference-data-service,services/transaction-service,services/hold-eligibility-service,services/traffic-file-service,services/fees-service,services/rules-service,services/workflow-service,services/notification-service,services/document-service,services/appointment-service,services/audit-service,services/payment-service,services/vehicle-service,services/violation-service,services/device-service,services/licensing-service,services/accident-service,services/rental-service,services/permit-service,services/geo-service,services/road-permit-service,services/marine-service,services/crossborder-service -am
 
 echo "== Starting the databases and OpenBao"
-"${COMPOSE[@]}" up -d --wait postgres iam-postgres transaction-postgres hold-postgres traffic-file-postgres fees-postgres rules-postgres workflow-postgres notification-postgres document-postgres appointment-postgres audit-postgres payment-postgres vehicle-postgres violation-postgres device-postgres accident-postgres rental-postgres openbao
+"${COMPOSE[@]}" up -d --wait postgres iam-postgres transaction-postgres hold-postgres traffic-file-postgres fees-postgres rules-postgres workflow-postgres notification-postgres document-postgres appointment-postgres audit-postgres payment-postgres vehicle-postgres violation-postgres device-postgres accident-postgres rental-postgres permit-postgres geo-postgres road-permit-postgres marine-postgres crossborder-postgres openbao
 
 echo "== Database owner role itms_owner (ADR-039)"
 for db in "postgres refdata $REFDATA_DB_USER" "iam-postgres iam $IAM_DB_USER" \
           "transaction-postgres transaction $TXN_DB_USER" "hold-postgres hold $HOLD_DB_USER" \
-          "traffic-file-postgres trafficfile $TF_DB_USER" "fees-postgres fees $FEES_DB_USER" "rules-postgres rules $RULES_DB_USER" "workflow-postgres workflow $WORKFLOW_DB_USER" "notification-postgres notification $NOTIF_DB_USER" "document-postgres document $DOC_DB_USER" "appointment-postgres appointment $APPT_DB_USER" "audit-postgres audit $AUDIT_DB_USER" "payment-postgres payment $PAY_DB_USER" "vehicle-postgres vehicle $VEH_DB_USER" "violation-postgres violation $VIO_DB_USER" "device-postgres device $DEVICE_DB_USER" "accident-postgres accident $ACC_DB_USER" "rental-postgres rental $RENT_DB_USER"; do
+          "traffic-file-postgres trafficfile $TF_DB_USER" "fees-postgres fees $FEES_DB_USER" "rules-postgres rules $RULES_DB_USER" "workflow-postgres workflow $WORKFLOW_DB_USER" "notification-postgres notification $NOTIF_DB_USER" "document-postgres document $DOC_DB_USER" "appointment-postgres appointment $APPT_DB_USER" "audit-postgres audit $AUDIT_DB_USER" "payment-postgres payment $PAY_DB_USER" "vehicle-postgres vehicle $VEH_DB_USER" "violation-postgres violation $VIO_DB_USER" "device-postgres device $DEVICE_DB_USER" "accident-postgres accident $ACC_DB_USER" "rental-postgres rental $RENT_DB_USER" \
+          "permit-postgres permit $PERMIT_DB_USER" "geo-postgres geo $GEO_DB_USER" "road-permit-postgres roadpermit $ROAD_PERMIT_DB_USER" \
+          "marine-postgres marine $MARINE_DB_USER" "crossborder-postgres crossborder $XB_DB_USER"; do
   set -- $db
   "${COMPOSE[@]}" exec -T "$1" psql -q -v ON_ERROR_STOP=1 -U "$3" -d "$2" < infra/local/db/itms-owner.sql
   echo "   $2: itms_owner owns the schema"
@@ -242,6 +244,10 @@ grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker PAYMENT_GATEWAY_ADAPTER
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker CASHIER_SUPERVISOR
 # Vehicles (VL-*; ADR-055): dev.maker records vehicles and registers them; dev.checker manages plate series and records inspections locally.
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker VEHICLE_OFFICER
+# Customs/dealer certificate feed (VL-002, VL-010): locally dev.maker stands in for the customs adapter's account.
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker CUSTOMS_INTEGRATION
+# Own instalment plans for open fines (VF-071, VF-073).
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker INSTALMENT_OFFICER
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker PLATE_ADMIN
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker INSPECTION_CENTRE
 # Violations (VF-*; ADR-056): dev.maker records violations and keeps the catalogue; dev.checker cancels (supervisor).

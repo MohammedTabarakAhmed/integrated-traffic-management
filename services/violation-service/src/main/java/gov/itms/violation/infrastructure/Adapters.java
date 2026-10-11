@@ -1,6 +1,7 @@
 package gov.itms.violation.infrastructure;
 
 import gov.itms.platform.client.ServiceCallException;
+import gov.itms.violation.application.InstalmentService;
 import gov.itms.violation.application.Ports;
 import gov.itms.violation.application.ViolationService;
 import gov.itms.violation.domain.UnpaidHold;
@@ -43,21 +44,56 @@ final class Adapters {
         @Override
         public UUID register(String violationNumber, String fileNumber, String region, String currency,
                              long amountMinor, String financialItem, String beneficiary, String description) {
-            Map<String, Object> line = new LinkedHashMap<>();
-            line.put("financialItem", financialItem);
-            line.put("beneficiary", beneficiary);
-            line.put("description", description.length() > 200 ? description.substring(0, 200) : description);
-            line.put("amountMinor", amountMinor);
+            return register(violationNumber, fileNumber, region, currency, amountMinor, financialItem, beneficiary,
+                    description, "payable-" + violationNumber.toLowerCase(java.util.Locale.ROOT));
+        }
+
+        @Override
+        public UUID registerReduced(String violationNumber, String fileNumber, String region, String currency,
+                                    long amountMinor, String financialItem, String beneficiary, String description) {
+            // A key of its own: the original payable's key would replay the original payable (ADR-032).
+            return register(violationNumber, fileNumber, region, currency, amountMinor, financialItem, beneficiary,
+                    description, "payable-reduced-" + violationNumber.toLowerCase(java.util.Locale.ROOT));
+        }
+
+        @Override
+        public UUID registerInstalment(String itemRef, String fileNumber, String region, String currency,
+                                       List<Ports.Payables.Line> lines) {
+            return register(itemRef, fileNumber, region, currency, lines,
+                    "payable-" + itemRef.toLowerCase(java.util.Locale.ROOT));
+        }
+
+        @SuppressWarnings("checkstyle:ParameterNumber")
+        private UUID register(String violationNumber, String fileNumber, String region, String currency,
+                              long amountMinor, String financialItem, String beneficiary, String description,
+                              String idempotencyKey) {
+            return register(violationNumber, fileNumber, region, currency,
+                    List.of(new Ports.Payables.Line(financialItem, beneficiary, description, amountMinor)),
+                    idempotencyKey);
+        }
+
+        /** A VIOLATION payable; an instalment's item reference is {@code <plan>-<nn>} (VF-071). */
+        private UUID register(String violationNumber, String fileNumber, String region, String currency,
+                              List<Ports.Payables.Line> lines, String idempotencyKey) {
+            List<Map<String, Object>> bodyLines = lines.stream().map(l -> {
+                Map<String, Object> line = new LinkedHashMap<>();
+                line.put("financialItem", l.financialItem());
+                line.put("beneficiary", l.beneficiary());
+                line.put("description", l.description().length() > 200 ? l.description().substring(0, 200)
+                        : l.description());
+                line.put("amountMinor", l.amountMinor());
+                return line;
+            }).toList();
             Map<String, Object> body = new LinkedHashMap<>();
             body.put("itemType", "VIOLATION");
             body.put("itemRef", violationNumber);
             body.put("trafficFileNumber", fileNumber);
             body.put("region", region);
             body.put("currency", currency);
-            body.put("lines", List.of(line));
+            body.put("lines", bodyLines);
             try {
                 PayableBody p = client.post().uri("/v1/payables").header("X-Channel", "BACKOFFICE")
-                        .header("Idempotency-Key", "payable-" + violationNumber.toLowerCase(java.util.Locale.ROOT))
+                        .header("Idempotency-Key", idempotencyKey)
                         .contentType(MediaType.APPLICATION_JSON).body(body).retrieve().body(PayableBody.class);
                 if (p == null || p.id() == null) {
                     throw new Ports.UnavailableException("PAYMENTS_UNAVAILABLE", "payment cannot be prepared", null);
@@ -216,14 +252,19 @@ final class Adapters {
         }
     }
 
-    /** Marks violations paid or open again from payment-service events (VF-070, UAT-4, FN-011). */
+    /**
+     * Marks violations paid or open again from payment-service events (VF-070, UAT-4, FN-011); an item reference
+     * {@code IP-...-nn} is an instalment of a plan (VF-073).
+     */
     static class PaymentEventListener {
 
         private final ViolationService violations;
+        private final InstalmentService instalments;
         private final ObjectMapper json;
 
-        PaymentEventListener(ViolationService violations, ObjectMapper json) {
+        PaymentEventListener(ViolationService violations, InstalmentService instalments, ObjectMapper json) {
             this.violations = violations;
+            this.instalments = instalments;
             this.json = json;
         }
 
@@ -245,7 +286,13 @@ final class Adapters {
             for (JsonNode item : event.path("data").path("items")) {
                 if ("VIOLATION".equals(item.path("itemType").asString(""))) {
                     String number = item.path("itemRef").asString("");
-                    if (confirmed) {
+                    if (number.startsWith(InstalmentService.PLAN_PREFIX)) {
+                        if (confirmed) {
+                            instalments.onInstalmentPaid(number);
+                        } else {
+                            instalments.onInstalmentReceiptCancelled(number);
+                        }
+                    } else if (confirmed) {
                         violations.onPaid(number);
                     } else {
                         violations.onReceiptCancelled(number);

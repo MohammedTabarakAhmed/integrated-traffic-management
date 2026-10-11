@@ -69,6 +69,21 @@ public final class Ports {
         /** True while the violation has an objection awaiting review or referred to court (VF-052). */
         boolean underObjection(UUID violationId);
 
+        /** True while the violation is in an instalment plan that is not completed (VF-073). */
+        default boolean inInstalmentPlan(UUID violationId) {
+            return false;
+        }
+
+        /** True while an ACTIVE instalment plan covers the violation, so no unpaid hold applies (VF-073). */
+        default boolean coveredByPlan(UUID violationId) {
+            return false;
+        }
+
+        /** The fine set by an objection accepted with a reduction (VF-051); empty when not reduced. */
+        default java.util.OptionalLong reducedFine(UUID violationId) {
+            return java.util.OptionalLong.empty();
+        }
+
         /**
          * Open or paid local violations carrying points, recorded before {@code recordedBefore}, with no points added
          * and no objection pending or at court, oldest first (VF-030 confirmation).
@@ -98,6 +113,26 @@ public final class Ports {
 
         UUID register(String violationNumber, String fileNumber, String region, String currency, long amountMinor,
                       String financialItem, String beneficiary, String description);
+
+        /** The payable that replaces a cancelled one after an objection reduced the fine (VF-051). */
+        default UUID registerReduced(String violationNumber, String fileNumber, String region, String currency,
+                                     long amountMinor, String financialItem, String beneficiary, String description) {
+            return register(violationNumber, fileNumber, region, currency, amountMinor, financialItem, beneficiary,
+                    description);
+        }
+
+        /** One revenue line of a payable (FN-001). */
+        record Line(String financialItem, String beneficiary, String description, long amountMinor) {
+        }
+
+        /** The payable of one instalment of a plan (VF-071); its item reference is the instalment's reference. */
+        default UUID registerInstalment(String itemRef, String fileNumber, String region, String currency,
+                                        java.util.List<Line> lines) {
+            Line first = lines.getFirst();
+            return register(itemRef, fileNumber, region, currency,
+                    lines.stream().mapToLong(Line::amountMinor).sum(), first.financialItem(), first.beneficiary(),
+                    first.description());
+        }
 
         void cancel(UUID payableId, String reason);
 
@@ -146,8 +181,15 @@ public final class Ports {
         /** False when the violation already has an objection. */
         boolean insert(gov.itms.violation.domain.Objection objection);
 
-        /** Pending objections in submission order, without those to partner-state violations. */
-        java.util.List<gov.itms.violation.domain.Objection> pendingLocal(int limit);
+        /** A pending objection with the region of its violation (CC-001 scope of the review queue). */
+        record Queued(gov.itms.violation.domain.Objection objection, String region) {
+        }
+
+        /**
+         * Pending objections in submission order after the given position (both null for the first page), without
+         * those to partner-state violations.
+         */
+        java.util.List<Queued> pendingLocal(int limit, java.time.Instant afterSubmittedAt, UUID afterId);
 
         java.util.Optional<gov.itms.violation.domain.Objection> lock(UUID id);
 
@@ -156,6 +198,30 @@ public final class Ports {
         /** Decides the pending objection to a violation; false when none was pending. */
         boolean decidePending(String violationNumber, gov.itms.violation.domain.Objection.Decision decision,
                               String decidedBy, java.time.Instant at, String reason);
+    }
+
+    /** Instalment plans (VF-071, VF-073; violation V9). */
+    public interface InstalmentPlans {
+
+        long nextPlanSequence();
+
+        /** Inserts the plan, its violation links and its instalments; false if a violation is already in a plan. */
+        boolean insert(gov.itms.violation.domain.InstalmentPlan plan);
+
+        java.util.Optional<gov.itms.violation.domain.InstalmentPlan> find(String number);
+
+        java.util.Optional<gov.itms.violation.domain.InstalmentPlan> lock(String number);
+
+        java.util.List<gov.itms.violation.domain.InstalmentPlan> byFile(String fileNumber, int limit);
+
+        /** Numbers of ACTIVE plans with an instalment still unpaid after its due date plus the plan's grace days. */
+        java.util.List<String> activeWithLapsedInstalment(java.time.LocalDate today, int limit);
+
+        void instalmentPaid(UUID planId, int seq, java.time.Instant at);
+
+        void instalmentReopened(UUID planId, int seq);
+
+        void status(UUID planId, gov.itms.violation.domain.InstalmentPlan.Status status, java.time.Instant closedAt);
     }
 
     /** vehicle-service: the local vehicle carrying a plate (XB-002). */

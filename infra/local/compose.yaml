@@ -1092,6 +1092,8 @@ services:
         target: itms.clients.holds.client-secret
       - source: violation_service_client_secret
         target: itms.clients.vehicles.client-secret
+      - source: violation_service_client_secret
+        target: itms.clients.rentals.client-secret
     volumes:
       - type: volume
         source: db-credentials

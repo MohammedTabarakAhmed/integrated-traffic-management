@@ -6,9 +6,11 @@ import gov.itms.platform.client.ServiceClients;
 import gov.itms.platform.events.DomainEventRecorder;
 import gov.itms.violation.application.ViolationService;
 import gov.itms.violation.application.CrossborderViolations;
+import gov.itms.violation.application.InstalmentService;
 import gov.itms.violation.application.ObjectionService;
 import gov.itms.violation.application.ViolationBooks;
 import gov.itms.violation.domain.BlackPoints;
+import gov.itms.violation.domain.InstalmentPlan;
 import gov.itms.violation.domain.UnpaidHold;
 import io.micrometer.observation.ObservationRegistry;
 import java.time.Clock;
@@ -35,7 +37,8 @@ import tools.jackson.databind.ObjectMapper;
 /** Wires violations to PostgreSQL, payment-service, hold-eligibility-service and the payment events. */
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties({ViolationServiceConfiguration.ViolationProperties.class,
-        ViolationServiceConfiguration.CrossborderProperties.class})
+        ViolationServiceConfiguration.CrossborderProperties.class,
+        ViolationServiceConfiguration.InstalmentProperties.class})
 public class ViolationServiceConfiguration {
 
     /**
@@ -143,6 +146,78 @@ public class ViolationServiceConfiguration {
                 new Adapters.RemotePayables(ServiceClients.create(client(environment, "payments"), clock, registry)),
                 audit, events, new CrossborderViolations.Settings(x.acceptedObjectionReason(), x.beneficiary()),
                 clock);
+    }
+
+    /**
+     * {@code itms.violations.instalments.*} (VF-071, VF-073; ADR-062, Q-083): the minimum total of a plan in minor
+     * units (BRD default 5,000 local currency, so 500000 for a two-decimal currency), the allowed number of monthly
+     * instalments (BRD 3 to 12) and the grace period after a due date before the holds return. These move to a
+     * rules-service decision table when the business publishes one (VF-071 "set by the rules engine", BQ-4).
+     */
+    @ConfigurationProperties("itms.violations.instalments")
+    public record InstalmentProperties(@DefaultValue("500000") long minimumTotalMinor,
+                                       @DefaultValue("3") int minMonths,
+                                       @DefaultValue("12") int maxMonths,
+                                       @DefaultValue("15") int graceDays,
+                                       @DefaultValue("1h") Duration lapseInterval) {
+        public InstalmentProperties {
+            new InstalmentPlan.Terms(minimumTotalMinor, minMonths, maxMonths, graceDays);
+            if (lapseInterval.compareTo(Duration.ofMinutes(1)) < 0 || lapseInterval.compareTo(Duration.ofDays(1)) > 0) {
+                throw new IllegalArgumentException("itms.violations.instalments.lapse-interval must be 1 minute to 1 day");
+            }
+        }
+    }
+
+    @Bean
+    InstalmentService instalmentService(JdbcClient jdbc, ObjectMapper json, ViolationService violations,
+                                        ViolationProperties p, InstalmentProperties i, Environment environment,
+                                        AuditRecorder audit, DomainEventRecorder events, Clock clock,
+                                        ObjectProvider<ObservationRegistry> observations) {
+        ObservationRegistry registry = observations.getIfAvailable(() -> ObservationRegistry.NOOP);
+        return new InstalmentService(new JdbcInstalmentPlans(jdbc), new JdbcViolationRepository(jdbc, json),
+                new JdbcCrossborderLinks(jdbc),
+                new Adapters.RemotePayables(ServiceClients.create(client(environment, "payments"), clock, registry)),
+                violations, audit, events,
+                new InstalmentService.Settings(new InstalmentPlan.Terms(i.minimumTotalMinor(), i.minMonths(),
+                        i.maxMonths(), i.graceDays()), p.currency(), ZoneId.of(p.zone())), clock);
+    }
+
+    /** Marks instalment plans LATE when an instalment lapsed (VF-073); safe on every instance (rows are locked). */
+    @Configuration(proxyBeanMethods = false)
+    @EnableScheduling
+    static class InstalmentJobConfiguration {
+
+        @Bean
+        InstalmentLapseJob instalmentLapseJob(InstalmentService instalments) {
+            return new InstalmentLapseJob(instalments);
+        }
+    }
+
+    /** Plans with an instalment unpaid past its grace period become LATE; a failure is retried on the next run. */
+    public static class InstalmentLapseJob {
+
+        private static final Logger LOG = LoggerFactory.getLogger(InstalmentLapseJob.class);
+        private final InstalmentService instalments;
+
+        public InstalmentLapseJob(InstalmentService instalments) {
+            this.instalments = instalments;
+        }
+
+        @Scheduled(fixedDelayString = "${itms.violations.instalments.lapse-interval:PT1H}",
+                initialDelayString = "${itms.violations.instalments.lapse-initial-delay:PT2M}")
+        public void run() {
+            int late = 0;
+            for (String number : instalments.lapsedPlans()) {
+                try {
+                    late += instalments.markLateIfLapsed(number) ? 1 : 0;
+                } catch (RuntimeException e) {
+                    LOG.warn("Instalment plan {} not checked: {}", number, e.getClass().getSimpleName());
+                }
+            }
+            if (late > 0) {
+                LOG.info("Instalment plans late: {} (VF-073)", late);
+            }
+        }
     }
 
     @Bean
@@ -276,8 +351,9 @@ public class ViolationServiceConfiguration {
     static class ConsumerConfiguration {
 
         @Bean
-        Adapters.PaymentEventListener paymentEventListener(ViolationService violations, ObjectMapper json) {
-            return new Adapters.PaymentEventListener(violations, json);
+        Adapters.PaymentEventListener paymentEventListener(ViolationService violations,
+                                                           InstalmentService instalments, ObjectMapper json) {
+            return new Adapters.PaymentEventListener(violations, instalments, json);
         }
 
         @Bean

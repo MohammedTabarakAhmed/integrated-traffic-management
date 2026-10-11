@@ -720,6 +720,9 @@ body_of_pipe() { sed '$d'; }
 basket_of() { # payable ids as a JSON list -> basket id
   post_to "$PAY" "$S_MAKER" /v1/baskets "{\"payableIds\":$1}" PORTAL | body_of_pipe | json_field "['id']"
 }
+# FN-020: counter payments need the cashier's open till; a rerun on the same stack finds it open already.
+res=$(post_to "$PAY" "$S_MAKER" /v1/tills '{"region":"DXB","openingAmountMinor":0}')
+[[ "${res##*$'\n'}" == 201 || "$res" == *TILL_ALREADY_OPEN* ]] || { echo "FAIL: till not opened: $res"; exit 1; }
 payable=$(pay_general "SMK-PAY-$SMK" 1500)
 res=$(post_to "$PAY" "$S_MAKER" "/v1/baskets/$(basket_of "[\"$payable\"]")/payments" "{\"method\":\"CASH\",\"counterReference\":\"TILL-SMK-$SMK\"}")
 expect "$res" 201
@@ -753,8 +756,10 @@ if [[ "$quote_total" == 0 ]]; then # first run on this stack: publish the first-
   expect "$(post_to "$FEES" "$S_CHECKER" "/v1/fee-versions/$(body_of "$res" | json_field "['id']")/approvals" '{"reason":"checked"}')" 200
 fi
 expect "$(post_to "$VEH" "$S_CHECKER" /v1/plate-series '{"code":"SMK_DXB_PRIVATE","region":"DXB","plateCategory":"PRIVATE","colourCode":"WHITE","design":"STANDARD","prefix":"S","firstNumber":1,"lastNumber":99999,"premiumPattern":"^(\\d)\\1+$","active":true}')" 200
-new_vehicle() { # vin
-  post_to "$VEH" "$S_MAKER" /v1/vehicles "{\"vin\":\"$1\",\"spec\":{\"engineNo\":\"ENG-$SMK\",\"make\":\"TOYOTA\",\"model\":\"COROLLA\",\"modelYear\":$(date -u +%Y),\"bodyType\":\"SEDAN\",\"colours\":[\"WHITE\"],\"fuelType\":\"PETROL\",\"steering\":\"LEFT\",\"seats\":5,\"emptyWeightKg\":1200,\"grossWeightKg\":1700,\"axles\":2,\"cylinders\":4,\"category\":\"PRIVATE\"},\"ownerFileNumber\":\"TF-SMK-$SMK\",\"region\":\"DXB\"}"
+new_vehicle() { # vin: first registration needs a customs/dealer certificate (VL-010), which pre-fills the vehicle (VL-002)
+  local spec="{\"engineNo\":\"ENG-$SMK\",\"make\":\"TOYOTA\",\"model\":\"COROLLA\",\"modelYear\":$(date -u +%Y),\"bodyType\":\"SEDAN\",\"colours\":[\"WHITE\"],\"fuelType\":\"PETROL\",\"steering\":\"LEFT\",\"seats\":5,\"emptyWeightKg\":1200,\"grossWeightKg\":1700,\"axles\":2,\"cylinders\":4,\"category\":\"PRIVATE\"}"
+  expect "$(post_to "$VEH" "$S_MAKER" /v1/customs-certificates "{\"certificateNo\":\"CC-$1\",\"source\":\"CUSTOMS\",\"issuerCode\":\"DXB_CUSTOMS\",\"vin\":\"$1\",\"spec\":$spec,\"issuedOn\":\"$today\"}" PARTNER)" 201
+  post_to "$VEH" "$S_MAKER" /v1/vehicles "{\"customsCertificateNo\":\"CC-$1\",\"ownerFileNumber\":\"TF-SMK-$SMK\",\"region\":\"DXB\"}"
 }
 expired_vin=$(printf 'WDB%09d00000' "$((SMK % 1000000000))")
 expect "$(new_vehicle "$expired_vin")" 201
@@ -992,5 +997,25 @@ settlement=$(get_from "$XB" "$S_CHECKER" "/v1/partner-states/$partner/settlement
 printf '%s' "$settlement" | "$PY" -c "import json,sys; s=json.load(sys.stdin)['items'][0]; assert s['collectedHereMinor']==30000 and s['commissionHereMinor']==3000 and s['owedToPartnerMinor']==27000, s" \
   || { echo "FAIL: UAT-5 settlement $settlement"; exit 1; }
 echo "   UAT-5: $xb_number (partner $partner) paid here -> PAID; notice acknowledged after ${notice_secs}s (<= 900); settlement 30000 collected, 3000 commission kept"
+
+echo "47. Instalment plans (VF-071, VF-073): two open fines move into a 3-month plan; the first instalment paid at the counter reaches the plan"
+catalogue "SMKI_$SMK" 300000 0
+plan_file="TF-SMKI-$SMK"
+first_fine=$(record "SMKI_$SMK" "$plan_file" "")
+second_fine=$(record "SMKI_$SMK" "$plan_file" "")
+expect "$(post_to "$VIO" "$S_MAKER" /v1/instalment-plans "{\"fileNumber\":\"$plan_file\",\"region\":\"DXB\",\"violationNumbers\":[\"$first_fine\"],\"months\":3}")" 422 INSTALMENT_TOTAL_TOO_LOW
+res=$(post_to "$VIO" "$S_MAKER" /v1/instalment-plans "{\"fileNumber\":\"$plan_file\",\"region\":\"DXB\",\"violationNumbers\":[\"$first_fine\",\"$second_fine\"],\"months\":3}")
+expect "$res" 201
+plan=$(body_of "$res" | json_field "['number']")
+[[ "$(pay_sql "select count(*) from payable where item_ref = '$first_fine' and status = 'CANCELLED'")" == 1 ]] \
+  || { echo "FAIL: the fine's own payable was not replaced"; exit 1; }
+inst_payable=$(pay_sql "select id from payable where item_ref = '$plan-01' and status = 'OPEN'")
+[[ -n "$inst_payable" ]] || { echo "FAIL: no payable for instalment $plan-01"; exit 1; }
+expect "$(post_to "$PAY" "$S_MAKER" "/v1/baskets/$(basket_of "[\"$inst_payable\"]")/payments" "{\"method\":\"CASH\",\"counterReference\":\"TILL-IP-$SMK\"}")" 201
+first_paid() { [[ "$(get_from "$VIO" "$S_MAKER" "/v1/instalment-plans/$plan" | json_field "['instalments'][0]['paid']")" == True ]]; }
+wait_until 60 first_paid || { echo "FAIL: instalment 1 of $plan not marked paid"; exit 1; }
+[[ "$(get_from "$VIO" "$S_MAKER" "/v1/violations/$first_fine" | json_field "['status']")" == OPEN ]] \
+  || { echo "FAIL: VF-073 the violation should stay open while the plan runs"; exit 1; }
+echo "   $plan: $first_fine + $second_fine (600000) in 3 instalments; instalment 1 paid at the counter -> plan updated; violations stay OPEN"
 
 echo "SMOKE OK"

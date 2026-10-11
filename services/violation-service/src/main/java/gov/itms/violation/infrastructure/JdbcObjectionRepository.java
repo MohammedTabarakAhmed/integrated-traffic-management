@@ -35,13 +35,17 @@ class JdbcObjectionRepository implements Ports.Objections {
     }
 
     @Override
-    public List<Objection> pendingLocal(int limit) {
+    public List<Ports.Objections.Queued> pendingLocal(int limit, Instant afterSubmittedAt, UUID afterId) {
         return jdbc.sql("""
-                select o.* from violation_objection o where o.status = 'PENDING' and not exists (
+                select o.*, v.region from violation_objection o join violation v on v.id = o.violation_id
+                where o.status = 'PENDING' and not exists (
                     select 1 from violation_crossborder x where x.violation_id = o.violation_id
                     and x.direction = 'INBOUND')
-                order by o.submitted_at limit :n
-                """).param("n", limit).query((rs, row) -> map(rs)).list();
+                  and (cast(:after as timestamptz) is null
+                       or (o.submitted_at, o.id) > (cast(:after as timestamptz), cast(:afterId as uuid)))
+                order by o.submitted_at, o.id limit :n
+                """).param("after", ts(afterSubmittedAt)).param("afterId", afterId).param("n", limit)
+                .query((rs, row) -> new Ports.Objections.Queued(map(rs), rs.getString("region"))).list();
     }
 
     @Override
@@ -53,20 +57,21 @@ class JdbcObjectionRepository implements Ports.Objections {
     @Override
     public void saveDecision(Objection d) {
         jdbc.sql("update violation_objection set status = :status, decided_by = :by, decided_at = :at,"
-                        + " decision = :decision, decision_reason = :reason where id = :id")
+                        + " decision = :decision, decision_reason = :reason, reduced_fine_minor = :reduced"
+                        + " where id = :id")
                 .param("status", d.status().name()).param("by", d.decidedBy()).param("at", ts(d.decidedAt()))
-                .param("decision", d.decision().name()).param("reason", d.decisionReason()).param("id", d.id())
+                .param("decision", d.decision().name()).param("reason", d.decisionReason())
+                .param("reduced", d.reducedFineMinor()).param("id", d.id())
                 .update();
     }
 
     @Override
     public boolean decidePending(String number, Objection.Decision decision, String decidedBy, Instant at,
                                  String reason) {
-        String status = switch (decision) {
-            case ACCEPT -> "ACCEPTED";
-            case REJECT -> "REJECTED";
-            case REFER_TO_COURT -> "COURT";
-        };
+        if (decision == Objection.Decision.REDUCE) {
+            throw new IllegalArgumentException("a partner decision cancels or stands; it never reduces here");
+        }
+        String status = Objection.statusOf(decision).name();
         return jdbc.sql("""
                 update violation_objection set status = :status, decided_by = :by, decided_at = :at,
                     decision = :decision, decision_reason = :reason
@@ -85,7 +90,8 @@ class JdbcObjectionRepository implements Ports.Objections {
                 rs.getTimestamp("submitted_at").toInstant(), rs.getString("reason_code"), rs.getString("explanation"),
                 List.of(values), Objection.Status.valueOf(rs.getString("status")), rs.getString("decided_by"),
                 decidedAt == null ? null : decidedAt.toInstant(),
-                decision == null ? null : Objection.Decision.valueOf(decision), rs.getString("decision_reason"));
+                decision == null ? null : Objection.Decision.valueOf(decision), rs.getString("decision_reason"),
+                rs.getObject("reduced_fine_minor", Long.class));
     }
 
     private static java.sql.Timestamp ts(java.time.Instant at) {

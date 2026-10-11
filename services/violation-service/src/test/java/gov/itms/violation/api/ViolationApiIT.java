@@ -11,7 +11,12 @@ import com.atlassian.oai.validator.model.Request;
 import com.atlassian.oai.validator.model.SimpleRequest;
 import com.atlassian.oai.validator.model.SimpleResponse;
 import com.atlassian.oai.validator.report.ValidationReport;
+import gov.itms.platform.security.Authorisation;
+import gov.itms.platform.security.AuthorisationResolver;
+import gov.itms.platform.security.ClaimsAuthorisationResolver;
+import gov.itms.platform.security.Scopes;
 import gov.itms.violation.application.CrossborderViolations;
+import gov.itms.violation.application.InstalmentService;
 import gov.itms.violation.application.ObjectionService;
 import gov.itms.violation.application.Ports;
 import gov.itms.violation.application.ViolationService;
@@ -29,6 +34,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -114,6 +120,34 @@ class ViolationApiIT {
         }
     }
 
+    /**
+     * Grants as in token-claims mode (national), narrowed to the {@code region} claim when present, plus a
+     * FINE_REDUCTION_AMOUNT approval limit in XTS from the {@code fineReductionLimit} claim (CC-003); token-claims mode
+     * cannot express either.
+     */
+    @TestConfiguration
+    static class ScopesAndLimits {
+        @Bean
+        AuthorisationResolver authorisationResolver() {
+            ClaimsAuthorisationResolver claims = new ClaimsAuthorisationResolver("permissions", "roles");
+            return jwt -> {
+                Authorisation base = claims.resolve(jwt);
+                Object limit = jwt.getClaims().get("fineReductionLimit");
+                String region = jwt.getClaimAsString("region");
+                if (limit == null && region == null) {
+                    return base;
+                }
+                List<Authorisation.ApprovalLimit> limits = limit == null ? List.of()
+                        : List.of(new Authorisation.ApprovalLimit(ViolationService.FINE_REDUCTION_LIMIT,
+                                ((Number) limit).longValue(), "XTS"));
+                Scopes scopes = region == null ? Scopes.NATIONAL
+                        : new Scopes(Set.of(region), Set.of(Scopes.ALL), Set.of(Scopes.ALL));
+                return new Authorisation(base.subjectId(), base.grants().stream().map(g -> new Authorisation.Grant(
+                        g.roleCode(), g.permissions(), scopes, g.validTo(), limits)).toList(), base.evaluatedAt());
+            };
+        }
+    }
+
     @DynamicPropertySource
     static void partners(DynamicPropertyRegistry registry) {
         for (String client : List.of("payments", "holds", "vehicles", "rentals")) {
@@ -132,6 +166,8 @@ class ViolationApiIT {
     JdbcClient db;
     @Autowired
     ViolationService violations;
+    @Autowired
+    InstalmentService instalments;
     @Autowired
     Clock clock;
 
@@ -466,6 +502,14 @@ class ViolationApiIT {
                 "violation.cancel");
     }
 
+    /** A reviewer whose grant reaches {@code region} only, with a fine-reduction limit (CC-003). */
+    private static RequestPostProcessor regionalReviewer(String region, long fineReductionLimit) {
+        return jwt().jwt(j -> j.subject("u-review-" + region).claim("preferred_username", "u-review-" + region)
+                .claim("roles", List.of("OBJECTION_REVIEWER"))
+                .claim("permissions", List.of("violation.objection.review", "violation.read"))
+                .claim("region", region).claim("fineReductionLimit", fineReductionLimit));
+    }
+
     private JsonNode expect(MvcResult r, int status) throws Exception {
         String text = r.getResponse().getContentAsString(StandardCharsets.UTF_8);
         assertThat(r.getResponse().getStatus()).as(text).isEqualTo(status);
@@ -547,6 +591,204 @@ class ViolationApiIT {
         SHIFT.set(Duration.ofDays(62));
         assertThat(code(postAs("/v1/violations/" + late + "/objections", objection, customer(),
                 "it-" + UUID.randomUUID()))).isEqualTo("OBJECTION_WINDOW_CLOSED");
+    }
+
+    @Test
+    @Tag("VF-051")
+    @Tag("CC-003")
+    @Tag("CC-001")
+    @DisplayName("VF-051, CC-003: a reviewer accepts an objection by reducing the fine within their approval limit; "
+            + "the payable is replaced at the reduced amount; the queue shows only the reviewer's region")
+    void objectionReduction() throws Exception {
+        String fine = catalogue(30_000, 4);
+        String file = "TF-RD-" + suffix().replace('_', '-');
+        String number = recorded(fine, file).get("number").asString();
+        Map<String, Object> objection = Map.of("reasonCode", "MITIGATION", "explanation",
+                "medical emergency, documents attached", "evidenceIds", List.of("DOC-9"));
+        expect(postAs("/v1/violations/" + number + "/objections", objection, customer(), "it-" + UUID.randomUUID()),
+                201);
+        String id = objectionId(number);
+
+        // CC-001: the violation is in NORTH; a SOUTH reviewer neither sees nor decides it.
+        assertThat(expect(getAs("/v1/objections/queue?limit=500", regionalReviewer("SOUTH", 1_000_000)), 200)
+                .get("items")).noneMatch(o -> o.get("id").asString().equals(id));
+        assertThat(expect(getAs("/v1/objections/queue?limit=500", regionalReviewer("NORTH", 1_000_000)), 200)
+                .get("items")).anyMatch(o -> o.get("id").asString().equals(id));
+        assertThat(postAs("/v1/objections/" + id + "/decisions", Map.of("decision", "REFER_TO_COURT", "reason",
+                "for the court"), regionalReviewer("SOUTH", 1_000_000), "it-" + UUID.randomUUID())
+                .getResponse().getStatus()).isEqualTo(403);
+
+        // The reduced fine must be above zero and below the fine, and go with REDUCE only.
+        assertThat(code(postAs("/v1/objections/" + id + "/decisions", Map.of("decision", "REDUCE", "reason",
+                "mitigation accepted"), regionalReviewer("NORTH", 1_000_000), "it-" + UUID.randomUUID())))
+                .isEqualTo("REDUCED_FINE_INVALID");
+        assertThat(code(postAs("/v1/objections/" + id + "/decisions", Map.of("decision", "ACCEPT", "reason",
+                "mitigation accepted", "reducedFineMinor", 10_000), regionalReviewer("NORTH", 1_000_000),
+                "it-" + UUID.randomUUID()))).isEqualTo("REDUCED_FINE_INVALID");
+        assertThat(code(postAs("/v1/objections/" + id + "/decisions", Map.of("decision", "REDUCE", "reason",
+                "mitigation accepted", "reducedFineMinor", 30_000), regionalReviewer("NORTH", 1_000_000),
+                "it-" + UUID.randomUUID()))).isEqualTo("REDUCED_FINE_INVALID");
+        // CC-003: taking 20 000 off needs a limit of at least 20 000; no limit at all is no authority.
+        assertThat(code(postAs("/v1/objections/" + id + "/decisions", Map.of("decision", "REDUCE", "reason",
+                "mitigation accepted", "reducedFineMinor", 10_000), regionalReviewer("NORTH", 19_999),
+                "it-" + UUID.randomUUID()))).isEqualTo("APPROVAL_LIMIT_EXCEEDED");
+        assertThat(code(postAs("/v1/objections/" + id + "/decisions", Map.of("decision", "REDUCE", "reason",
+                "mitigation accepted", "reducedFineMinor", 10_000), reviewer(), "it-" + UUID.randomUUID())))
+                .isEqualTo("APPROVAL_LIMIT_EXCEEDED");
+        assertThat(db.sql("select status from violation_objection where id = cast(:id as uuid)").param("id", id)
+                .query(String.class).single()).as("refusals change nothing").isEqualTo("PENDING");
+
+        int cancelled = PARTNERS.cancelledPayables.size();
+        JsonNode decided = expect(postAs("/v1/objections/" + id + "/decisions", Map.of("decision", "REDUCE",
+                "reason", "mitigation accepted", "reducedFineMinor", 10_000), regionalReviewer("NORTH", 20_000),
+                "it-" + UUID.randomUUID()), 200);
+        assertThat(decided.get("status").asString()).isEqualTo("ACCEPTED");
+        assertThat(decided.get("decision").asString()).isEqualTo("REDUCE");
+        assertThat(decided.get("reducedFineMinor").asLong()).isEqualTo(10_000);
+        assertThat(PARTNERS.cancelledPayables).hasSize(cancelled + 1);
+        assertThat(PARTNERS.payables).anyMatch(p -> p.get("itemRef").asString().equals(number)
+                && p.get("lines").get(0).get("amountMinor").asLong() == 10_000);
+        assertThat(PARTNERS.payableKeys).contains("payable-reduced-" + number.toLowerCase(java.util.Locale.ROOT));
+        JsonNode violation = body(getAs("/v1/violations/" + number, officer()));
+        assertThat(violation.get("status").asString()).isEqualTo("OPEN");
+        assertThat(violation.get("fineMinor").asLong()).as("the recorded fine stays a fact (VF-020)")
+                .isEqualTo(30_000);
+        UUID violationId = db.sql("select id from violation where number = :n").param("n", number)
+                .query(UUID.class).single();
+        assertThat(repository().underObjection(violationId)).as("payment resumes on the new payable").isFalse();
+        assertThat(repository().pointsAdded(violationId)).as("Q-082 (a): the violation stands and is confirmed")
+                .isTrue();
+        assertThat(db.sql("select count(*) from event_outbox where event_type = 'itms.violation.fine-reduced' "
+                + "and subject = :n").param("n", number).query(Long.class).single()).isEqualTo(1);
+        assertThat(db.sql("select count(*) from audit_outbox where entity_id = :n and action = 'VIOLATION_FINE_REDUCED'")
+                .param("n", number).query(Long.class).single()).isEqualTo(1);
+        assertThatThrownBy(() -> db.sql("update violation_objection set reduced_fine_minor = 1 where id = "
+                + "cast(:id as uuid)").param("id", id).update()).isInstanceOf(DataAccessException.class);
+    }
+
+    private static RequestPostProcessor instalmentOfficer() {
+        return user("u-instalment", "INSTALMENT_OFFICER", "violation.instalment.create", "violation.read");
+    }
+
+    private String planStatus(String plan) throws Exception {
+        return expect(getAs("/v1/instalment-plans/" + plan, officer()), 200).get("status").asString();
+    }
+
+    private boolean unpaidHeld(String number) {
+        UUID id = db.sql("select id from violation where number = :n").param("n", number).query(UUID.class).single();
+        return repository().activeUnpaidHold(id).isPresent();
+    }
+
+    @Test
+    @Tag("VF-071")
+    @Tag("VF-073")
+    @DisplayName("VF-071, VF-073: an own instalment plan replaces the fines' payables by monthly instalments; holds are "
+            + "lifted while it is paid on time, return after a missed instalment's grace period, and the last payment "
+            + "closes the violations")
+    void ownInstalmentPlan() throws Exception {
+        String fine = catalogue(300_000, 0);
+        String file = "TF-IP-" + suffix().replace('_', '-');
+        String first = recorded(fine, file).get("number").asString();
+        String second = recorded(fine, file).get("number").asString();
+        String other = recorded(fine, "TF-OTHER-" + suffix().replace('_', '-')).get("number").asString();
+
+        // Older than the unpaid-hold period (60 days): both violations carry an UNPAID_FINES hold (VF-023).
+        SHIFT.set(Duration.ofDays(61));
+        assertThat(violations.holdIfOverdue(first) | unpaidHeld(first)).isTrue();
+        assertThat(violations.holdIfOverdue(second) | unpaidHeld(second)).isTrue();
+        SHIFT.set(Duration.ZERO);
+
+        Map<String, Object> request = new HashMap<>(Map.of("fileNumber", file, "region", "NORTH",
+                "violationNumbers", List.of(first, second), "months", 3));
+        assertThat(postAs("/v1/instalment-plans", request, officer(), "it-" + UUID.randomUUID()).getResponse()
+                .getStatus()).isEqualTo(403);
+        assertThat(code(postAs("/v1/instalment-plans", Map.of("fileNumber", file, "region", "NORTH",
+                "violationNumbers", List.of(first), "months", 3), instalmentOfficer(), "it-" + UUID.randomUUID())))
+                .as("300 000 is below the 500 000 minimum").isEqualTo("INSTALMENT_TOTAL_TOO_LOW");
+        assertThat(code(postAs("/v1/instalment-plans", Map.of("fileNumber", file, "region", "NORTH",
+                "violationNumbers", List.of(first, second), "months", 2), instalmentOfficer(),
+                "it-" + UUID.randomUUID()))).isEqualTo("INSTALMENT_MONTHS_INVALID");
+        assertThat(code(postAs("/v1/instalment-plans", Map.of("fileNumber", file, "region", "NORTH",
+                "violationNumbers", List.of(first, other), "months", 3), instalmentOfficer(),
+                "it-" + UUID.randomUUID()))).isEqualTo("VIOLATION_NOT_OF_FILE");
+
+        int cancelled = PARTNERS.cancelledPayables.size();
+        JsonNode plan = expect(postAs("/v1/instalment-plans", request, instalmentOfficer(),
+                "it-" + UUID.randomUUID()), 201);
+        String number = plan.get("number").asString();
+        assertThat(plan.get("status").asString()).isEqualTo("ACTIVE");
+        assertThat(plan.get("totalMinor").asLong()).isEqualTo(600_000);
+        assertThat(plan.get("instalments")).hasSize(3).allSatisfy(i -> assertThat(i.get("amountMinor").asLong())
+                .isEqualTo(200_000));
+        assertThat(plan.get("instalments").get(0).get("dueDate").asString())
+                .isEqualTo(today().plusMonths(1).toString());
+        assertThat(PARTNERS.cancelledPayables).as("the fines' payables are replaced").hasSize(cancelled + 2);
+        for (int seq = 1; seq <= 3; seq++) {
+            String ref = number + "-0" + seq;
+            assertThat(PARTNERS.payables).anyMatch(p -> p.get("itemRef").asString().equals(ref)
+                    && p.get("itemType").asString().equals("VIOLATION")
+                    && p.get("lines").get(0).get("amountMinor").asLong() == 200_000);
+        }
+        assertThat(body(getAs("/v1/violations/" + first, officer())).get("status").asString())
+                .as("VF-073: the violations stay open").isEqualTo("OPEN");
+        assertThat(unpaidHeld(first) || unpaidHeld(second)).as("VF-073: holds lifted while the plan runs").isFalse();
+        assertThat(expect(getAs("/v1/instalment-plans?fileNumber=" + file, officer()), 200).get("items"))
+                .extracting(p -> p.get("number").asString()).containsExactly(number);
+
+        // A violation in a plan is in no second plan, is not cancelled on its own and is not challenged (Q-083).
+        assertThat(code(postAs("/v1/instalment-plans", Map.of("fileNumber", file, "region", "NORTH",
+                "violationNumbers", List.of(first, second), "months", 6), instalmentOfficer(),
+                "it-" + UUID.randomUUID()))).isIn("VIOLATION_IN_INSTALMENT_PLAN", "VIOLATION_NOT_PAYABLE");
+        assertThat(code(postAs("/v1/violations/" + first + "/cancellations", Map.of("reasonCode", "DUPLICATE"),
+                supervisor(), "it-" + UUID.randomUUID()))).isEqualTo("VIOLATION_IN_INSTALMENT_PLAN");
+        assertThat(code(postAs("/v1/violations/" + first + "/objections", Map.of("reasonCode", "NOT_THE_DRIVER",
+                "explanation", "changed my mind"), customer(), "it-" + UUID.randomUUID())))
+                .isEqualTo("VIOLATION_IN_INSTALMENT_PLAN");
+
+        // On time: the first instalment is paid within its grace period; nothing lapses, no hold returns.
+        SHIFT.set(Duration.ofDays(40));
+        assertThat(instalments.onInstalmentPaid(number + "-01")).isTrue();
+        assertThat(instalments.onInstalmentPaid(number + "-01")).as("a repeat event changes nothing").isFalse();
+        assertThat(instalments.lapsedPlans()).doesNotContain(number);
+
+        // Missed: the second instalment is unpaid past due + 15 days; the plan is LATE and the holds return.
+        SHIFT.set(Duration.ofDays(80));
+        assertThat(violations.overdueForHold()).as("still covered until the plan is marked late")
+                .doesNotContain(first, second);
+        assertThat(instalments.lapsedPlans()).contains(number);
+        assertThat(instalments.markLateIfLapsed(number)).isTrue();
+        assertThat(planStatus(number)).isEqualTo("LATE");
+        assertThat(violations.overdueForHold()).contains(first, second);
+        assertThat(violations.holdIfOverdue(first)).isTrue();
+        assertThat(unpaidHeld(first)).isTrue();
+
+        // Paid up: ACTIVE again and the hold is lifted.
+        assertThat(instalments.onInstalmentPaid(number + "-02")).isTrue();
+        assertThat(planStatus(number)).isEqualTo("ACTIVE");
+        assertThat(unpaidHeld(first)).isFalse();
+
+        // The last instalment completes the plan and pays the violations.
+        assertThat(instalments.onInstalmentPaid(number + "-03")).isTrue();
+        assertThat(planStatus(number)).isEqualTo("COMPLETED");
+        assertThat(body(getAs("/v1/violations/" + first, officer())).get("status").asString()).isEqualTo("PAID");
+        assertThat(body(getAs("/v1/violations/" + second, officer())).get("status").asString()).isEqualTo("PAID");
+
+        // FN-011: cancelling the last instalment's receipt reopens the plan and the violations.
+        assertThat(instalments.onInstalmentReceiptCancelled(number + "-03")).isTrue();
+        assertThat(planStatus(number)).isEqualTo("ACTIVE");
+        assertThat(body(getAs("/v1/violations/" + first, officer())).get("status").asString()).isEqualTo("OPEN");
+
+        assertThat(db.sql("select count(*) from audit_outbox where entity_id = :n and action in "
+                + "('INSTALMENT_PLAN_CREATED', 'INSTALMENT_PLAN_LATE', 'INSTALMENT_PLAN_COMPLETED')")
+                .param("n", number).query(Long.class).single()).isEqualTo(3);
+        assertThat(db.sql("select count(*) from event_outbox where subject = :n and event_type in "
+                + "('itms.violation.instalment-plan-created', 'itms.violation.instalment-missed')")
+                .param("n", number).query(Long.class).single()).isEqualTo(2);
+        assertThatThrownBy(() -> db.sql("update instalment set amount_minor = 1 where plan_id = "
+                + "(select id from instalment_plan where number = :n)").param("n", number).update())
+                .isInstanceOf(DataAccessException.class);
+        assertThatThrownBy(() -> db.sql("delete from instalment_plan_violation where violation_number = :v")
+                .param("v", first).update()).isInstanceOf(DataAccessException.class);
     }
 
     @Test

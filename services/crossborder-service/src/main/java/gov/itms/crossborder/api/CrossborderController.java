@@ -39,8 +39,8 @@ class CrossborderController {
 
     record PartnerRequest(@NotBlank @Size(max = 12) String code, @NotBlank @Size(max = 120) String name,
                           @NotBlank String mode, @Min(0) @Max(10000) int commissionBasisPoints,
-                          @Size(max = 500) String endpointUrl, boolean allowsAccident, boolean allowsPermit,
-                          boolean allowsLicence, String status, @NotBlank @Size(min = 3, max = 500) String reason) { }
+                          @Size(max = 500) String endpointUrl, Boolean allowsAccident, Boolean allowsPermit,
+                          Boolean allowsLicence, String status, @NotBlank @Size(min = 3, max = 500) String reason) { }
     record MappingRequest(@NotBlank @Size(max = 40) String domain, @NotBlank @Size(max = 80) String localCode,
                           @NotBlank @Size(max = 80) String externalCode,
                           @NotBlank @Size(min = 3, max = 500) String reason) { }
@@ -78,7 +78,8 @@ class CrossborderController {
     @PreAuthorize("hasAuthority('crossborder.partner.manage')")
     ResponseEntity<Ports.Proposal> proposePartner(@Valid @RequestBody PartnerRequest b) {
         var p = exchange.proposePartner(b.code(), b.name(), b.mode(), b.commissionBasisPoints(), b.endpointUrl(),
-                b.allowsAccident(), b.allowsPermit(), b.allowsLicence(), b.status(), b.reason(), actor());
+                Boolean.TRUE.equals(b.allowsAccident()), Boolean.TRUE.equals(b.allowsPermit()),
+                Boolean.TRUE.equals(b.allowsLicence()), b.status(), b.reason(), actor());
         return ResponseEntity.accepted().location(URI.create("/v1/config-proposals/" + p.id())).body(p);
     }
 

@@ -58,6 +58,11 @@ public class ObjectionService {
         }
         Violation violation = violations.getForObjection(number, caller);
         Instant now = clock.instant();
+        if (violations.inInstalmentPlan(violation)) {
+            // Q-083 (e): the customer accepted the fine by choosing to pay it in instalments.
+            throw DomainException.conflict("VIOLATION_IN_INSTALMENT_PLAN",
+                    "a violation in an instalment plan cannot be challenged", List.of("VF-050", "VF-071"));
+        }
         if (now.isAfter(violation.recordedAt().plus(objectionWindow))) {
             throw DomainException.validation("OBJECTION_WINDOW_CLOSED", "the objection period has ended",
                     List.of("VF-050"), violation.recordedAt().plus(objectionWindow).toString());
@@ -65,11 +70,6 @@ public class ObjectionService {
         if (violation.status() != Violation.Status.OPEN) {
             throw DomainException.conflict("VIOLATION_NOT_OPEN", "only an open violation can be challenged",
                     List.of("VF-050"));
-        }
-        if (violations.inInstalmentPlan(violation)) {
-            // Q-083 (e): the customer accepted the fine by choosing to pay it in instalments.
-            throw DomainException.conflict("VIOLATION_IN_INSTALMENT_PLAN",
-                    "a violation in an instalment plan cannot be challenged", List.of("VF-050", "VF-071"));
         }
         List<String> evidence = evidenceIds == null ? List.of() : List.copyOf(evidenceIds);
         Objection objection = Objection.submitted(UUID.randomUUID(), violation.id(), number, caller.actor().id(), now,

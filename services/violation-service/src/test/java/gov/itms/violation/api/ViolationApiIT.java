@@ -696,7 +696,8 @@ class ViolationApiIT {
         SHIFT.set(Duration.ofDays(61));
         assertThat(violations.holdIfOverdue(first) | unpaidHeld(first)).isTrue();
         assertThat(violations.holdIfOverdue(second) | unpaidHeld(second)).isTrue();
-        SHIFT.set(Duration.ZERO);
+        // The plan is made on that day: a hold is never lifted before it was placed (ck_unpaid_hold_lifted).
+        Duration day0 = Duration.ofDays(61);
 
         Map<String, Object> request = new HashMap<>(Map.of("fileNumber", file, "region", "NORTH",
                 "violationNumbers", List.of(first, second), "months", 3));
@@ -746,13 +747,13 @@ class ViolationApiIT {
                 .isEqualTo("VIOLATION_IN_INSTALMENT_PLAN");
 
         // On time: the first instalment is paid within its grace period; nothing lapses, no hold returns.
-        SHIFT.set(Duration.ofDays(40));
+        SHIFT.set(day0.plusDays(40));
         assertThat(instalments.onInstalmentPaid(number + "-01")).isTrue();
         assertThat(instalments.onInstalmentPaid(number + "-01")).as("a repeat event changes nothing").isFalse();
         assertThat(instalments.lapsedPlans()).doesNotContain(number);
 
         // Missed: the second instalment is unpaid past due + 15 days; the plan is LATE and the holds return.
-        SHIFT.set(Duration.ofDays(80));
+        SHIFT.set(day0.plusDays(80));
         assertThat(violations.overdueForHold()).as("still covered until the plan is marked late")
                 .doesNotContain(first, second);
         assertThat(instalments.lapsedPlans()).contains(number);

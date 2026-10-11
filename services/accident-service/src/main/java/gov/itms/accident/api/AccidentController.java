@@ -39,7 +39,7 @@ class AccidentController {
     record PartyRequest(String trafficFileNumber, String vehiclePlate, @NotNull Accident.Role role,
                         @Size(max = 40) String seatPosition, @Size(max = 40) String injuryDegree,
                         @Size(max = 80) String transportMethod, @Size(max = 40) String intoxicationStatus,
-                        Integer faultPercent, boolean agrees, boolean unknownParty) { }
+                        Integer faultPercent, boolean agrees, Boolean unknownParty) { }
     record ReportRequest(@NotBlank String region, @NotNull Instant occurredAt, @NotBlank @Size(max = 500) String location,
                          @Size(max = 80) String roadCondition, @Size(max = 80) String weather,
                          @NotNull Accident.Origin origin,
@@ -86,7 +86,7 @@ class AccidentController {
                 body.location(), body.roadCondition(), body.weather(), body.origin(), body.parties().stream()
                 .map(p -> new AccidentService.PartyInput(p.trafficFileNumber(), p.vehiclePlate(), p.role(),
                         p.seatPosition(), p.injuryDegree(), p.transportMethod(), p.intoxicationStatus(),
-                        p.faultPercent(), p.agrees(), p.unknownParty())).toList(), body.evidenceDocumentIds() == null
+                        p.faultPercent(), p.agrees(), Boolean.TRUE.equals(p.unknownParty()))).toList(), body.evidenceDocumentIds() == null
                 ? List.of() : body.evidenceDocumentIds());
         Accident result = accidents.report(report, current.userId());
         return ResponseEntity.created(URI.create("/v1/accidents/" + result.id())).body(ReportResponse.of(result));

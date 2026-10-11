@@ -79,7 +79,8 @@ class AccidentApiIT {
     }
 
     private static Map<String, Object> party(String file, String plate, Integer fault, boolean agrees) {
-        Map<String, Object> m = new HashMap<>(Map.of("role", "DRIVER", "agrees", agrees, "unknownParty", false));
+        // unknownParty is optional in the contract (absent = false); the smoke test omits it too.
+        Map<String, Object> m = new HashMap<>(Map.of("role", "DRIVER", "agrees", agrees));
         m.put("trafficFileNumber", file);
         m.put("vehiclePlate", plate);
         if (fault != null) {

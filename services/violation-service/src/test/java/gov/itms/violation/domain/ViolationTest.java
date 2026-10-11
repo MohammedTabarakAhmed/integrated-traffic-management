@@ -40,7 +40,7 @@ public class ViolationTest {
     @Tag("TR-032")
     @DisplayName("VF-014, TR-032: driver, else renter of the covering contract, else owner; a renter needs a contract "
             + "and no identified driver")
-    void responsibleParty() {
+    void responsiblePartyWithRental() {
         java.util.UUID contract = java.util.UUID.randomUUID();
         assertThat(report("X", "TF-OWNER", null, null, null).responsibleFileNumber()).isEqualTo("TF-OWNER");
         assertThat(report("X", "TF-OWNER", "TF-DRIVER", null, null).responsibleFileNumber()).isEqualTo("TF-DRIVER");

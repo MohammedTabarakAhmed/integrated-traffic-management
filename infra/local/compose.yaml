@@ -1075,6 +1075,10 @@ services:
       ITMS_VIOLATIONS_UNPAID_HOLD_AFTER: PT1M
       ITMS_VIOLATIONS_UNPAID_HOLD_INTERVAL: PT1M
       ITMS_VIOLATIONS_UNPAID_HOLD_INITIAL_DELAY: PT30S
+      # VF-030 locally: a one-minute objection window (default 30 days) so smoke step 37 sees points on confirmation.
+      ITMS_VIOLATIONS_OBJECTION_WINDOW: PT1M
+      ITMS_VIOLATIONS_CONFIRMATION_INTERVAL: PT15S
+      ITMS_VIOLATIONS_CONFIRMATION_INITIAL_DELAY: PT20S
       # Short-lived login from OpenBao (ADR-039), files under /run/secrets/spring/datasource; owner role on connect.
       SPRING_DATASOURCE_HIKARI_CONNECTIONINITSQL: SET ROLE itms_owner
       ITMS_OIDC_ISSUER: http://localhost:8180/realms/itms

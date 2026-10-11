@@ -175,6 +175,8 @@ public class ObjectionService {
             violations.resumeAfterObjection(current.violationNumber(), "objection accepted", caller);
         } else if (decision == Objection.Decision.REJECT) {
             violations.resumeAfterObjection(current.violationNumber(), "objection rejected: " + reason, caller);
+            // Q-001: a rejected objection confirms the violation; its black points are added now (VF-030).
+            violations.confirmAfterRejection(current.violationNumber());
         }
         audit.record("VIOLATION_OBJECTION_DECIDED", "Violation", current.violationNumber(),
                 Map.of("status", "PENDING"), Map.of("status", result.status().name()), reason);

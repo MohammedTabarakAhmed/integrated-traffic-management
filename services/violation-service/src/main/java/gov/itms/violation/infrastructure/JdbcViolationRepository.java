@@ -263,6 +263,25 @@ class JdbcViolationRepository implements Ports.ViolationRepository {
     }
 
     @Override
+    public List<Violation> dueForConfirmation(Instant recordedBefore, int limit) {
+        return jdbc.sql(VIOLATION_SELECT + """
+                          where status in ('OPEN', 'PAID') and black_points > 0 and source <> 'PARTNER'
+                           and recorded_at < :c
+                           and not exists (select 1 from black_point_entry e where e.violation_id = violation.id)
+                           and not exists (select 1 from violation_objection o
+                                           where o.violation_id = violation.id and o.status in ('PENDING', 'COURT'))
+                         order by recorded_at limit :l""")
+                .param("c", ts(recordedBefore)).param("l", limit)
+                .query(JdbcViolationRepository::mapViolation).list();
+    }
+
+    @Override
+    public boolean pointsAdded(UUID violationId) {
+        return jdbc.sql("select exists (select 1 from black_point_entry where violation_id = :v)")
+                .param("v", violationId).query(Boolean.class).single();
+    }
+
+    @Override
     public boolean underObjection(UUID violationId) {
         return jdbc.sql("""
                         select exists (select 1 from violation_objection

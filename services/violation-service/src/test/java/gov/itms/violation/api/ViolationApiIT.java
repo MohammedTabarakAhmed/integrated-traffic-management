@@ -66,14 +66,16 @@ import tools.jackson.databind.ObjectMapper;
  * test hands payment confirmations to the service itself. The clock can be moved forward to reach a second
  * suspension.
  *
- * <p>Black points are added when a violation is recorded (ADR-056); UAT-1 speaks of a confirmed violation, which
- * needs objections (not built). Recording stands in for confirmation until the owner answers Q-072 (a).
+ * <p>Black points are added when a violation is confirmed (VF-030, owner decision Q-072 (a), Q-001): its objection
+ * window has lapsed with no objection pending, or an objection was rejected. The confirmation job is held back here;
+ * tests move the clock and confirm explicitly.
  */
 @SpringBootTest(properties = {
         "itms.security.issuer=https://idp.test/realms/itms",
         "itms.security.jwk-set-uri=https://idp.test/realms/itms/protocol/openid-connect/certs",
         "itms.security.authorisation-source=token-claims",
-        "itms.violations.consumer-enabled=false"})
+        "itms.violations.consumer-enabled=false",
+        "itms.violations.confirmation-initial-delay=PT24H"})
 @AutoConfigureMockMvc
 @Testcontainers
 @Tag("VF-020")
@@ -288,6 +290,8 @@ class ViolationApiIT {
         assertThat(PARTNERS.rentalQueries).anyMatch(q -> q.startsWith(plate + "@"));
         assertThat(PARTNERS.payables).anyMatch(p -> p.get("trafficFileNumber").asString().equals(renter)
                 && p.get("itemRef").asString().equals(number));
+        SHIFT.set(Duration.ofDays(31));
+        assertThat(violations.confirmIfDue(number)).as("objection window lapsed").isTrue();
         assertThat(body(getAs("/v1/black-point-accounts/" + renter, officer())).get("activePoints").asInt())
                 .isEqualTo(4);
         // both are notified: the renter by VIOLATION_RECORDED (recipientId), the company by the transfer event
@@ -306,12 +310,21 @@ class ViolationApiIT {
     @Tag("UAT-1")
     @Tag("VF-032")
     @Tag("VF-030")
-    @DisplayName("UAT-1 (at recording, Q-072): 20 + 6 points → 26, suspended 3 months, hold placed, events; then 6 months")
+    @DisplayName("UAT-1: 20 active + a confirmed 6-point violation = 26 → suspended 3 months from the confirmation date, "
+            + "hold placed, events; then 6 months")
     void uat1BlackPointSuspension() throws Exception {
         String file = "TF-UAT1-" + suffix().replace('_', '-');
         String twenty = catalogue(30_000, 20);
         String six = catalogue(60_000, 6);
-        recorded(twenty, file);
+        String first = recorded(twenty, file).get("number").asString();
+        assertThat(body(getAs("/v1/black-point-accounts/" + file, officer())).get("activePoints").asInt())
+                .as("VF-030: points wait for confirmation").isZero();
+        assertThat(violations.confirmIfDue(first)).as("inside the objection window").isFalse();
+        SHIFT.set(Duration.ofDays(31));
+        assertThat(repository().dueForConfirmation(clock.instant().minus(Duration.ofDays(30)), 500))
+                .extracting(Violation::number).contains(first);
+        assertThat(violations.confirmIfDue(first)).isTrue();
+        assertThat(violations.confirmIfDue(first)).as("once").isFalse();
         JsonNode before = body(getAs("/v1/black-point-accounts/" + file, officer()));
         assertThat(before.get("activePoints").asInt()).isEqualTo(20);
         assertThat(before.get("activeSuspension").isNull()).isTrue();
@@ -320,6 +333,9 @@ class ViolationApiIT {
         JsonNode trigger = recorded(six, file);
         assertThat(trigger.get("blackPoints").asInt()).isEqualTo(6);
         assertThat(trigger.get("responsibleFileNumber").asString()).isEqualTo(file);
+        SHIFT.set(Duration.ofDays(62));
+        // UAT-1: "when a violation carrying 6 black points is confirmed" - the suspension starts today
+        assertThat(violations.confirmIfDue(trigger.get("number").asString())).isTrue();
         JsonNode account = body(getAs("/v1/black-point-accounts/" + file, officer()));
         JsonNode suspension = account.get("activeSuspension");
         assertThat(suspension.get("pointsAtOrder").asInt()).as("active total at the order").isEqualTo(26);
@@ -346,10 +362,16 @@ class ViolationApiIT {
         assertThatThrownBy(() -> db.sql("delete from licence_suspension where file_number = :f").param("f", file)
                 .update()).isInstanceOf(DataAccessException.class).hasMessageContaining("never changed");
 
-        // The second suspension, after the first has ended, lasts 6 months.
-        SHIFT.set(Duration.ofDays(100));
-        recorded(twenty, file);
-        recorded(six, file);
+        assertThat(db.sql("select count(*) from event_outbox where subject = :n and event_type = 'itms.violation.confirmed'")
+                .param("n", trigger.get("number").asString()).query(Long.class).single()).isEqualTo(1);
+
+        // The second suspension, after the first has ended (day 62 + 3 months), lasts 6 months.
+        SHIFT.set(Duration.ofDays(160));
+        String again20 = recorded(twenty, file).get("number").asString();
+        String again6 = recorded(six, file).get("number").asString();
+        SHIFT.set(Duration.ofDays(191));
+        assertThat(violations.confirmIfDue(again20)).isTrue();
+        assertThat(violations.confirmIfDue(again6)).isTrue();
         JsonNode second = body(getAs("/v1/black-point-accounts/" + file, officer())).get("activeSuspension");
         assertThat(second.get("ordinal").asInt()).isEqualTo(2);
         assertThat(second.get("until").asString()).isEqualTo(today().plusMonths(6).minusDays(1).toString());
@@ -508,6 +530,10 @@ class ViolationApiIT {
         assertThat(PARTNERS.payableHolds).anyMatch(h -> h.startsWith("LIFT ") && h.endsWith("OBJECTION:" + rejected));
         assertThat(body(getAs("/v1/violations/" + rejected, officer())).get("status").asString()).isEqualTo("OPEN");
         assertThat(repository().underObjection(rejectedViolation)).as("rejected: payment resumes").isFalse();
+        assertThat(repository().pointsAdded(rejectedViolation)).as("Q-001: a rejected objection confirms (VF-030)")
+                .isTrue();
+        assertThat(repository().pointsAdded(db.sql("select id from violation where number = :n").param("n", accepted)
+                .query(UUID.class).single())).as("accepted: cancelled, never confirmed").isFalse();
         assertThat(repository().overdueWithoutHold(clock.instant().plus(Duration.ofDays(1)), 500))
                 .extracting(Violation::number).contains(rejected);
         assertThat(code(postAs("/v1/objections/" + UUID.randomUUID() + "/decisions", Map.of("decision", "REJECT",

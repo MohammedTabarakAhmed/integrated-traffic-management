@@ -113,7 +113,8 @@ public class ViolationServiceConfiguration {
                 new ViolationService.Settings(new BlackPoints.Policy(p.pointsExpiryMonths(), p.suspensionThreshold(),
                         p.suspensionMonths(), p.warningThresholds()), Set.copyOf(p.cancelReasons()), p.currency(),
                         ZoneId.of(p.zone()), p.maxReportDelay(),
-                        unpaidPolicy(p.unpaidHoldEnabled(), p.unpaidHoldAfter(), p.unpaidHoldBatchSize())), clock);
+                        unpaidPolicy(p.unpaidHoldEnabled(), p.unpaidHoldAfter(), p.unpaidHoldBatchSize()),
+                        pointsAt(environment), p.objectionWindow()), clock);
     }
 
     /**
@@ -151,6 +152,16 @@ public class ViolationServiceConfiguration {
                 audit, events, clock, properties.objectionWindow());
     }
 
+    /** VF-030 (Q-072 (a)): {@code itms.violations.points-at} CONFIRMATION (default) or RECORDING. */
+    private static ViolationService.Settings.PointsAt pointsAt(Environment environment) {
+        String value = environment.getProperty("itms.violations.points-at", "CONFIRMATION");
+        try {
+            return ViolationService.Settings.PointsAt.valueOf(value);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("itms.violations.points-at must be CONFIRMATION or RECORDING", e);
+        }
+    }
+
     /** TR-032: rental-service lookup, switchable with {@code itms.violations.rental-transfer-enabled} (default on). */
     private static gov.itms.violation.application.Ports.Rentals rentals(Environment environment, Clock clock,
                                                                          ObservationRegistry registry) {
@@ -183,6 +194,45 @@ public class ViolationServiceConfiguration {
         @Bean
         UnpaidHoldJob unpaidHoldJob(ViolationService violations) {
             return new UnpaidHoldJob(violations);
+        }
+    }
+
+    /** Confirms violations whose objection window has lapsed (VF-030); on by default, off at RECORDING. */
+    @Configuration(proxyBeanMethods = false)
+    @EnableScheduling
+    @ConditionalOnProperty(name = "itms.violations.points-at", havingValue = "CONFIRMATION", matchIfMissing = true)
+    static class ConfirmationJobConfiguration {
+
+        @Bean
+        ConfirmationJob confirmationJob(ViolationService violations) {
+            return new ConfirmationJob(violations);
+        }
+    }
+
+    /** Adds the black points of confirmed violations (VF-030, UAT-1); a failure is retried on the next run. */
+    public static class ConfirmationJob {
+
+        private static final Logger LOG = LoggerFactory.getLogger(ConfirmationJob.class);
+        private final ViolationService violations;
+
+        public ConfirmationJob(ViolationService violations) {
+            this.violations = violations;
+        }
+
+        @Scheduled(fixedDelayString = "${itms.violations.confirmation-interval:PT15M}",
+                initialDelayString = "${itms.violations.confirmation-initial-delay:PT1M}")
+        public void run() {
+            int confirmed = 0;
+            for (String number : violations.dueForConfirmation()) {
+                try {
+                    confirmed += violations.confirmIfDue(number) ? 1 : 0;
+                } catch (RuntimeException e) {
+                    LOG.warn("Violation {} not confirmed: {}", number, e.getClass().getSimpleName());
+                }
+            }
+            if (confirmed > 0) {
+                LOG.info("Violations confirmed, black points added: {} (VF-030)", confirmed);
+            }
         }
     }
 

@@ -59,7 +59,11 @@ class ViolationServiceTest {
     /** The rental contract rental-service reports for any plate and time; null = none covers it (TR-032). */
     private Ports.Rentals.Cover rentalCover;
     private boolean rentalsDown;
-    private final ViolationService service = new ViolationService(repo, new Ports.Payables() {
+    /** Points at recording: these tests exercise the points engine itself; confirmation has its own tests. */
+    private final ViolationService service = build(ViolationService.Settings.PointsAt.RECORDING);
+
+    private ViolationService build(ViolationService.Settings.PointsAt pointsAt) {
+        return new ViolationService(repo, new Ports.Payables() {
         @Override
         public UUID register(String number, String file, String region, String currency, long amount,
                              String financialItem, String beneficiary, String description) {
@@ -130,7 +134,8 @@ class ViolationServiceTest {
         }
     }, new ViolationService.Settings(new BlackPoints.Policy(12, 24, List.of(3, 6, 12), List.of(12, 18)),
             Set.of("DUPLICATE", "WRONG_PLATE"), "XTS", ZoneOffset.UTC, Duration.ofDays(30),
-            new UnpaidHold.Policy(true, Duration.ofDays(60), 100)), clock);
+            new UnpaidHold.Policy(true, Duration.ofDays(60), 100), pointsAt, Duration.ofDays(30)), clock);
+    }
 
     private static Caller caller(String id, Set<String> regions, String... permissions) {
         Set<String> held = Set.of(permissions);
@@ -353,6 +358,53 @@ class ViolationServiceTest {
         assertThat(service.overdueForHold()).containsExactly(owners.number());
         assertThat(service.holdIfOverdue(owners.number())).isTrue();
         assertThat(repo.unpaid.stream().filter(h -> h.violationNumber().equals(owners.number()))).hasSize(2);
+    }
+
+    @Test
+    @Tag("VF-030")
+    @Tag("UAT-1")
+    @DisplayName("VF-030 (Q-072 a, Q-001): points wait for confirmation - the objection window lapsed with no objection "
+            + "pending; the suspension starts on the confirmation date")
+    void pointsAtConfirmation() {
+        ViolationService confirming = build(ViolationService.Settings.PointsAt.CONFIRMATION);
+        publish("SPEED_20", null, 30_000, 20, null, null);
+        publish("SPEED_6", null, 60_000, 6, null, null);
+        Violation twenty = confirming.record(new Violation.Report("SPEED_20", clock.instant().minus(Duration.ofHours(1)),
+                "NORTH", "Main road", "A 1", null, "TF-OWNER", "TF-C", null, null, Violation.Source.OFFICER, null,
+                List.of()), OFFICER);
+        assertThat(repo.points("TF-C")).as("not yet confirmed").isEmpty();
+        assertThat(confirming.dueForConfirmation()).isEmpty();
+        assertThat(confirming.confirmIfDue(twenty.number())).isFalse();
+
+        clock.set(NOW.plus(Duration.ofDays(31)));
+        assertThat(confirming.dueForConfirmation()).containsExactly(twenty.number());
+        assertThat(confirming.confirmIfDue(twenty.number())).isTrue();
+        assertThat(confirming.confirmIfDue(twenty.number())).as("once").isFalse();
+        assertThat(confirming.standing("TF-C", OFFICER).activePoints()).isEqualTo(20);
+        assertThat(audit).contains("VIOLATION_CONFIRMED " + twenty.number());
+
+        Violation six = confirming.record(new Violation.Report("SPEED_6", clock.instant().minus(Duration.ofHours(1)),
+                "NORTH", "Main road", "A 1", null, "TF-OWNER", "TF-C", null, null, Violation.Source.OFFICER, null,
+                List.of()), OFFICER);
+        repo.objected.add(six.id());
+        clock.set(NOW.plus(Duration.ofDays(62)));
+        assertThat(confirming.confirmIfDue(six.number())).as("objection pending").isFalse();
+        assertThat(confirming.confirmAfterRejection(six.number())).as("still pending").isFalse();
+        repo.objected.remove(six.id());
+        assertThat(confirming.confirmAfterRejection(six.number())).as("rejected: confirmed at once").isTrue();
+        LocalDate confirmedOn = LocalDate.ofInstant(clock.instant(), ZoneOffset.UTC);
+        ViolationService.Standing standing = confirming.standing("TF-C", OFFICER);
+        assertThat(standing.activeSuspension().pointsAtOrder()).isEqualTo(26);
+        assertThat(standing.activeSuspension().from()).as("UAT-1: from the confirmation date").isEqualTo(confirmedOn);
+
+        Violation cancelled = confirming.record(new Violation.Report("SPEED_6", clock.instant().minus(Duration.ofHours(1)),
+                "NORTH", "Main road", "A 1", null, "TF-OWNER", "TF-X", null, null, Violation.Source.OFFICER, null,
+                List.of()), OFFICER);
+        confirming.cancel(cancelled.number(), "DUPLICATE", null, SUPERVISOR);
+        clock.set(NOW.plus(Duration.ofDays(100)));
+        assertThat(confirming.confirmIfDue(cancelled.number())).as("cancelled: never confirmed").isFalse();
+        assertThat(repo.points("TF-X")).isEmpty();
+        assertThat(service.dueForConfirmation()).as("RECORDING mode has nothing to confirm").isEmpty();
     }
 
     @Test
@@ -603,6 +655,20 @@ class ViolationServiceTest {
         @Override
         public boolean underObjection(UUID violationId) {
             return objected.contains(violationId);
+        }
+
+        @Override
+        public List<Violation> dueForConfirmation(Instant recordedBefore, int limit) {
+            return violations.values().stream()
+                    .filter(v -> v.status() != Violation.Status.CANCELLED && v.blackPoints() > 0)
+                    .filter(v -> v.report().source() != Violation.Source.PARTNER)
+                    .filter(v -> v.recordedAt().isBefore(recordedBefore))
+                    .filter(v -> !pointsAdded(v.id()) && !underObjection(v.id())).limit(limit).toList();
+        }
+
+        @Override
+        public boolean pointsAdded(UUID violationId) {
+            return points.stream().anyMatch(e -> e.violationId().equals(violationId));
         }
 
         @Override

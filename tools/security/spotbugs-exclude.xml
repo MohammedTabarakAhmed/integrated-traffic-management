@@ -73,6 +73,7 @@
       <And><Class name="gov.itms.violation.application.ObjectionService"/><Field name="~objections|links|violations"/></And>
       <And><Class name="gov.itms.violation.application.ViolationBooks"/><Field name="repo"/></And>
       <And><Class name="gov.itms.violation.infrastructure.ViolationServiceConfiguration$UnpaidHoldJob"/><Field name="violations"/></And>
+      <And><Class name="gov.itms.violation.infrastructure.ViolationServiceConfiguration$ConfirmationJob"/><Field name="violations"/></And>
     </Or>
   </Match>
 

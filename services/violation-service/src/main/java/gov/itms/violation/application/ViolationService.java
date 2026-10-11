@@ -54,11 +54,29 @@ public class ViolationService {
     public static final String CANCEL = "violation.cancel";
     static final String ENTITY = "Violation";
 
-    /** Settings (configuration). */
+    /**
+     * Settings (configuration). {@code pointsAt}: when black points are added (VF-030; Q-001, Q-072 (a)): at
+     * CONFIRMATION (the objection window has lapsed with no objection pending, or an objection was rejected) or, as
+     * before objections existed, at RECORDING.
+     */
     public record Settings(BlackPoints.Policy points, Set<String> cancelReasons, String currency, ZoneId zone,
-                           Duration maxReportDelay, UnpaidHold.Policy unpaid) {
+                           Duration maxReportDelay, UnpaidHold.Policy unpaid, PointsAt pointsAt,
+                           Duration objectionWindow) {
+        public enum PointsAt { RECORDING, CONFIRMATION }
+
         public Settings {
             cancelReasons = Set.copyOf(cancelReasons);
+            java.util.Objects.requireNonNull(pointsAt, "pointsAt");
+            if (objectionWindow == null || objectionWindow.isNegative() || objectionWindow.isZero()) {
+                throw new IllegalArgumentException("the objection window must be positive (VF-050)");
+            }
+        }
+
+        /** Points at recording (the behaviour before objections existed). */
+        public Settings(BlackPoints.Policy points, Set<String> cancelReasons, String currency, ZoneId zone,
+                        Duration maxReportDelay, UnpaidHold.Policy unpaid) {
+            this(points, cancelReasons, currency, zone, maxReportDelay, unpaid, PointsAt.RECORDING,
+                    Duration.ofDays(30));
         }
     }
 
@@ -186,10 +204,65 @@ public class ViolationService {
         if (cover != null) {
             rentalTransfer(v, cover);
         }
-        if (v.blackPoints() > 0) {
+        if (v.blackPoints() > 0 && settings.pointsAt() == Settings.PointsAt.RECORDING) {
             addPoints(v, responsible, day, CurrentActor.system("violation-black-points"));
         }
         return v;
+    }
+
+    // ---- confirmation (VF-030; Q-001, Q-072 (a); UAT-1)
+
+    private static final int CONFIRMATION_BATCH = 100;
+
+    /** Violations whose objection window has lapsed with points not yet added, oldest first (VF-030). */
+    @Transactional(readOnly = true)
+    public List<String> dueForConfirmation() {
+        if (settings.pointsAt() != Settings.PointsAt.CONFIRMATION) {
+            return List.of();
+        }
+        return repo.dueForConfirmation(clock.instant().minus(settings.objectionWindow()), CONFIRMATION_BATCH).stream()
+                .map(Violation::number).toList();
+    }
+
+    /**
+     * Confirms the violation once its objection window has lapsed with no objection pending or referred to court:
+     * its black points are added now, so a suspension starts on the confirmation date (UAT-1). False when it is not
+     * due, was cancelled, carries no points, comes from a partner state (Q-079 a) or was confirmed already.
+     */
+    @Transactional
+    public boolean confirmIfDue(String number) {
+        return confirm(number, false);
+    }
+
+    /** VF-051: a rejected objection confirms the violation at once (Q-001). */
+    @Transactional
+    public boolean confirmAfterRejection(String number) {
+        return confirm(number, true);
+    }
+
+    private boolean confirm(String number, boolean objectionRejected) {
+        if (settings.pointsAt() != Settings.PointsAt.CONFIRMATION) {
+            return false;
+        }
+        Violation v = repo.findForUpdate(number).orElse(null);
+        Instant now = clock.instant();
+        if (v == null || v.status() == Violation.Status.CANCELLED || v.blackPoints() <= 0
+                || v.report().source() == Violation.Source.PARTNER || repo.pointsAdded(v.id())
+                || repo.underObjection(v.id())
+                || (!objectionRejected && v.recordedAt().plus(settings.objectionWindow()).isAfter(now))) {
+            return false;
+        }
+        CurrentActor system = CurrentActor.system("violation-confirmation");
+        String file = v.report().responsibleFileNumber();
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("violationNumber", number);
+        detail.put("fileNumber", file);
+        detail.put("points", v.blackPoints());
+        detail.put("confirmedBy", objectionRejected ? "OBJECTION_REJECTED" : "OBJECTION_WINDOW_LAPSED");
+        audit.recordAs(system, "VIOLATION_CONFIRMED", ENTITY, number, null, detail, "VF-030");
+        events.recordAs(system, "itms.violation.confirmed", number, detail);
+        addPoints(v, file, v.occurredOn(settings.zone()), system);
+        return true;
     }
 
     /** Adds the points, sends warnings, and suspends when the threshold is reached (VF-030..VF-033, UAT-1). */
@@ -210,13 +283,14 @@ public class ViolationService {
         base.put("violationNumber", v.number());
         base.put("points", v.blackPoints());
         base.put("activePoints", after);
-        audit.record("BLACK_POINTS_ADDED", "BlackPointAccount", file, Map.of("activePoints", before), base, null);
-        events.record("itms.violation.points-added", file, base);
+        audit.recordAs(actor, "BLACK_POINTS_ADDED", "BlackPointAccount", file, Map.of("activePoints", before), base,
+                null);
+        events.recordAs(actor, "itms.violation.points-added", file, base);
         for (Integer threshold : BlackPoints.warningsCrossed(settings.points(), before, after)) {
             Map<String, Object> warning = new LinkedHashMap<>(base);
             warning.put("warningThreshold", threshold);
             warning.put("suspensionThreshold", settings.points().suspensionThreshold());
-            events.record("itms.violation.points-warning", file, warning);
+            events.recordAs(actor, "itms.violation.points-warning", file, warning);
         }
         List<BlackPoints.Suspension> previous = repo.suspensions(file);
         boolean suspendedNow = previous.stream().anyMatch(s -> s.activeOn(today));
@@ -248,8 +322,8 @@ public class ViolationService {
         m.put("activePoints", points);
         m.put("holdId", holdId);
         m.put("violationNumber", trigger.number());
-        audit.record("LICENCE_SUSPENDED", "BlackPointAccount", file, null, m, "VF-032 threshold reached");
-        events.record("itms.violation.licence-suspended", file, m);
+        audit.recordAs(actor, "LICENCE_SUSPENDED", "BlackPointAccount", file, null, m, "VF-032 threshold reached");
+        events.recordAs(actor, "itms.violation.licence-suspended", file, m);
     }
 
     // ---- reading

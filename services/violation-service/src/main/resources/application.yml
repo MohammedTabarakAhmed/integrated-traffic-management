@@ -68,6 +68,12 @@ itms:
     unpaid-hold-blocked-services: ${ITMS_VIOLATIONS_UNPAID_HOLD_BLOCKED_SERVICES:VEH_RENEWAL}
     unpaid-hold-liftable-by-roles: ${ITMS_VIOLATIONS_UNPAID_HOLD_LIFTABLE_BY:UNPAID_FINE_HOLD_MANAGER,HOLD_SUPERVISOR}
     objection-window: ${ITMS_VIOLATIONS_OBJECTION_WINDOW:30d}
+    # VF-030 (Q-001, owner decision Q-072 (a)): black points are added when the violation is confirmed: the objection
+    # window has lapsed with no objection pending or at court, or an objection was rejected. RECORDING restores the
+    # behaviour from before objections existed. The confirmation job runs every confirmation-interval.
+    points-at: ${ITMS_VIOLATIONS_POINTS_AT:CONFIRMATION}
+    confirmation-interval: ${ITMS_VIOLATIONS_CONFIRMATION_INTERVAL:PT15M}
+    confirmation-initial-delay: ${ITMS_VIOLATIONS_CONFIRMATION_INITIAL_DELAY:PT1M}
     # TR-032, VF-014, UAT-2: with no identified driver, rental-service is asked which contract covered the vehicle;
     # the renter becomes responsible. Fail closed: if rental-service cannot answer, recording is refused (503) and
     # retried by the caller (device intake resends by source key; Q-081).

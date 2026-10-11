@@ -796,9 +796,15 @@ catalogue "SMK20_$SMK" 30000 20
 catalogue "SMK6_$SMK" 60000 6
 catalogue "SMKP_$SMK" 10000 0
 driver="TF-SMKD-$SMK" # throw-away file per run; it keeps its suspension and hold (harmless)
+# VF-030 (Q-072 a): points are added on confirmation, when the objection window lapses (locally one minute).
+active_points() { get_from "$VIO" "$S_MAKER" "/v1/black-point-accounts/$driver" | json_field "['activePoints']"; }
 record "SMK20_$SMK" "TF-SMKO-$SMK" "$driver" >/dev/null
-[[ "$(get_from "$VIO" "$S_MAKER" "/v1/black-point-accounts/$driver" | json_field "['activePoints']")" == 20 ]] || { echo "FAIL: 20 points expected"; exit 1; }
+[[ "$(active_points)" == 0 ]] || { echo "FAIL: points before confirmation"; exit 1; }
+has20() { [[ "$(active_points)" == 20 ]]; }
+wait_until 180 has20 || { echo "FAIL: 20 points expected after confirmation, got $(active_points)"; exit 1; }
 record "SMK6_$SMK" "TF-SMKO-$SMK" "$driver" >/dev/null
+suspended() { [[ "$(get_from "$VIO" "$S_MAKER" "/v1/black-point-accounts/$driver" | json_field "['activeSuspension'] is not None")" == True ]]; }
+wait_until 180 suspended || { echo "FAIL: no suspension after the 6-point violation was confirmed"; exit 1; }
 account=$(get_from "$VIO" "$S_MAKER" "/v1/black-point-accounts/$driver")
 until_expected=$("$PY" -c "import datetime,calendar; d=datetime.datetime.now(datetime.timezone.utc).date(); m=d.month+2; y=d.year+m//12; m=m%12+1; e=datetime.date(y,m,min(d.day,calendar.monthrange(y,m)[1])); print(e-datetime.timedelta(days=1))")
 printf '%s' "$account" | "$PY" -c "import json,sys; s=json.load(sys.stdin)['activeSuspension']; assert s and s['pointsAtOrder']==26 and s['ordinal']==1 and s['until']==sys.argv[1], s" "$until_expected" \
@@ -823,7 +829,7 @@ r2=$(body_of "$(callback "$vpayment" "gw-uat4-$SMK" 30000)")
   || { echo "FAIL: UAT-4 callback log"; exit 1; }
 all_paid() { for n in "$v1" "$v2" "$v3"; do [[ "$(get_from "$VIO" "$S_MAKER" "/v1/violations/$n" | json_field "['status']")" == PAID ]] || return 1; done; }
 wait_until 60 all_paid || { echo "FAIL: UAT-4 violations not all PAID"; exit 1; }
-echo "   UAT-1 (points at recording, Q-072): $driver 26 points -> suspended until $until_expected, LICENCE_SUSPENSION hold active"
+echo "   UAT-1 (points on confirmation, Q-072 a): $driver 20 + 6 confirmed -> suspended until $until_expected, LICENCE_SUSPENSION hold active"
 # VF-015, UAT-1: the events reach notification-service through Kafka and the seeded templates notify the driver
 notices() { "${DC[@]}" exec -T notification-postgres psql -qtA -U "$NOTIF_DB_USER" -d notification -c \
   "select string_agg(distinct template_code, ',' order by template_code) from notification where recipient_id = '$driver' and channel = 'INBOX'"; }
@@ -847,5 +853,144 @@ expect "$(post_to "$VIO" "$S_CHECKER" "/v1/violations/$unpaid/cancellations" '{"
 unpaid_lifted() { [[ "$(vehicle_holds)" == *UNPAID_FINES/LIFTED* && "$(vehicle_holds)" != *ACTIVE* ]]; }
 wait_until 120 unpaid_lifted || { echo "FAIL: the UNPAID_FINES hold on $uvin was not lifted: '$(vehicle_holds)'"; exit 1; }
 echo "   $unpaid on $uvin: UNPAID_FINES hold placed after the (local, 1 minute) period, lifted when cancelled"
+
+# ---- Increments 4-9 services (2026-10-11): one end-to-end path each, through the running stack.
+S_MAKER=$(token dev.maker "$DEV_MAKER_PASSWORD"); S_CHECKER=$(token dev.checker "$DEV_CHECKER_PASSWORD")
+hours_ago() { "$PY" -c "import datetime,sys; print((datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=float(sys.argv[1]))).strftime('%Y-%m-%dT%H:%M:%SZ'))" "$1"; }
+days_ahead() { "$PY" -c "import datetime,sys; print((datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=float(sys.argv[1]))).strftime('%Y-%m-%dT%H:%M:%SZ'))" "$1"; }
+
+echo "39. Devices (VF-010, VF-011, VF-080, VF-081): a calibrated radar's capture becomes a violation; an uncalibrated one is held for review"
+DEV=http://localhost:8097
+radar="RAD-$SMK"; stale="RAD-$SMK-X"
+for code in "$radar" "$stale"; do
+  expect "$(post_to "$DEV" "$S_MAKER" /v1/devices "{\"code\":\"$code\",\"type\":\"RADAR\",\"owner\":\"POLICE\",\"region\":\"DXB\",\"latitude\":25.2,\"longitude\":55.3,\"road\":\"E11\",\"direction\":\"NORTHBOUND\",\"speedLimitKmh\":100}")" 201
+done
+expect "$(post_to "$DEV" "$S_MAKER" "/v1/devices/$radar/calibrations" "{\"validFrom\":\"$(hours_ago 24)\",\"validUntil\":\"$(days_ahead 180)\"}")" 200
+capture() { # device source-key -> result
+  post_to "$DEV" "$S_MAKER" /v1/device-captures "{\"sourceKey\":\"$2\",\"deviceCode\":\"$1\",\"capturedAt\":\"$(hours_ago 0.01)\",\"catalogueCode\":\"SMKP_$SMK\",\"region\":\"DXB\",\"plate\":\"S 39\",\"location\":\"E11 km 39\",\"measuredSpeedKmh\":131,\"evidenceId\":\"EV-$SMK\",\"plateReadable\":true,\"imagePresent\":true,\"ownerFileNumber\":\"TF-SMKDEV-$SMK\"}" PARTNER
+}
+res=$(capture "$radar" "SRC-$SMK-1"); expect "$res" 201
+[[ "$(body_of "$res" | json_field "['status']")" == RECORDED ]] || { echo "FAIL: capture not recorded: $(body_of "$res")"; exit 1; }
+dev_violation=$(body_of "$res" | json_field "['violationNumber']")
+[[ "$(get_from "$VIO" "$S_MAKER" "/v1/violations/$dev_violation" | json_field "['responsibleFileNumber']")" == "TF-SMKDEV-$SMK" ]] \
+  || { echo "FAIL: device violation $dev_violation"; exit 1; }
+again=$(capture "$radar" "SRC-$SMK-1")
+[[ "$(body_of "$again" | json_field "['violationNumber']")" == "$dev_violation" ]] || { echo "FAIL: duplicate capture made a second violation"; exit 1; }
+res=$(capture "$stale" "SRC-$SMK-2"); expect "$res" 201
+[[ "$(body_of "$res" | json_field "['status']")" == REVIEW ]] || { echo "FAIL: uncalibrated capture not held: $(body_of "$res")"; exit 1; }
+echo "   $radar: capture -> $dev_violation (once, by source key); $stale (no calibration) -> REVIEW queue"
+
+echo "40. Accidents (AC-002, AC-005, AC-006): agreed shares decide fault at once; the report keeps every person's details"
+ACC=http://localhost:8100
+res=$(post_to "$ACC" "$S_MAKER" /v1/accidents "{\"region\":\"DXB\",\"occurredAt\":\"$(hours_ago 1)\",\"location\":\"Smoke road km 40\",\"origin\":\"OFFICER_DEVICE\",\"evidenceDocumentIds\":[\"DOC-$SMK\"],\"parties\":[{\"role\":\"DRIVER\",\"trafficFileNumber\":\"TF-SMKA1-$SMK\",\"vehiclePlate\":\"S 401\",\"faultPercent\":70,\"agrees\":true,\"seatPosition\":\"FRONT_LEFT\",\"intoxicationStatus\":\"NEGATIVE\"},{\"role\":\"DRIVER\",\"trafficFileNumber\":\"TF-SMKA2-$SMK\",\"vehiclePlate\":\"S 402\",\"faultPercent\":30,\"agrees\":true,\"injuryDegree\":\"MINOR\",\"transportMethod\":\"AMBULANCE\"}]}" FIELD)
+expect "$res" 201
+accident=$(body_of "$res" | json_field "['id']")
+acc=$(get_from "$ACC" "$S_MAKER" "/v1/accidents/$accident")
+printf '%s' "$acc" | "$PY" -c "import json,sys; a=json.load(sys.stdin); assert a['status']=='FAULT_DECIDED' and a['reportNumber'] and a['parties'][1]['transportMethod']=='AMBULANCE', a" \
+  || { echo "FAIL: accident $acc"; exit 1; }
+echo "   accident $(printf '%s' "$acc" | json_field "['reportNumber']"): FAULT_DECIDED 70/30 without an officer decision"
+
+echo "41. Rental and UAT-2 (TR-030, TR-032, VF-014): a radar violation during a rental contract goes to the renter; renter and company notified"
+RENT=http://localhost:8101
+company="TF-SMKRC-$SMK"; renter="TF-SMKRENTER-$SMK"; rplate="R $((SMK % 100000))"
+expect "$(post_to "$RENT" "$S_MAKER" /v1/rental-companies "{\"trafficFileNumber\":\"$company\",\"commercialLicence\":\"CL-$SMK\",\"region\":\"DXB\"}")" 201
+expect "$(post_to "$RENT" "$S_MAKER" "/v1/rental-companies/$company/branches" '{"code":"AIRPORT","name":"Airport desk","region":"DXB"}')" 201
+# UAT-2: contract from day 1 10:00 to day 3 10:00, violation at 18:00 on day 2 (here: 32 h after the start)
+start=$(hours_ago 32.5); end=$(days_ahead 2)
+res=$(post_to "$RENT" "$S_MAKER" /v1/rental-contracts "{\"companyFile\":\"$company\",\"vehiclePlate\":\"$rplate\",\"renterFile\":\"$renter\",\"startsAt\":\"$start\",\"endsAt\":\"$end\",\"pickupBranch\":\"AIRPORT\",\"returnBranch\":\"AIRPORT\",\"type\":\"DAILY\",\"bondMinor\":50000}")
+expect "$res" 201
+rental_contract=$(body_of "$res" | json_field "['id']")
+res=$(post_to "$VIO" "$S_MAKER" /v1/violations "{\"catalogueCode\":\"SMKP_$SMK\",\"occurredAt\":\"$(hours_ago 0.5)\",\"region\":\"DXB\",\"location\":\"Smoke road km 41\",\"plate\":\"$rplate\",\"ownerFileNumber\":\"$company\",\"source\":\"DEVICE\",\"deviceId\":\"$radar\"}" FIELD)
+expect "$res" 201
+uat2=$(body_of "$res")
+[[ "$(printf '%s' "$uat2" | json_field "['responsibleFileNumber']")" == "$renter" && "$(printf '%s' "$uat2" | json_field "['rentalContractId']")" == "$rental_contract" ]] \
+  || { echo "FAIL: UAT-2 violation not with the renter: $uat2"; exit 1; }
+uat2_number=$(printf '%s' "$uat2" | json_field "['number']")
+inbox_of() { "${DC[@]}" exec -T notification-postgres psql -qtA -U "$NOTIF_DB_USER" -d notification -c \
+  "select string_agg(distinct template_code, ',' order by template_code) from notification where recipient_id = '$1' and reference = '$uat2_number' and channel = 'INBOX'"; }
+both_notified() { [[ "$(inbox_of "$renter")" == *VIOLATION_RECORDED* && "$(inbox_of "$company")" == *VIOLATION_TRANSFERRED_TO_RENTER* ]]; }
+wait_until 120 both_notified || { echo "FAIL: UAT-2 notices renter='$(inbox_of "$renter")' company='$(inbox_of "$company")'"; exit 1; }
+echo "   UAT-2: $uat2_number during contract $rental_contract -> $renter (not $company); renter and company notified"
+
+echo "42. Training permits (TR-002, TR-003, TR-006): type, application, committee test, approval and issue"
+PERMIT=http://localhost:8102
+ptype="PT_$((SMK % 1000000))"
+expect "$(post_to "$PERMIT" "$S_CHECKER" /v1/permit-types "{\"code\":\"$ptype\",\"category\":\"INSTRUCTOR\",\"licenceClass\":\"LIGHT\",\"minimumDrivingYears\":3,\"minimumAge\":21,\"cleanRecordDays\":365,\"medicalFitRequired\":true,\"testRequired\":true,\"validityDays\":365,\"renewalWindowDays\":30,\"feeMinor\":5000}")" 200
+res=$(post_to "$PERMIT" "$S_MAKER" /v1/permits "{\"typeCode\":\"$ptype\",\"trafficFileNumber\":\"TF-SMKP-$SMK\",\"licenceEligible\":true,\"drivingYears\":5,\"age\":30,\"cleanRecordDays\":400,\"medicallyFit\":true,\"dualControls\":false,\"schoolId\":\"SCHOOL-1\"}")
+expect "$res" 201
+pbase="/v1/permits/$(body_of "$res" | json_field "['id']")"
+expect "$(post_to "$PERMIT" "$S_MAKER" "$pbase/tests" "{\"committee\":\"C1\",\"scheduledAt\":\"$(days_ahead 1)\"}")" 201
+expect "$(post_to "$PERMIT" "$S_CHECKER" "$pbase/test-results" '{"examiner":"EX-1","passed":true}')" 200
+expect "$(post_to "$PERMIT" "$S_CHECKER" "$pbase/transitions" '{"action":"approve","reason":"test passed"}')" 200
+res=$(post_to "$PERMIT" "$S_CHECKER" "$pbase/transitions" '{"action":"issue"}'); expect "$res" 200
+[[ "$(body_of "$res" | json_field "['status']")" == ISSUED ]] || { echo "FAIL: permit $(body_of "$res")"; exit 1; }
+echo "   permit $(body_of "$res" | json_field "['number']") ISSUED after a passed committee test"
+
+echo "43. Geography (CC-111, RE-002): region -> city -> area -> street -> road segment, children listed"
+GEO=http://localhost:8103
+node() { # parent type code [extra-json] -> id
+  local parent=${1:+,\"parentId\":\"$1\"}
+  post_to "$GEO" "$S_MAKER" /v1/geographic-nodes "{\"type\":\"$2\",\"code\":\"$3\",\"nameEn\":\"Smoke $3\",\"nameAr\":\"اختبار $3\",\"region\":\"DXB\"$parent${4:-}}" \
+    | body_of_pipe | json_field "['id']"
+}
+g=$((SMK % 1000000)); g_region=$(node "" REGION "SR$g"); g_city=$(node "$g_region" CITY "SC$g"); g_area=$(node "$g_city" AREA "SA$g")
+g_street=$(node "$g_area" STREET "SS$g")
+g_seg=$(node "$g_street" ROAD_SEGMENT "SG$g" ',"roadType":"ARTERIAL","laneCount":3,"direction":"FORWARD","owningAuthority":"ROADS","speedLimitKmh":80.0')
+[[ "$(get_from "$GEO" "$S_MAKER" "/v1/geographic-nodes?parentId=$g_street" | json_field "['items'][0]['id']")" == "$g_seg" ]] \
+  || { echo "FAIL: road segment $g_seg not under street $g_street"; exit 1; }
+echo "   hierarchy SR$g > SC$g > SA$g > SS$g > SG$g"
+
+echo "44. Road permits (RE-020, RE-022): every required authority approves before issue"
+ROADP=http://localhost:8104
+res=$(post_to "$ROADP" "$S_MAKER" /v1/road-permits "{\"type\":\"OVERSIZE\",\"applicant\":\"TF-SMKHAUL-$SMK\",\"vehicles\":[\"S 44\"],\"routeSegments\":[\"SG$g\"],\"region\":\"DXB\",\"startsAt\":\"$(days_ahead 1)\",\"endsAt\":\"$(days_ahead 3)\",\"vehicleLimit\":2,\"requiredAuthorities\":[\"ROADS\",\"POLICE\"],\"widthMetres\":3.4,\"loadTonnes\":48.0}" PORTAL)
+expect "$res" 201
+rbase="/v1/road-permits/$(body_of "$res" | json_field "['id']")"
+expect "$(post_to "$ROADP" "$S_CHECKER" "$rbase/transitions" '{"action":"issue"}')" 400
+expect "$(post_to "$ROADP" "$S_CHECKER" "$rbase/approvals" '{"authority":"ROADS","reason":"route ok"}')" 200
+expect "$(post_to "$ROADP" "$S_CHECKER" "$rbase/approvals" '{"authority":"POLICE"}')" 200
+res=$(post_to "$ROADP" "$S_CHECKER" "$rbase/transitions" '{"action":"issue"}'); expect "$res" 200
+[[ "$(body_of "$res" | json_field "['status']")" == ISSUED ]] || { echo "FAIL: road permit $(body_of "$res")"; exit 1; }
+echo "   road permit issued after ROADS and POLICE approved"
+
+echo "45. Marine craft (RE-030, RE-031): register, renew only after a passed inspection, transfer ownership"
+MAR=http://localhost:8105
+hull="HULL-$SMK"
+expect "$(post_to "$MAR" "$S_MAKER" /v1/marine-craft "{\"hullId\":\"$hull\",\"type\":\"MOTOR_BOAT\",\"lengthMetres\":8.5,\"engines\":2,\"capacity\":6,\"homePort\":\"DXB_PORT\",\"owner\":\"TF-SMKM1-$SMK\"}")" 201
+expect "$(post_to "$MAR" "$S_MAKER" "/v1/marine-craft/$hull/renewals" '{"validityDays":365}')" 400
+expect "$(post_to "$MAR" "$S_CHECKER" "/v1/marine-craft/$hull/inspections" '{"purpose":"RENEWAL","result":"PASS","workshop":"WS_1","documentId":"DOC-1"}')" 200
+expect "$(post_to "$MAR" "$S_MAKER" "/v1/marine-craft/$hull/renewals" '{"validityDays":365}')" 200
+res=$(post_to "$MAR" "$S_MAKER" "/v1/marine-craft/$hull/ownership-transfers" "{\"owner\":\"TF-SMKM2-$SMK\"}"); expect "$res" 200
+[[ "$(body_of "$res" | json_field "['owner']")" == "TF-SMKM2-$SMK" ]] || { echo "FAIL: marine transfer $(body_of "$res")"; exit 1; }
+echo "   $hull renewed after a passed inspection and transferred"
+
+echo "46. Cross-border and UAT-5 (XB-002, XB-003, XB-004, XB-007; CONF-002 a): a partner violation paid here closes, the notice reaches the real-time partner within 15 minutes, the settlement keeps the commission"
+XB=http://localhost:8106
+partner="PS$((SMK % 100000))"
+approve_proposal() { # result of a proposal -> approved by the checker
+  expect "$1" 202
+  expect "$(post_to "$XB" "$S_CHECKER" "/v1/config-proposals/$(body_of "$1" | json_field "['id']")/decisions" '{"approve":true,"reason":"agreement signed"}')" 200
+}
+approve_proposal "$(post_to "$XB" "$S_MAKER" /v1/partner-states "{\"code\":\"$partner\",\"name\":\"Smoke partner $partner\",\"mode\":\"REALTIME\",\"commissionBasisPoints\":1000,\"allowsAccident\":false,\"allowsPermit\":false,\"allowsLicence\":false,\"endpointUrl\":\"http://partner-state-mock:8080/xb/$partner\",\"reason\":\"bilateral agreement\"}")"
+approve_proposal "$(post_to "$XB" "$S_MAKER" "/v1/partner-states/$partner/mappings" "{\"domain\":\"VIOLATION\",\"localCode\":\"SMKP_$SMK\",\"externalCode\":\"P_SMK\",\"reason\":\"code list v1\"}")"
+xb_from=$(hours_ago 0.02)
+# UAT-5: a violation received from the partner state for the local vehicle registered in step 36 ($plate, owner TF-SMK-$SMK)
+expect "$(post_to "$XB" "$S_MAKER" "/v1/partner-states/$partner/inbound-violations" "{\"externalId\":\"E-$SMK\",\"code\":\"P_SMK\",\"vehiclePlate\":\"$plate\",\"currency\":\"XTS\",\"amountMinor\":30000,\"occurredAt\":\"$(hours_ago 2)\"}" PARTNER)" 201
+xb_payable() { pay_sql "select id || ' ' || item_ref from payable where traffic_file_number = 'TF-SMK-$SMK' and item_type = 'VIOLATION' and status = 'OPEN' and total_minor = 30000"; }
+loaded() { [[ -n "$(xb_payable)" ]]; }
+wait_until 120 loaded || { echo "FAIL: UAT-5 partner violation not loaded and payable for TF-SMK-$SMK"; exit 1; }
+read -r xb_payable_id xb_number <<<"$(xb_payable)"
+expect "$(post_to "$PAY" "$S_MAKER" "/v1/baskets/$(basket_of "[\"$xb_payable_id\"]")/payments" "{\"method\":\"CASH\",\"counterReference\":\"TILL-XB-$SMK\"}")" 201
+paid_at=$(date -u +%s)
+xb_closed() { [[ "$(get_from "$VIO" "$S_MAKER" "/v1/violations/$xb_number" | json_field "['status']")" == PAID ]]; }
+wait_until 120 xb_closed || { echo "FAIL: UAT-5 violation $xb_number not closed locally"; exit 1; }
+xb_sql() { db_sql crossborder-postgres crossborder "$XB_DB_USER" "$1"; }
+notice_acked() { [[ -n "$(xb_sql "select d.acknowledged_at from exchange_message m join exchange_delivery d on d.message_id = m.id where m.partner_code = '$partner' and m.message_type = 'PAYMENT' and m.direction = 'OUTBOUND' and d.status = 'ACKNOWLEDGED'")" ]]; }
+wait_until 900 notice_acked || { echo "FAIL: UAT-5 payment notice not acknowledged by $partner within 15 minutes"; exit 1; }
+notice_secs=$(( $(date -u +%s) - paid_at ))
+xb_to=$(days_ahead 0.001)
+settlement=$(get_from "$XB" "$S_CHECKER" "/v1/partner-states/$partner/settlements?from=$xb_from&to=$xb_to")
+printf '%s' "$settlement" | "$PY" -c "import json,sys; s=json.load(sys.stdin)['items'][0]; assert s['collectedHereMinor']==30000 and s['commissionHereMinor']==3000 and s['owedToPartnerMinor']==27000, s" \
+  || { echo "FAIL: UAT-5 settlement $settlement"; exit 1; }
+echo "   UAT-5: $xb_number (partner $partner) paid here -> PAID; notice acknowledged after ${notice_secs}s (<= 900); settlement 30000 collected, 3000 commission kept"
 
 echo "SMOKE OK"

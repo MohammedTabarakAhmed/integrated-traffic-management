@@ -69,6 +69,15 @@ public final class Ports {
         /** True while the violation has an objection awaiting review or referred to court (VF-052). */
         boolean underObjection(UUID violationId);
 
+        /**
+         * Open or paid local violations carrying points, recorded before {@code recordedBefore}, with no points added
+         * and no objection pending or at court, oldest first (VF-030 confirmation).
+         */
+        List<Violation> dueForConfirmation(Instant recordedBefore, int limit);
+
+        /** True once the violation's black points were added (VF-030). */
+        boolean pointsAdded(UUID violationId);
+
         /** Active unpaid holds whose violation is no longer open (paid or cancelled), oldest first. */
         List<UnpaidHold> settledWithActiveHold(int limit);
 

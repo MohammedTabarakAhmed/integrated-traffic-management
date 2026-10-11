@@ -106,6 +106,10 @@ upstreams:
     type: roundrobin
     nodes:
       "search-service:8080": 1
+  - id: reporting-service
+    type: roundrobin
+    nodes:
+      "reporting-service:8080": 1
 
 plugin_configs:
   - id: protected-api
@@ -417,4 +421,11 @@ routes:
     plugin_config_id: protected-api
     uris:
       - /v1/searches
+  - id: reporting-service
+    name: reporting-service
+    upstream_id: reporting-service
+    plugin_config_id: protected-api
+    uris:
+      - /v1/reports
+      - /v1/report-runs
 #END

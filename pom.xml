@@ -48,6 +48,7 @@
     <module>services/marine-service</module>
     <module>services/crossborder-service</module>
     <module>services/search-service</module>
+    <module>services/reporting-service</module>
   </modules>
 
   <properties>

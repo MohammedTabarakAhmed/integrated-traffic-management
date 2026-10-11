@@ -1,0 +1,151 @@
+openapi: 3.1.0
+info:
+  title: ITMS Reporting Service
+  version: 1.0.0
+  description: |
+    Reporting and analytics (RPT-001, RPT-002, RPT-004, RPT-005, RPT-020, RPT-022; Increment 11).
+
+    Warehouse (RPT-020): reporting-service consumes the modules' domain events (violations, payments, vehicles,
+    licences, accidents, transactions, permits, rental, cross-border) into its own database as facts, once per event
+    and never changed. Personal identifiers named in `itms.reporting.personal-fields` (traffic file numbers, identity
+    documents, plates, VINs, payer and recipient ids) are replaced by keyed pseudonyms (HMAC-SHA256, key from a secret
+    file) before they are stored, so no analysis exposes a readable identity (RPT-022).
+
+    Reports (RPT-001): configured definitions count, and optionally sum an amount of, event types per day or month,
+    region and event type, for a date range (inclusive, at most `itms.reporting.max-days`, default 366; RPT-005) with
+    region, channel and status filters. A caller sees only regions their `report.read` grants reach; asking for
+    another is 403 `REGION_OUT_OF_SCOPE`; facts without a region need a national grant (RPT-004). Every run is
+    audited. With `Accept: text/csv` the run is a CSV file (UTF-8 with byte-order mark, bilingual title and print date
+    first; RPT-002). Not yet in this version: PDF and Excel export, the Authority's letterhead, scheduled delivery
+    (RPT-003), background runs for larger ranges (RPT-005), dashboards and maps (RPT-010, RPT-011), KPI targets
+    (RPT-012) and the self-service tool (RPT-021).
+
+    A report run changes nothing, so it needs no `Idempotency-Key`. Request input (SEC-022) is hardened once in
+    itms-platform: unknown fields and malformed values are refused with 400 `VALIDATION_FAILED`.
+servers:
+  - url: /
+security:
+  - bearerAuth: []
+tags:
+  - name: Reports
+paths:
+  /v1/reports:
+    get:
+      tags: [Reports]
+      operationId: listReports
+      summary: The report definitions (RPT-001)
+      x-itms-permission: report.read
+      x-itms-scope: national
+      responses:
+        '200':
+          description: Every report definition
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Definition' } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/report-runs:
+    post:
+      tags: [Reports]
+      operationId: runReport
+      summary: Run a report for a period, filtered by the caller's data scope (RPT-001, RPT-002, RPT-004)
+      description: |
+        404 `REPORT_NOT_FOUND`; 422 `PERIOD_INVALID` (from after to) or `PERIOD_TOO_LONG`; 403 `REGION_OUT_OF_SCOPE`.
+      x-itms-permission: report.read
+      x-itms-scope: [region]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RunRequest' }
+      responses:
+        '200':
+          description: The report's rows
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RunResult' }
+            text/csv:
+              schema: { type: string }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  responses:
+    Problem:
+      description: The request was refused
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    Period:
+      type: string
+      enum: [DAY, MONTH]
+    Definition:
+      type: object
+      additionalProperties: false
+      required: [code, titleNl, titleEn, eventTypes]
+      properties:
+        code: { type: string }
+        titleNl: { type: string }
+        titleEn: { type: string }
+        eventTypes: { type: array, items: { type: string } }
+        amountField: { oneOf: [ { type: string }, { type: 'null' } ] }
+    RunRequest:
+      type: object
+      additionalProperties: false
+      required: [code, from, to]
+      properties:
+        code: { type: string, pattern: '^[A-Z][A-Z0-9_]{1,39}$' }
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        period: { oneOf: [ { $ref: '#/components/schemas/Period' }, { type: 'null' } ] }
+        regions:
+          oneOf:
+            - { type: array, maxItems: 50, uniqueItems: true, items: { type: string, pattern: '^[A-Z0-9_]{1,40}$' } }
+            - { type: 'null' }
+        channel: { oneOf: [ { type: string, pattern: '^[A-Z]{2,20}$' }, { type: 'null' } ] }
+        status: { oneOf: [ { type: string, pattern: '^[A-Z_]{2,30}$' }, { type: 'null' } ] }
+    Row:
+      type: object
+      additionalProperties: false
+      required: [period, eventType, count]
+      properties:
+        period: { type: string, format: date }
+        region: { oneOf: [ { type: string }, { type: 'null' } ] }
+        eventType: { type: string }
+        count: { type: integer, format: int64 }
+        amountMinor: { oneOf: [ { type: integer, format: int64 }, { type: 'null' } ] }
+    RunResult:
+      type: object
+      additionalProperties: false
+      required: [code, titleNl, titleEn, from, to, period, rows, printedAt]
+      properties:
+        code: { type: string }
+        titleNl: { type: string }
+        titleEn: { type: string }
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        period: { $ref: '#/components/schemas/Period' }
+        rows: { type: array, items: { $ref: '#/components/schemas/Row' } }
+        printedAt: { type: string }
+    Problem:
+      type: object
+      additionalProperties: true
+      required: [type, title, status]
+      properties:
+        type: { type: string, format: uri-reference }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        code: { type: string }
+        requirementRefs: { type: array, items: { type: string } }
+        correlationId: { type: string }

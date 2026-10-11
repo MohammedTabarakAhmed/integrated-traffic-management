@@ -109,3 +109,5 @@ services:
     environment: *lite-service-jvm
   search-service:
     environment: *lite-service-jvm
+  reporting-service:
+    environment: *lite-service-jvm

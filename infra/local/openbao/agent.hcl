@@ -286,3 +286,14 @@ template {
   destination = "/run/db-credentials/search-service/password"
   perms       = "0444"
 }
+
+template {
+  contents    = "{{ with secret \"database/creds/reporting-service\" }}{{ .Data.username }}{{ end }}"
+  destination = "/run/db-credentials/reporting-service/username"
+  perms       = "0444"
+}
+template {
+  contents    = "{{ with secret \"database/creds/reporting-service\" }}{{ .Data.password }}{{ end }}"
+  destination = "/run/db-credentials/reporting-service/password"
+  perms       = "0444"
+}

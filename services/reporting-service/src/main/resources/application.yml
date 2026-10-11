@@ -1,0 +1,74 @@
+spring:
+  application:
+    name: reporting-service
+  config:
+    import: "optional:configtree:${ITMS_SECRETS_DIR:/run/secrets/}"
+  # The warehouse (RPT-020) lives in reporting-service's own database, with personal identifiers pseudonymised.
+  datasource:
+    url: ${REPORTING_DB_URL}
+    username: ${REPORTING_DB_USER:}
+    password: ${REPORTING_DB_PASSWORD:}
+  flyway:
+    locations: classpath:db/platform,classpath:db/migration
+    out-of-order: true
+  kafka:
+    bootstrap-servers: ${ITMS_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+  messages:
+    basename: messages
+    fallback-to-system-locale: false
+  threads:
+    virtual:
+      enabled: true
+itms:
+  events:
+    enabled: ${ITMS_EVENTS_ENABLED:false}
+    audit-topic: ${ITMS_EVENTS_AUDIT_TOPIC:itms.audit.v1}
+    domain-topic: ${ITMS_EVENTS_DOMAIN_TOPIC:}
+    batch-size: ${ITMS_EVENTS_BATCH_SIZE:100}
+    send-timeout: ${ITMS_EVENTS_SEND_TIMEOUT:10s}
+    relay-interval: ${ITMS_EVENTS_RELAY_INTERVAL:1s}
+  security:
+    issuer: ${ITMS_OIDC_ISSUER}
+    jwk-set-uri: ${ITMS_OIDC_JWKS_URI}
+    audience: itms-api
+    authorisation-source: ${ITMS_AUTHORISATION_SOURCE:iam}
+    iam:
+      base-url: ${ITMS_IAM_URL:}
+      cache-ttl: ${ITMS_IAM_CACHE_TTL:60s}
+  # A report run changes nothing, so it needs no Idempotency-Key (API_SPECIFICATION §2).
+  idempotency:
+    enabled: false
+  # Reporting (RPT-001, RPT-004, RPT-005, RPT-020, RPT-022). The pseudonymisation key is a secret file
+  # (itms.reporting.pseudonym-key under ITMS_SECRETS_DIR); without it the service does not start.
+  reporting:
+    pseudonym-key: ${ITMS_REPORTING_PSEUDONYM_KEY:}
+    max-days: ${ITMS_REPORTING_MAX_DAYS:366}
+    personal-fields: [trafficFileNumber, ownerFileNumber, responsibleFileNumber, recipientId, payerId, renterFile,
+                      renterFileNumber, companyFile, holderFile, fileNumber, applicantFileNumber, customerId,
+                      nationalIdNo, passportNo, plate, plateNumber, vin]
+    consumer:
+      enabled: ${ITMS_REPORTING_CONSUMER_ENABLED:false}
+      group-id: reporting-service
+      topics: ${ITMS_REPORTING_CONSUMER_TOPICS:itms.violation-service.events.v1,itms.payment-service.events.v1,itms.vehicle-service.events.v1,itms.licensing-service.events.v1,itms.accident-service.events.v1,itms.transaction-service.events.v1,itms.permit-service.events.v1,itms.rental-service.events.v1,itms.crossborder-service.events.v1}
+    reports:
+      - { code: VIOLATIONS_RECORDED, title-nl: 'المخالفات المسجلة', title-en: Violations recorded, event-types: [itms.violation.recorded], amount-field: fine }
+      - { code: VIOLATIONS_PAID, title-nl: 'المخالفات المسددة', title-en: Violations paid, event-types: [itms.violation.paid] }
+      - { code: PAYMENTS_CONFIRMED, title-nl: 'المدفوعات المؤكدة', title-en: Payments confirmed, event-types: [itms.payment.confirmed], amount-field: amount }
+      - { code: VEHICLE_REGISTRATIONS, title-nl: 'تسجيل المركبات وتجديدها', title-en: Vehicle registrations and renewals, event-types: [itms.vehicle.registered, itms.vehicle.renewed] }
+      - { code: LICENCES_ISSUED, title-nl: 'رخص القيادة الصادرة والمجددة', title-en: Driving licences issued and renewed, event-types: [itms.licence.issued, itms.licence.renewed] }
+      - { code: ACCIDENTS_REPORTED, title-nl: 'الحوادث المبلغ عنها', title-en: Accidents reported, event-types: [itms.accident.reported] }
+management:
+  server:
+    port: ${ITMS_MANAGEMENT_PORT:8090}
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+server:
+  error:
+    include-stacktrace: never
+    include-message: never

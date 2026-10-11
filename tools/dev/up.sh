@@ -80,6 +80,9 @@ wanted = {
     "XB_DB_PASSWORD": lambda: secrets.token_urlsafe(24),
     "SEARCH_DB_USER": lambda: "search",
     "SEARCH_DB_PASSWORD": lambda: secrets.token_urlsafe(24),
+    "REPORTING_DB_USER": lambda: "reporting",
+    "REPORTING_DB_PASSWORD": lambda: secrets.token_urlsafe(24),
+    "REPORTING_PSEUDONYM_KEY": lambda: secrets.token_urlsafe(48),
     "KC_ADMIN_USER": lambda: "kc-admin",
     "KC_ADMIN_PASSWORD": lambda: secrets.token_urlsafe(24),
     "DEV_IAM_ADMIN_PASSWORD": lambda: secrets.token_urlsafe(16),
@@ -114,10 +117,10 @@ if [[ "${1:-}" == "down" ]]; then
 fi
 
 echo "== Building service jars"
-mvn -B -ntp -q package -DskipTests -pl services/iam-service,services/reference-data-service,services/transaction-service,services/hold-eligibility-service,services/traffic-file-service,services/fees-service,services/rules-service,services/workflow-service,services/notification-service,services/document-service,services/appointment-service,services/audit-service,services/payment-service,services/vehicle-service,services/violation-service,services/device-service,services/licensing-service,services/accident-service,services/rental-service,services/permit-service,services/geo-service,services/road-permit-service,services/marine-service,services/crossborder-service,services/search-service -am
+mvn -B -ntp -q package -DskipTests -pl services/iam-service,services/reference-data-service,services/transaction-service,services/hold-eligibility-service,services/traffic-file-service,services/fees-service,services/rules-service,services/workflow-service,services/notification-service,services/document-service,services/appointment-service,services/audit-service,services/payment-service,services/vehicle-service,services/violation-service,services/device-service,services/licensing-service,services/accident-service,services/rental-service,services/permit-service,services/geo-service,services/road-permit-service,services/marine-service,services/crossborder-service,services/search-service,services/reporting-service -am
 
 echo "== Starting the databases and OpenBao"
-"${COMPOSE[@]}" up -d --wait postgres iam-postgres transaction-postgres hold-postgres traffic-file-postgres fees-postgres rules-postgres workflow-postgres notification-postgres document-postgres appointment-postgres audit-postgres payment-postgres vehicle-postgres violation-postgres device-postgres accident-postgres rental-postgres permit-postgres geo-postgres road-permit-postgres marine-postgres crossborder-postgres search-postgres openbao
+"${COMPOSE[@]}" up -d --wait postgres iam-postgres transaction-postgres hold-postgres traffic-file-postgres fees-postgres rules-postgres workflow-postgres notification-postgres document-postgres appointment-postgres audit-postgres payment-postgres vehicle-postgres violation-postgres device-postgres accident-postgres rental-postgres permit-postgres geo-postgres road-permit-postgres marine-postgres crossborder-postgres search-postgres reporting-postgres openbao
 
 echo "== Database owner role itms_owner (ADR-039)"
 for db in "postgres refdata $REFDATA_DB_USER" "iam-postgres iam $IAM_DB_USER" \
@@ -125,7 +128,7 @@ for db in "postgres refdata $REFDATA_DB_USER" "iam-postgres iam $IAM_DB_USER" \
           "traffic-file-postgres trafficfile $TF_DB_USER" "fees-postgres fees $FEES_DB_USER" "rules-postgres rules $RULES_DB_USER" "workflow-postgres workflow $WORKFLOW_DB_USER" "notification-postgres notification $NOTIF_DB_USER" "document-postgres document $DOC_DB_USER" "appointment-postgres appointment $APPT_DB_USER" "audit-postgres audit $AUDIT_DB_USER" "payment-postgres payment $PAY_DB_USER" "vehicle-postgres vehicle $VEH_DB_USER" "violation-postgres violation $VIO_DB_USER" "device-postgres device $DEVICE_DB_USER" "accident-postgres accident $ACC_DB_USER" "rental-postgres rental $RENT_DB_USER" \
           "permit-postgres permit $PERMIT_DB_USER" "geo-postgres geo $GEO_DB_USER" "road-permit-postgres roadpermit $ROAD_PERMIT_DB_USER" \
           "marine-postgres marine $MARINE_DB_USER" "crossborder-postgres crossborder $XB_DB_USER" \
-          "search-postgres search $SEARCH_DB_USER"; do
+          "search-postgres search $SEARCH_DB_USER" "reporting-postgres reporting $REPORTING_DB_USER"; do
   set -- $db
   "${COMPOSE[@]}" exec -T "$1" psql -q -v ON_ERROR_STOP=1 -U "$3" -d "$2" < infra/local/db/itms-owner.sql
   echo "   $2: itms_owner owns the schema"
@@ -154,6 +157,7 @@ BAO_AGENT_TOKEN=$({ printf "export BAO_TOKEN='%s' ITMS_DB_LOGIN_TTL='%s' ITMS_DB
     printf "export PERMIT_DB_USER='%s' PERMIT_DB_PASSWORD='%s' GEO_DB_USER='%s' GEO_DB_PASSWORD='%s'\n" "$PERMIT_DB_USER" "$PERMIT_DB_PASSWORD" "$GEO_DB_USER" "$GEO_DB_PASSWORD"
     printf "export ROAD_PERMIT_DB_USER='%s' ROAD_PERMIT_DB_PASSWORD='%s' MARINE_DB_USER='%s' MARINE_DB_PASSWORD='%s' XB_DB_USER='%s' XB_DB_PASSWORD='%s'\n" "$ROAD_PERMIT_DB_USER" "$ROAD_PERMIT_DB_PASSWORD" "$MARINE_DB_USER" "$MARINE_DB_PASSWORD" "$XB_DB_USER" "$XB_DB_PASSWORD"
     printf "export SEARCH_DB_USER='%s' SEARCH_DB_PASSWORD='%s'\n" "$SEARCH_DB_USER" "$SEARCH_DB_PASSWORD"
+    printf "export REPORTING_DB_USER='%s' REPORTING_DB_PASSWORD='%s'\n" "$REPORTING_DB_USER" "$REPORTING_DB_PASSWORD"
     cat infra/local/openbao/configure.sh
   } | "${COMPOSE[@]}" exec -T openbao sh -s | tail -n 1)
 export BAO_AGENT_TOKEN
@@ -312,6 +316,8 @@ grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000012 service-account-itms-vehicle-service 
 # Increment 10: unified search (CC-100); what a user finds still follows their own read grants.
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker SEARCH_USER
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker SEARCH_USER
+# Increment 11: reports within the assignment's regions (RPT-004).
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker REPORT_VIEWER
 
 cat <<EOF
 
@@ -341,6 +347,7 @@ ITMS local stack is up:
   marine-service           http://localhost:8105                     (bearer token required)
   crossborder-service      http://localhost:8106                     (bearer token required)
   search-service           http://localhost:8107                     (bearer token required)
+  reporting-service        http://localhost:8108                     (bearer token required)
   Keycloak                http://localhost:8180   (realm: itms; users dev.iam-admin / dev.maker / dev.checker;
                                                    passwords in $ENV_FILE; clients itms-directory-feed and
                                                    itms-transaction-service use DEV_DIRECTORY_FEED_SECRET and

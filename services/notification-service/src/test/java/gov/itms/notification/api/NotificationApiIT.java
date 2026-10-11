@@ -316,6 +316,7 @@ class NotificationApiIT {
     @Tag("VF-015")
     @Tag("VF-031")
     @Tag("UAT-1")
+    @Tag("TR-032")
     @DisplayName("VF-015, VF-031, UAT-1: the seeded violation notices are sent to the responsible party's inbox")
     void violationNotices() {
         String file = "TF-VIO-" + CODES.incrementAndGet();
@@ -325,7 +326,11 @@ class NotificationApiIT {
                 "itms.violation.points-warning", Map.of("violationNumber", "V-2026-000000901", "points", 6,
                         "activePoints", 18, "warningThreshold", 18, "suspensionThreshold", 24, "recipientId", file),
                 "itms.violation.licence-suspended", Map.of("violationNumber", "V-2026-000000901", "months", 3,
-                        "from", "2026-10-09", "until", "2027-01-08", "activePoints", 26, "recipientId", file));
+                        "from", "2026-10-09", "until", "2027-01-08", "activePoints", 26, "recipientId", file),
+                // TR-032, UAT-2: the rental company is told the violation went to the renter
+                "itms.violation.transferred-to-renter", Map.of("violationNumber", "V-2026-000000901", "plate", "S 1",
+                        "occurredAt", "2026-10-09T08:00:00Z", "rentalContractId", "7d0c1a3e-0000-4000-8000-000000000001",
+                        "companyFile", file, "recipientId", file, "transferred", true));
         events.forEach((type, data) -> {
             String eventId = UUID.randomUUID().toString();
             assertThat(notifications.onEvent(eventId, type, new HashMap<>(data))).as(type).isEqualTo(1);

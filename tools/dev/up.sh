@@ -265,6 +265,8 @@ grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000013 service-account-itms-violation-servic
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000013 service-account-itms-violation-service VIOLATION_PAYMENT_HOLDER
 # violation-service finds the local vehicle and owner of a partner-state violation by plate (XB-002).
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000013 service-account-itms-violation-service VEHICLE_READER
+# violation-service asks rental-service which contract covered a vehicle (TR-032, VF-014, UAT-2).
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000013 service-account-itms-violation-service RENTAL_COVERAGE_READER
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000014 service-account-itms-device-service DEVICE_VIOLATION_RECORDER
 # Enforcement device registry and manual capture quality queue (VF-010, VF-011, VF-080, VF-081).
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker DEVICE_ADMIN

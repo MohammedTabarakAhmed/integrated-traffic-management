@@ -75,18 +75,28 @@ public class ViolationService {
     private final Ports.Payables payables;
     private final Ports.Holds holds;
     private final Ports.UnpaidFineHolds unpaidHolds;
+    private final Ports.Rentals rentals;
     private final AuditRecorder audit;
     private final DomainEventRecorder events;
     private final Settings settings;
     private final Clock clock;
 
+    /** Without rental contract lookup: violations go to the identified driver or the owner. */
     public ViolationService(Ports.ViolationRepository repo, Ports.Payables payables, Ports.Holds holds,
                             Ports.UnpaidFineHolds unpaidHolds, AuditRecorder audit, DomainEventRecorder events,
                             Settings settings, Clock clock) {
+        this(repo, payables, holds, unpaidHolds, (plate, at) -> java.util.Optional.empty(), audit, events, settings,
+                clock);
+    }
+
+    public ViolationService(Ports.ViolationRepository repo, Ports.Payables payables, Ports.Holds holds,
+                            Ports.UnpaidFineHolds unpaidHolds, Ports.Rentals rentals, AuditRecorder audit,
+                            DomainEventRecorder events, Settings settings, Clock clock) {
         this.repo = repo;
         this.payables = payables;
         this.holds = holds;
         this.unpaidHolds = unpaidHolds;
+        this.rentals = rentals;
         this.audit = audit;
         this.events = events;
         this.settings = settings;
@@ -150,6 +160,12 @@ public class ViolationService {
         }
         LocalDate day = LocalDate.ofInstant(report.occurredAt(), settings.zone());
         CatalogueEntry entry = inForce(report.catalogueCode(), report.region(), day);
+        // VF-014, TR-032: with no identified driver, a rental contract covering the time makes the renter responsible.
+        Ports.Rentals.Cover cover = report.driverFileNumber() == null && report.plate() != null
+                ? rentals.covering(report.plate(), report.occurredAt()).orElse(null) : null;
+        if (cover != null) {
+            report = report.coveredBy(cover.contractId(), cover.renterFile());
+        }
         String responsible = report.responsibleFileNumber();
         boolean repeat = entry.repeatWithinDays() != null && repo.hadViolationSince(responsible, entry.code(),
                 report.occurredAt().minus(Duration.ofDays(entry.repeatWithinDays())));
@@ -167,6 +183,9 @@ public class ViolationService {
         Map<String, Object> snapshot = snapshot(v, entry);
         audit.record("VIOLATION_RECORDED", ENTITY, number, null, snapshot, null);
         events.record("itms.violation.recorded", number, snapshot);
+        if (cover != null) {
+            rentalTransfer(v, cover);
+        }
         if (v.blackPoints() > 0) {
             addPoints(v, responsible, day, CurrentActor.system("violation-black-points"));
         }
@@ -334,6 +353,29 @@ public class ViolationService {
                 "recipientId", v.report().responsibleFileNumber()));
         tryLiftUnpaidHold(v, CurrentActor.system("violation-unpaid-holds"));
         return v;
+    }
+
+    /**
+     * TR-032, UAT-2: the violation went to the renter's file; the rental company is notified. A visitor renter without
+     * a traffic file leaves the owner (the company) responsible, with the contract kept for staff (Q-081).
+     */
+    private void rentalTransfer(Violation v, Ports.Rentals.Cover cover) {
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("violationNumber", v.number());
+        detail.put("plate", v.report().plate());
+        detail.put("occurredAt", v.report().occurredAt().toString());
+        detail.put("rentalContractId", cover.contractId().toString());
+        detail.put("companyFile", cover.companyFile());
+        detail.put("recipientId", cover.companyFile());
+        detail.put("transferred", cover.renterFile() != null);
+        if (cover.renterFile() != null) {
+            detail.put("renterFileNumber", cover.renterFile());
+        }
+        audit.record(cover.renterFile() != null ? "VIOLATION_TRANSFERRED_TO_RENTER" : "VIOLATION_RENTER_IS_VISITOR",
+                ENTITY, v.number(), Map.of("responsibleFileNumber", v.report().ownerFileNumber()),
+                Map.of("responsibleFileNumber", v.report().responsibleFileNumber()), "TR-032");
+        events.record(cover.renterFile() != null ? "itms.violation.transferred-to-renter"
+                : "itms.violation.renter-is-visitor", v.number(), detail);
     }
 
     // ---- payment (VF-070, UAT-4)

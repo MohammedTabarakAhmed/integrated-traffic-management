@@ -114,7 +114,7 @@ class ViolationApiIT {
 
     @DynamicPropertySource
     static void partners(DynamicPropertyRegistry registry) {
-        for (String client : List.of("payments", "holds", "vehicles")) {
+        for (String client : List.of("payments", "holds", "vehicles", "rentals")) {
             registry.add("itms.clients." + client + ".base-url", PARTNERS::baseUrl);
             registry.add("itms.clients." + client + ".token-uri", () -> PARTNERS.baseUrl() + "/token");
             registry.add("itms.clients." + client + ".client-id", () -> PartnerStub.CLIENT_ID);
@@ -262,6 +262,44 @@ class ViolationApiIT {
         MvcResult r = postAs("/v1/violations", report(code, driverFile), officer());
         assertThat(r.getResponse().getStatus()).as(r.getResponse().getContentAsString()).isEqualTo(201);
         return body(r);
+    }
+
+    @Test
+    @Tag("UAT-2")
+    @Tag("TR-032")
+    @Tag("VF-014")
+    @DisplayName("UAT-2: a radar violation during a rental contract goes to the renter's file; renter and company "
+            + "are notified (events); the facts cannot change")
+    void uat2RentalViolationTransfer() throws Exception {
+        String radar = catalogue(40_000, 4);
+        String plate = "R " + (1000 + CODES.incrementAndGet());
+        String contract = UUID.randomUUID().toString();
+        String renter = "TF-RENTER-" + suffix().replace('_', '-');
+        PARTNERS.rentals.put(plate, new String[] {contract, "TF-RENTALCO", renter});
+        // day 2, 18:00 of a contract from day 1 10:00 to day 3 10:00 (the stub covers any time for the plate)
+        Map<String, Object> report = report(radar, null);
+        report.put("plate", plate);
+        report.put("source", "DEVICE");
+        report.put("deviceId", "RADAR-7");
+        JsonNode v = expect(postAs("/v1/violations", report, officer(), "it-" + UUID.randomUUID()), 201);
+        String number = v.get("number").asString();
+        assertThat(v.get("responsibleFileNumber").asString()).as("the renter, not the company").isEqualTo(renter);
+        assertThat(v.get("rentalContractId").asString()).isEqualTo(contract);
+        assertThat(PARTNERS.rentalQueries).anyMatch(q -> q.startsWith(plate + "@"));
+        assertThat(PARTNERS.payables).anyMatch(p -> p.get("trafficFileNumber").asString().equals(renter)
+                && p.get("itemRef").asString().equals(number));
+        assertThat(body(getAs("/v1/black-point-accounts/" + renter, officer())).get("activePoints").asInt())
+                .isEqualTo(4);
+        // both are notified: the renter by VIOLATION_RECORDED (recipientId), the company by the transfer event
+        assertThat(db.sql("select data->>'recipientId' from event_outbox where subject = :n "
+                + "and event_type = 'itms.violation.recorded'").param("n", number).query(String.class).single())
+                .isEqualTo(renter);
+        assertThat(db.sql("select data->>'recipientId' from event_outbox where subject = :n "
+                + "and event_type = 'itms.violation.transferred-to-renter'").param("n", number).query(String.class)
+                .single()).isEqualTo("TF-RENTALCO");
+        assertThatThrownBy(() -> db.sql("update violation set renter_file_number = 'TF-OTHER' where number = :n")
+                .param("n", number).update()).isInstanceOf(DataAccessException.class);
+        PARTNERS.rentals.remove(plate);
     }
 
     @Test

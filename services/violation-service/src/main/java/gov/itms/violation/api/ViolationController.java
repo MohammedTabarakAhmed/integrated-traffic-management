@@ -78,12 +78,13 @@ class ViolationController {
     record ViolationDto(String number, String catalogueCode, int catalogueVersion, Instant occurredAt, String region,
                         String location, String plate, String responsibleFileNumber, Integer overKmh, long fineMinor,
                         int blackPoints, boolean repeat, Violation.Status status, String cancelReason,
-                        List<String> evidenceIds, Instant recordedAt) {
+                        List<String> evidenceIds, Instant recordedAt, java.util.UUID rentalContractId) {
         static ViolationDto of(Violation v) {
             return new ViolationDto(v.number(), v.catalogueCode(), v.catalogueVersion(), v.report().occurredAt(),
                     v.report().region(), v.report().location(), v.report().plate(),
                     v.report().responsibleFileNumber(), v.report().overKmh(), v.fineMinor(), v.blackPoints(),
-                    v.repeat(), v.status(), v.cancelReason(), v.report().evidenceIds(), v.recordedAt());
+                    v.repeat(), v.status(), v.cancelReason(), v.report().evidenceIds(), v.recordedAt(),
+                    v.report().rentalContractId());
         }
     }
 

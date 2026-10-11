@@ -30,6 +30,9 @@ public final class PartnerStub implements AutoCloseable {
     public final List<String> payableHolds = new CopyOnWriteArrayList<>();
     /** vehicle-service: plate to {vin, ownerFileNumber, region}; other plates answer 404 (XB-002). */
     public final java.util.Map<String, String[]> vehicles = new java.util.concurrent.ConcurrentHashMap<>();
+    /** rental-service stand-in (TR-032): plate -> {contractId, companyFile, renterFile or null}, covering any time. */
+    public final java.util.Map<String, String[]> rentals = new java.util.concurrent.ConcurrentHashMap<>();
+    public final List<String> rentalQueries = new CopyOnWriteArrayList<>();
     public final List<JsonNode> holds = new CopyOnWriteArrayList<>();
     public final List<String> holdKeys = new CopyOnWriteArrayList<>();
     public volatile boolean holdsDown;
@@ -57,6 +60,23 @@ public final class PartnerStub implements AutoCloseable {
             }
             respond(ex, 200, "{\"vin\":\"" + v[0] + "\",\"ownerFileNumber\":\"" + v[1] + "\",\"region\":\""
                     + v[2] + "\"}");
+        });
+        server.createContext("/v1/rental-contracts/coverage", ex -> {
+            java.util.Map<String, String> q = new java.util.HashMap<>();
+            for (String pair : String.valueOf(ex.getRequestURI().getRawQuery()).split("&")) {
+                String[] kv = pair.split("=", 2);
+                q.put(kv[0], kv.length > 1 ? java.net.URLDecoder.decode(kv[1], StandardCharsets.UTF_8) : "");
+            }
+            rentalQueries.add(q.get("plate") + "@" + q.get("at"));
+            String[] r = rentals.get(String.valueOf(q.get("plate")));
+            if (r == null) {
+                respond(ex, 200, "{\"covered\":false,\"contractId\":null,\"companyFile\":null,\"renterFile\":null,"
+                        + "\"visitor\":false}");
+                return;
+            }
+            respond(ex, 200, "{\"covered\":true,\"contractId\":\"" + r[0] + "\",\"companyFile\":\"" + r[1]
+                    + "\",\"renterFile\":" + (r[2] == null ? "null" : "\"" + r[2] + "\"") + ",\"visitor\":"
+                    + (r[2] == null) + "}");
         });
         server.createContext("/v1/holds", ex -> {
             JsonNode body = json.readTree(ex.getRequestBody().readAllBytes());

@@ -185,7 +185,10 @@ paths:
       summary: Record a violation; fine payable, black points and notification follow (VF-014, VF-015, VF-030)
       description: |
         404 `CATALOGUE_NOT_IN_FORCE`; 422 `SPEED_REQUIRED` / `SPEED_NOT_IN_BANDS` for speed entries; 503 when
-        payment-service or hold-eligibility-service does not answer (nothing is recorded).
+        payment-service, hold-eligibility-service or rental-service does not answer (nothing is recorded).
+        Responsible party (VF-014): the identified driver; otherwise, when a rental contract covered the plate at
+        the time, the renter (TR-032: the company is notified by `itms.violation.transferred-to-renter`); otherwise
+        the owner. A visitor renter without a traffic file leaves the owner responsible (Q-081).
       x-itms-permission: violation.record
       x-itms-scope: [region]
       parameters:
@@ -592,6 +595,11 @@ components:
         cancelReason: { oneOf: [ { type: string }, { type: 'null' } ] }
         evidenceIds: { type: array, items: { type: string } }
         recordedAt: { type: string, format: date-time }
+        rentalContractId:
+          description: >-
+            The rental contract that covered the time when no driver was identified (TR-032, VF-014); the renter is
+            then the responsible file. Null when no contract covered it.
+          oneOf: [ { type: string, format: uuid }, { type: 'null' } ]
     Suspension:
       type: object
       additionalProperties: false

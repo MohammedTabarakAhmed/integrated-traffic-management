@@ -31,6 +31,8 @@ public class RentalService {
             evidenceIds = List.copyOf(evidenceIds);
         }
     }
+    /** The contract covering a plate at an instant (TR-032): renterFile is null for a visitor without a file. */
+    public record Coverage(UUID contractId, String companyFile, String renterFile, boolean visitor) { }
     private final Ports.RentalRepository repo;
     private final AuditRecorder audit;
     private final DomainEventRecorder events;
@@ -187,6 +189,23 @@ public class RentalService {
                 "inspectionId", inspection.id().toString(), "contractId", contractId.toString(),
                 "type", type, "damageNotes", damageNotes, "evidenceIds", evidenceIds));
         return inspection;
+    }
+
+    /**
+     * Which contract, if any, covered the plate at the instant (TR-032, VF-014): asked by violation-service when a
+     * violation has no identified driver. The read reveals the renter, so it is audited.
+     */
+    @Transactional
+    public java.util.Optional<Coverage> coverage(String plate, Instant at) {
+        if (plate == null || plate.isBlank() || plate.length() > 40 || at == null) {
+            throw new DomainException(DomainException.Kind.VALIDATION, "RENTAL_COVERAGE_INVALID",
+                    "give the plate and the instant", List.of("TR-032"));
+        }
+        java.util.Optional<Coverage> found = repo.coverage(plate, at);
+        audit.record("RENTAL_COVERAGE_CHECKED", "RentalContract",
+                found.map(c -> c.contractId().toString()).orElse("none"), null,
+                Map.of("covered", found.isPresent(), "at", at.toString()), null);
+        return found;
     }
 
     @Transactional(readOnly = true)

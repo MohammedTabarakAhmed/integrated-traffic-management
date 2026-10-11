@@ -56,6 +56,9 @@ class ViolationServiceTest {
     private final List<String> unpaidLifted = new ArrayList<>();
     private boolean holdsDown;
     private final List<String> payablesHeld = new ArrayList<>();
+    /** The rental contract rental-service reports for any plate and time; null = none covers it (TR-032). */
+    private Ports.Rentals.Cover rentalCover;
+    private boolean rentalsDown;
     private final ViolationService service = new ViolationService(repo, new Ports.Payables() {
         @Override
         public UUID register(String number, String file, String region, String currency, long amount,
@@ -98,6 +101,11 @@ class ViolationServiceTest {
             }
             unpaidLifted.add(holdId);
         }
+    }, (plate, at) -> {
+        if (rentalsDown) {
+            throw new Ports.UnavailableException("RENTALS_UNAVAILABLE", "down", null);
+        }
+        return Optional.ofNullable(rentalCover);
     }, new AuditRecorder() {
         @Override
         public void record(String action, String entityType, String entityId, Object oldValue, Object newValue,
@@ -345,6 +353,58 @@ class ViolationServiceTest {
         assertThat(service.overdueForHold()).containsExactly(owners.number());
         assertThat(service.holdIfOverdue(owners.number())).isTrue();
         assertThat(repo.unpaid.stream().filter(h -> h.violationNumber().equals(owners.number()))).hasSize(2);
+    }
+
+    @Test
+    @Tag("TR-032")
+    @Tag("VF-014")
+    @DisplayName("TR-032, VF-014, UAT-2: no identified driver and a rental contract covers the time: the renter is "
+            + "responsible, gets the points, the payable and the unpaid hold; the company is notified")
+    void rentalTransfer() {
+        publish("SPEEDING", null, 30_000, 4, null, null);
+        UUID contract = UUID.randomUUID();
+        rentalCover = new Ports.Rentals.Cover(contract, "TF-RENTALCO", "TF-RENTER", false);
+        Violation v = record("SPEEDING", "NORTH", null);
+        assertThat(v.report().responsibleFileNumber()).isEqualTo("TF-RENTER");
+        assertThat(v.report().rentalContractId()).isEqualTo(contract);
+        assertThat(payablesRegistered).contains(v.number() + " TF-RENTER 30000 XTS");
+        assertThat(repo.points("TF-RENTER")).hasSize(1);
+        assertThat(repo.points("TF-OWNER")).isEmpty();
+        assertThat(events).contains("itms.violation.recorded " + v.number(),
+                "itms.violation.transferred-to-renter " + v.number());
+        assertThat(audit).contains("VIOLATION_TRANSFERRED_TO_RENTER " + v.number());
+        clock.set(NOW.plus(Duration.ofDays(61)));
+        assertThat(service.holdIfOverdue(v.number())).isTrue();
+        assertThat(unpaidPlaced).as("Q-016: the renter's file, not the company's vehicle")
+                .containsExactly("TRAFFIC_FILE TF-RENTER");
+    }
+
+    @Test
+    @Tag("TR-032")
+    @Tag("VF-014")
+    @DisplayName("VF-014: an identified driver wins over the rental contract; a visitor renter leaves the owner "
+            + "responsible (Q-081); rental-service down refuses the recording (fail closed)")
+    void rentalTransferLimits() {
+        publish("PARKING", null, 20_000, 0, null, null);
+        rentalCover = new Ports.Rentals.Cover(UUID.randomUUID(), "TF-RENTALCO", "TF-RENTER", false);
+        Violation driven = record("PARKING", "NORTH", "TF-DRIVER");
+        assertThat(driven.report().responsibleFileNumber()).isEqualTo("TF-DRIVER");
+        assertThat(driven.report().rentalContractId()).as("not even asked").isNull();
+
+        UUID visitorContract = UUID.randomUUID();
+        rentalCover = new Ports.Rentals.Cover(visitorContract, "TF-RENTALCO", null, true);
+        Violation visiting = record("PARKING", "NORTH", null);
+        assertThat(visiting.report().responsibleFileNumber()).isEqualTo("TF-OWNER");
+        assertThat(visiting.report().rentalContractId()).isEqualTo(visitorContract);
+        assertThat(events).contains("itms.violation.renter-is-visitor " + visiting.number());
+
+        rentalCover = null;
+        assertThat(record("PARKING", "NORTH", null).report().rentalContractId()).isNull();
+
+        rentalsDown = true;
+        int before = repo.violations.size();
+        assertThatThrownBy(() -> record("PARKING", "NORTH", null)).isInstanceOf(Ports.UnavailableException.class);
+        assertThat(repo.violations).hasSize(before);
     }
 
     @Test

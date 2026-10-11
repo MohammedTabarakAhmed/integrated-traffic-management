@@ -18,6 +18,8 @@ public final class Ports {
                             String foreignLicence, List<String> additionalDrivers, Instant startsAt, Instant endsAt,
                             String pickup, String returns, String type, long bondMinor, String actor, Instant at);
         Optional<RentalService.Contract> contract(UUID id);
+        /** The non-cancelled contract whose period covers the instant for the plate, latest start first (TR-032). */
+        Optional<RentalService.Coverage> coverage(String plate, Instant at);
         void insertInspection(RentalService.Inspection inspection);
         List<RentalService.Inspection> inspections(UUID contractId);
     }

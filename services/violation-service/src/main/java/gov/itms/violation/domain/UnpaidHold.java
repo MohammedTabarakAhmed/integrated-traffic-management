@@ -41,6 +41,10 @@ public record UnpaidHold(UUID id, UUID violationId, String violationNumber, Subj
         if (r.driverFileNumber() != null) {
             return new Subject(SubjectType.TRAFFIC_FILE, r.driverFileNumber());
         }
+        if (r.renterFileNumber() != null) {
+            // Q-016: a violation transferred to the renter holds the renter's file, not the company's vehicle.
+            return new Subject(SubjectType.TRAFFIC_FILE, r.renterFileNumber());
+        }
         if (r.vin() != null) {
             return new Subject(SubjectType.VEHICLE, r.vin());
         }

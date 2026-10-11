@@ -88,6 +88,17 @@ public class JdbcRentalRepository implements Ports.RentalRepository {
     }
 
     @Override
+    public Optional<RentalService.Coverage> coverage(String plate, Instant at) {
+        return jdbc.sql("select id,company_file,renter_file,visitor_passport is not null as visitor from rental_contract "
+                        + "where upper(vehicle_plate)=upper(:plate) and status<>'CANCELLED' "
+                        + "and starts_at<=:at and ends_at>:at order by starts_at desc limit 1")
+                .param("plate", plate.strip()).param("at", ts(at))
+                .query((rs, row) -> new RentalService.Coverage(rs.getObject("id", UUID.class),
+                        rs.getString("company_file"), rs.getString("renter_file"), rs.getBoolean("visitor")))
+                .optional();
+    }
+
+    @Override
     public void insertInspection(RentalService.Inspection inspection) {
         jdbc.sql("insert into rental_inspection(id,contract_id,inspection_type,inspected_at,odometer_km,fuel_percent,"
                         + "damage_notes,evidence_ids,notes,inspected_by) values (:id,:contract,:type,:at,:odometer,"

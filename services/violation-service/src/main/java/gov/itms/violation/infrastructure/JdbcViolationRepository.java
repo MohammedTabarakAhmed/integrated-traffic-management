@@ -35,7 +35,7 @@ class JdbcViolationRepository implements Ports.ViolationRepository {
             select id, number, catalogue_code, catalogue_version, occurred_at, region, location, plate, vin,
                 owner_file_number, driver_file_number, speed_limit_kmh, measured_speed_kmh, source, device_id,
                 evidence_ids, fine_minor, black_points, repeat, recorded_by, recorded_at, status, payable_id,
-                cancel_reason, closed_at
+                cancel_reason, closed_at, renter_file_number, rental_contract_id
             from violation""";
 
     private static final String UNPAID_HOLD_SELECT = """
@@ -120,10 +120,11 @@ class JdbcViolationRepository implements Ports.ViolationRepository {
                             location, plate, vin, owner_file_number, driver_file_number, responsible_file_number,
                             speed_limit_kmh, measured_speed_kmh, source, device_id, evidence_ids, fine_minor,
                             black_points, repeat, recorded_by, recorded_at, status, payable_id, cancel_reason,
-                            closed_at)
+                            closed_at, renter_file_number, rental_contract_id)
                         values (:id, :number, :code, :version, :occurred, :region, :location, :plate, :vin, :owner,
                             :driver, :responsible, :limit, :measured, :source, :device, string_to_array(:evidence, ','),
-                            :fine, :points, :repeat, :by, :at, :status, :payable, :cancel, :closed)""")
+                            :fine, :points, :repeat, :by, :at, :status, :payable, :cancel, :closed, :renter,
+                            :contract)""")
                 .param("id", v.id()).param("number", v.number()).param("code", v.catalogueCode())
                 .param("version", v.catalogueVersion()).param("occurred", Timestamp.from(r.occurredAt()))
                 .param("region", r.region()).param("location", r.location()).param("plate", r.plate())
@@ -134,7 +135,8 @@ class JdbcViolationRepository implements Ports.ViolationRepository {
                 .param("fine", v.fineMinor()).param("points", v.blackPoints()).param("repeat", v.repeat())
                 .param("by", v.recordedBy()).param("at", Timestamp.from(v.recordedAt()))
                 .param("status", v.status().name()).param("payable", v.payableId())
-                .param("cancel", v.cancelReason()).param("closed", ts(v.closedAt())).update();
+                .param("cancel", v.cancelReason()).param("closed", ts(v.closedAt()))
+                .param("renter", r.renterFileNumber()).param("contract", r.rentalContractId()).update();
     }
 
     @Override
@@ -363,7 +365,8 @@ class JdbcViolationRepository implements Ports.ViolationRepository {
                 rs.getString("plate"), rs.getString("vin"), rs.getString("owner_file_number"),
                 rs.getString("driver_file_number"), speedLimit, measuredSpeed,
                 Violation.Source.valueOf(rs.getString("source")), rs.getString("device_id"),
-                strings(rs.getArray("evidence_ids")));
+                strings(rs.getArray("evidence_ids")), rs.getString("renter_file_number"),
+                rs.getObject("rental_contract_id", UUID.class));
         return new Violation(rs.getObject("id", UUID.class), rs.getString("number"), report,
                 rs.getString("catalogue_code"), rs.getInt("catalogue_version"), rs.getLong("fine_minor"),
                 rs.getInt("black_points"), rs.getBoolean("repeat"), rs.getString("recorded_by"),

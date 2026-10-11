@@ -87,6 +87,19 @@ class RentalController {
         return ResponseEntity.created(URI.create("/v1/rental-contracts/" + contract.id())).body(contract);
     }
 
+    /** TR-032: the response for a plate and instant; covered=false when no contract covers it. National read. */
+    record CoverageResponse(boolean covered, UUID contractId, String companyFile, String renterFile,
+                            boolean visitor) { }
+
+    @GetMapping("/v1/rental-contracts/coverage")
+    @PreAuthorize("hasAuthority('rental.contract.coverage')")
+    CoverageResponse coverage(@org.springframework.web.bind.annotation.RequestParam String plate,
+                              @org.springframework.web.bind.annotation.RequestParam Instant at) {
+        return rentals.coverage(plate, at)
+                .map(c -> new CoverageResponse(true, c.contractId(), c.companyFile(), c.renterFile(), c.visitor()))
+                .orElseGet(() -> new CoverageResponse(false, null, null, null, false));
+    }
+
     @GetMapping("/v1/rental-contracts/{id}")
     @PreAuthorize("hasAuthority('rental.contract.read')")
     RentalService.Contract get(@PathVariable UUID id) {

@@ -159,6 +159,17 @@ public final class Ports {
         java.util.Optional<Registered> byPlate(String plate);
     }
 
+    /** rental-service: the contract covering a plate at an instant (TR-032, VF-014). */
+    public interface Rentals {
+
+        /** {@code renterFile} is null for a visitor renter without a traffic file. */
+        record Cover(UUID contractId, String companyFile, String renterFile, boolean visitor) {
+        }
+
+        /** Empty when no contract covers the plate at that instant; rental-service errors are UnavailableException. */
+        java.util.Optional<Cover> covering(String plate, java.time.Instant at);
+    }
+
     public static class UnavailableException extends RuntimeException {
         private final String code;
 

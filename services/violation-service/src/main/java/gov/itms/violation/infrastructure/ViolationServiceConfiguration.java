@@ -108,6 +108,7 @@ public class ViolationServiceConfiguration {
                         p.suspensionBlockedServices(), p.suspensionLiftableByRoles()),
                 new Adapters.RemoteUnpaidFineHolds(ServiceClients.create(client(environment, "holds"), clock,
                         registry), p.unpaidHoldBlockedServices(), p.unpaidHoldLiftableByRoles()),
+                rentals(environment, clock, registry),
                 audit, events,
                 new ViolationService.Settings(new BlackPoints.Policy(p.pointsExpiryMonths(), p.suspensionThreshold(),
                         p.suspensionMonths(), p.warningThresholds()), Set.copyOf(p.cancelReasons()), p.currency(),
@@ -148,6 +149,15 @@ public class ViolationServiceConfiguration {
                                       DomainEventRecorder events, Clock clock, ViolationProperties properties) {
         return new ObjectionService(new JdbcObjectionRepository(jdbc), new JdbcCrossborderLinks(jdbc), violations,
                 audit, events, clock, properties.objectionWindow());
+    }
+
+    /** TR-032: rental-service lookup, switchable with {@code itms.violations.rental-transfer-enabled} (default on). */
+    private static gov.itms.violation.application.Ports.Rentals rentals(Environment environment, Clock clock,
+                                                                         ObservationRegistry registry) {
+        if (!environment.getProperty("itms.violations.rental-transfer-enabled", Boolean.class, true)) {
+            return (plate, at) -> java.util.Optional.empty();
+        }
+        return new Adapters.RemoteRentals(ServiceClients.create(client(environment, "rentals"), clock, registry));
     }
 
     private static UnpaidHold.Policy unpaidPolicy(boolean enabled, Duration after, int batchSize) {

@@ -68,6 +68,10 @@ itms:
     unpaid-hold-blocked-services: ${ITMS_VIOLATIONS_UNPAID_HOLD_BLOCKED_SERVICES:VEH_RENEWAL}
     unpaid-hold-liftable-by-roles: ${ITMS_VIOLATIONS_UNPAID_HOLD_LIFTABLE_BY:UNPAID_FINE_HOLD_MANAGER,HOLD_SUPERVISOR}
     objection-window: ${ITMS_VIOLATIONS_OBJECTION_WINDOW:30d}
+    # TR-032, VF-014, UAT-2: with no identified driver, rental-service is asked which contract covered the vehicle;
+    # the renter becomes responsible. Fail closed: if rental-service cannot answer, recording is refused (503) and
+    # retried by the caller (device intake resends by source key; Q-081).
+    rental-transfer-enabled: ${ITMS_VIOLATIONS_RENTAL_TRANSFER_ENABLED:true}
     consumer-enabled: ${ITMS_VIOLATIONS_CONSUMER_ENABLED:false}
     payment-topic: ${ITMS_VIOLATIONS_PAYMENT_TOPIC:itms.payment-service.events.v1}
     # Increment 9: partner-state violations, payments abroad, forwarded objections and decisions (XB-002..XB-005).
@@ -89,6 +93,12 @@ itms:
       client-id: ${ITMS_SERVICE_CLIENT_ID:itms-violation-service}
       client-secret: ${ITMS_SERVICE_CLIENT_SECRET:}
       timeout: ${ITMS_VEHICLES_TIMEOUT:3s}
+    rentals:
+      base-url: ${ITMS_RENTALS_URL:http://localhost:8101}
+      token-uri: ${ITMS_OIDC_TOKEN_URI:http://localhost:8180/realms/itms/protocol/openid-connect/token}
+      client-id: ${ITMS_SERVICE_CLIENT_ID:itms-violation-service}
+      client-secret: ${ITMS_SERVICE_CLIENT_SECRET:}
+      timeout: ${ITMS_RENTALS_TIMEOUT:3s}
     holds:
       base-url: ${ITMS_HOLDS_URL:http://localhost:8084}
       token-uri: ${ITMS_OIDC_TOKEN_URI:http://localhost:8180/realms/itms/protocol/openid-connect/token}

@@ -287,6 +287,41 @@ final class Adapters {
         }
     }
 
+    /** {@code GET /v1/rental-contracts/coverage} at rental-service with this service's own account (TR-032). */
+    static class RemoteRentals implements Ports.Rentals {
+
+        private final RestClient client;
+
+        RemoteRentals(RestClient client) {
+            this.client = client;
+        }
+
+        record CoverageBody(boolean covered, java.util.UUID contractId, String companyFile, String renterFile,
+                            boolean visitor) {
+        }
+
+        @Override
+        public java.util.Optional<Cover> covering(String plate, java.time.Instant at) {
+            try {
+                CoverageBody c = client.get().uri(b -> b.path("/v1/rental-contracts/coverage")
+                                .queryParam("plate", plate).queryParam("at", at.toString()).build())
+                        .header("X-Channel", "BACKOFFICE").retrieve().body(CoverageBody.class);
+                if (c == null || !c.covered()) {
+                    return java.util.Optional.empty();
+                }
+                return java.util.Optional.of(new Cover(c.contractId(), c.companyFile(), c.renterFile(), c.visitor()));
+            } catch (RestClientResponseException e) {
+                LOG.warn("Rental coverage lookup failed: HTTP {}", e.getStatusCode().value());
+                throw new Ports.UnavailableException("RENTALS_UNAVAILABLE", "rental contracts cannot be checked now",
+                        e);
+            } catch (RestClientException | ServiceCallException e) {
+                LOG.warn("Rental coverage lookup failed: {}", e.getClass().getSimpleName());
+                throw new Ports.UnavailableException("RENTALS_UNAVAILABLE", "rental contracts cannot be checked now",
+                        e);
+            }
+        }
+    }
+
     /**
      * crossborder-service events (Increment 9): partner violations to load (XB-002), payments made in the partner state
      * (XB-003), objections forwarded to or received from a partner and the partner's decisions (XB-005). Business

@@ -148,6 +148,25 @@ paths:
         '409': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+  /v1/rental-contracts/coverage:
+    get:
+      tags: [Rental]
+      summary: The contract covering a plate at an instant, for violation transfer to the renter (TR-032, VF-014)
+      description: >-
+        Asked by violation-service when a violation has no identified driver. A contract covers the instant when it
+        is not cancelled and starts at or before it and ends after it; with several, the latest start wins. A visitor
+        renter has no traffic file (renterFile null, visitor true). The read is audited.
+      operationId: getRentalCoverage
+      x-itms-permission: rental.contract.coverage
+      x-itms-scope: national
+      parameters:
+        - { in: query, name: plate, required: true, schema: { type: string, minLength: 1, maxLength: 40 } }
+        - { in: query, name: at, required: true, schema: { type: string, format: date-time } }
+      responses:
+        '200': { description: Coverage (covered false when no contract covers the instant), content: {application/json: {schema: {$ref: '#/components/schemas/Coverage'}}} }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
   /v1/rental-contracts/{id}:
     get:
       tags: [Rental]
@@ -239,6 +258,16 @@ components:
       required: true
       schema: { type: string, minLength: 16, maxLength: 128 }
   schemas:
+    Coverage:
+      type: object
+      additionalProperties: false
+      required: [covered, contractId, companyFile, renterFile, visitor]
+      properties:
+        covered: { type: boolean }
+        contractId: { type: [string, 'null'], format: uuid }
+        companyFile: { type: [string, 'null'] }
+        renterFile: { type: [string, 'null'] }
+        visitor: { type: boolean }
     Company:
       type: object
       required: [id, trafficFileNumber, commercialLicence, region, status, createdAt]

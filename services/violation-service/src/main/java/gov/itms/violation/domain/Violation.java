@@ -27,7 +27,18 @@ public final class Violation {
     /** What the officer or device reports. */
     public record Report(String catalogueCode, Instant occurredAt, String region, String location, String plate,
                          String vin, String ownerFileNumber, String driverFileNumber, Integer speedLimitKmh,
-                         Integer measuredSpeedKmh, Source source, String deviceId, List<String> evidenceIds) {
+                         Integer measuredSpeedKmh, Source source, String deviceId, List<String> evidenceIds,
+                         String renterFileNumber, UUID rentalContractId) {
+
+        /** A report as given by the caller; the renter is found by the service from rental contracts (TR-032). */
+        @SuppressWarnings("checkstyle:ParameterNumber")
+        public Report(String catalogueCode, Instant occurredAt, String region, String location, String plate,
+                      String vin, String ownerFileNumber, String driverFileNumber, Integer speedLimitKmh,
+                      Integer measuredSpeedKmh, Source source, String deviceId, List<String> evidenceIds) {
+            this(catalogueCode, occurredAt, region, location, plate, vin, ownerFileNumber, driverFileNumber,
+                    speedLimitKmh, measuredSpeedKmh, source, deviceId, evidenceIds, null, null);
+        }
+
         public Report {
             CatalogueEntry.code("catalogueCode", catalogueCode);
             Objects.requireNonNull(occurredAt, "occurredAt");
@@ -60,15 +71,32 @@ public final class Violation {
             if (source == Source.DEVICE && (deviceId == null || !deviceId.matches("^[A-Z0-9][A-Z0-9_-]{0,39}$"))) {
                 throw CatalogueEntry.invalid("deviceId");
             }
+            ref("renterFileNumber", renterFileNumber, false);
+            if (renterFileNumber != null && (driverFileNumber != null || rentalContractId == null)) {
+                throw CatalogueEntry.invalid("renterFileNumber");
+            }
             evidenceIds = List.copyOf(evidenceIds == null ? List.of() : evidenceIds);
             if (evidenceIds.size() > 20 || evidenceIds.stream().anyMatch(e -> !e.matches("^[A-Za-z0-9-]{1,64}$"))) {
                 throw CatalogueEntry.invalid("evidenceIds");
             }
         }
 
-        /** VF-014: the identified driver; otherwise the registered owner (rental contracts come with TR-*). */
+        /** VF-014: the identified driver; otherwise the renter whose contract covers the time; otherwise the owner. */
         public String responsibleFileNumber() {
-            return driverFileNumber != null ? driverFileNumber : ownerFileNumber;
+            if (driverFileNumber != null) {
+                return driverFileNumber;
+            }
+            return renterFileNumber != null ? renterFileNumber : ownerFileNumber;
+        }
+
+        /**
+         * The report with the rental contract that covered the time (TR-032). {@code renter} is null for a visitor
+         * without a traffic file: the contract is kept for the record and the owner stays responsible (Q-081).
+         */
+        public Report coveredBy(UUID contractId, String renter) {
+            return new Report(catalogueCode, occurredAt, region, location, plate, vin, ownerFileNumber,
+                    driverFileNumber, speedLimitKmh, measuredSpeedKmh, source, deviceId, evidenceIds, renter,
+                    Objects.requireNonNull(contractId));
         }
 
         public Integer overKmh() {

@@ -177,4 +177,52 @@ class RentalApiIT {
         assertThat(api.post("/v1/rental-companies/" + company + "/suspensions", Map.of("reason", "x y z"),
                 SOUTH_ONLY).getResponse().getStatus()).isEqualTo(403);
     }
+
+    @Test
+    @Tag("TR-032")
+    @Tag("VF-014")
+    @DisplayName("TR-032, UAT-2: the contract covering a plate at an instant names the renter; outside it, none")
+    void coverage() throws Exception {
+        RequestPostProcessor violations = user("svc-violation", "RENTAL_COVERAGE_READER", "rental.contract.coverage");
+        String company = company();
+        String plate = "U" + (1000 + new java.util.Random().nextInt(9000));
+        Instant start = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+        Map<String, Object> resident = contract(company);
+        resident.put("vehiclePlate", plate);
+        resident.put("startsAt", start.toString());
+        resident.put("endsAt", start.plus(2, ChronoUnit.DAYS).toString());
+        String contractId = api.expect(api.post("/v1/rental-contracts", resident, REGULATOR), 201).get("id")
+                .asString();
+
+        // UAT-2: contract day 1 10:00 to day 3 10:00, violation day 2 18:00
+        JsonNode during = api.expect(api.get("/v1/rental-contracts/coverage?plate=" + plate
+                + "&at=" + start.plus(32, ChronoUnit.HOURS), violations), 200);
+        assertThat(during.get("covered").asBoolean()).isTrue();
+        assertThat(during.get("contractId").asString()).isEqualTo(contractId);
+        assertThat(during.get("renterFile").asString()).isEqualTo("TF-RENTER");
+        assertThat(during.get("companyFile").asString()).isEqualTo(company);
+        assertThat(during.get("visitor").asBoolean()).isFalse();
+        for (Instant outside : List.of(start.minusSeconds(1), start.plus(2, ChronoUnit.DAYS))) {
+            assertThat(api.expect(api.get("/v1/rental-contracts/coverage?plate=" + plate
+                    + "&at=" + outside, violations), 200).get("covered").asBoolean()).as(outside.toString()).isFalse();
+        }
+        assertThat(db.sql("select count(*) from audit_outbox where action = 'RENTAL_COVERAGE_CHECKED' "
+                + "and entity_id = :id").param("id", contractId).query(Long.class).single()).isEqualTo(1);
+
+        Map<String, Object> visitor = contract(company);
+        String visitorPlate = plate + "V";
+        visitor.put("vehiclePlate", visitorPlate);
+        visitor.remove("renterFile");
+        visitor.put("visitorPassport", "P7654321");
+        visitor.put("foreignLicence", "FL-7");
+        api.expect(api.post("/v1/rental-contracts", visitor, REGULATOR), 201);
+        JsonNode visiting = api.expect(api.get("/v1/rental-contracts/coverage?plate=" + visitorPlate
+                + "&at=" + Instant.now().plus(1, ChronoUnit.HOURS).truncatedTo(ChronoUnit.SECONDS), violations), 200);
+        assertThat(visiting.get("covered").asBoolean()).isTrue();
+        assertThat(visiting.get("visitor").asBoolean()).isTrue();
+        assertThat(visiting.get("renterFile").isNull()).isTrue();
+
+        assertThat(api.get("/v1/rental-contracts/coverage?plate=X&at=" + start, REGULATOR).getResponse().getStatus())
+                .as("needs rental.contract.coverage").isEqualTo(403);
+    }
 }

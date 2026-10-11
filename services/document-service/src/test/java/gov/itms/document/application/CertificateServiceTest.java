@@ -11,6 +11,7 @@ import gov.itms.document.domain.Document;
 import gov.itms.document.domain.DomainException;
 import gov.itms.platform.audit.AuditRecorder;
 import gov.itms.platform.events.DomainEventRecorder;
+import gov.itms.platform.events.ProcessedEvents;
 import gov.itms.platform.security.CurrentActor;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -136,6 +137,49 @@ class CertificateServiceTest {
             sum += d;
         }
         return sum % 10 == 0;
+    }
+
+    @Test
+    @Tag("CC-082")
+    @DisplayName("CC-082, Q-075 f, Q-078 a: another module's certificate event is rendered once, with the holder's name"
+            + " from the traffic file and the module's number as reference")
+    void handOff() {
+        service.publish("VL_CERT_CLEARANCE", "براءة ذمة", "Clearance", "{{holderNameNl}} {{vin}}",
+                "{{holderNameEn}} {{vin}} {{sourceCertificateNumber}}", null, "first version", ADMIN);
+        Set<String> seen = new java.util.HashSet<>();
+        CertificateHandOff handOff = new CertificateHandOff(service,
+                file -> "TF-1".equals(file) ? Optional.of(new Ports.HolderNames.Names("محمد أحمد", "Mohammed Ahmed"))
+                        : Optional.empty(),
+                new ProcessedEvents(null, null) {
+                    @Override
+                    public boolean firstDelivery(String consumer, String eventId) {
+                        return seen.add(consumer + "/" + eventId);
+                    }
+                },
+                List.of(new CertificateHandOff.CertificateEvent("itms.vehicle.certificate-issued", "VL_CERT_{kind}",
+                        "VEHICLE", "vin", "ownerFileNumber", "number")));
+        Map<String, String> event = Map.of("number", "VC-2026-1", "kind", "CLEARANCE", "vin", "VIN-9",
+                "ownerFileNumber", "TF-1");
+        assertThat(handOff.onEvent("e-1", "itms.vehicle.certificate-issued", event)).isEqualTo(1);
+        assertThat(handOff.onEvent("e-1", "itms.vehicle.certificate-issued", event)).as("redelivery").isZero();
+        assertThat(handOff.onEvent("e-2", "itms.vehicle.registered", event)).as("not a certificate").isZero();
+        Certificate.Issued c = repo.certificates.values().iterator().next();
+        assertThat(c.reference()).isEqualTo("VC-2026-1");
+        assertThat(c.subjectId()).isEqualTo("VIN-9");
+        assertThat(new String(stored.get("certificates/" + c.number()), StandardCharsets.UTF_8))
+                .isEqualTo("محمد أحمد VIN-9|Mohammed Ahmed VIN-9 VC-2026-1");
+        assertThat(audit).contains("CERTIFICATE_ISSUED " + c.number());
+
+        Map<String, String> unknownKind = new HashMap<>(event);
+        unknownKind.put("kind", "EXPORT");
+        assertThat(handOff.onEvent("e-3", "itms.vehicle.certificate-issued", unknownKind))
+                .as("no template: skipped").isZero();
+        Map<String, String> unknownHolder = new HashMap<>(event);
+        unknownHolder.put("ownerFileNumber", "TF-404");
+        assertThat(handOff.onEvent("e-4", "itms.vehicle.certificate-issued", unknownHolder)).isZero();
+        assertThat(handOff.onEvent("e-5", "itms.vehicle.certificate-issued", Map.of("kind", "CLEARANCE")))
+                .as("fields missing").isZero();
+        assertThat(repo.certificates).hasSize(1);
     }
 
     @Test

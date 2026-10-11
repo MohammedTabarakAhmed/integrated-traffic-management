@@ -58,6 +58,7 @@ public class LicenceService {
     private final Ports.FeeQuotes fees;
     private final Ports.Payables payables;
     private final Ports.Eligibility eligibility;
+    private final Ports.TrafficFiles trafficFiles;
     private final LicensingRules rules;
     private final AuditRecorder audit;
     private final DomainEventRecorder events;
@@ -65,13 +66,14 @@ public class LicenceService {
 
     public LicenceService(LicenceRepository repo, LicenceClassService classes, LicenceNumberService numbers,
                           Ports.FeeQuotes fees, Ports.Payables payables, Ports.Eligibility eligibility,
-                          LicensingRules rules, AuditRecorder audit, DomainEventRecorder events, Clock clock) {
+                          Ports.TrafficFiles trafficFiles, LicensingRules rules, AuditRecorder audit, DomainEventRecorder events, Clock clock) {
         this.repo = repo;
         this.classes = classes;
         this.numbers = numbers;
         this.fees = fees;
         this.payables = payables;
         this.eligibility = eligibility;
+        this.trafficFiles = trafficFiles;
         this.rules = rules;
         this.audit = audit;
         this.events = events;
@@ -81,8 +83,8 @@ public class LicenceService {
     /**
      * What an officer asks for when issuing a new licence (DL-050).
      *
-     * @param customerCategory   the holder's customer category, for validity (DL-062) and the fee
-     * @param residencyExpiresOn the end of the holder's residency, needed when a class links validity to it
+     * @param customerCategory   optional; when given it must match the traffic file's (DL-062, Q-076 a)
+     * @param residencyExpiresOn optional; when given it must match the traffic file's residency end
      */
     public record IssueSpec(String trafficFileNumber, String region, List<UUID> transferIds, String customerCategory,
                             LocalDate residencyExpiresOn, List<Licence.Condition> conditions,
@@ -190,15 +192,17 @@ public class LicenceService {
                     List.of("DL-050"));
         }
         requireKnownConditions(spec.conditions());
-        terms(classCodes(transfers), spec.customerCategory(), spec.residencyExpiresOn(), today, today);
+        Ports.TrafficFiles.Holder holder = holder(spec.trafficFileNumber(), spec.customerCategory(),
+                spec.residencyExpiresOn());
+        terms(classCodes(transfers), holder.customerCategory(), holder.residencyExpiresOn(), today, today);
         String serviceCode = rules.serviceCode(LicenceRequest.Kind.ISSUE);
         requireNoHolds(serviceCode, spec.trafficFileNumber(), null, channel);
-        Ports.FeeQuotes.Quote quote = fees.quote(serviceCode, spec.region(), spec.customerCategory(), null,
+        Ports.FeeQuotes.Quote quote = fees.quote(serviceCode, spec.region(), holder.customerCategory(), null,
                 Map.of("CLASSES", transfers.size()), null);
         Map<String, String> payload = new LinkedHashMap<>();
-        payload.put("customerCategory", spec.customerCategory());
-        if (spec.residencyExpiresOn() != null) {
-            payload.put("residencyExpiresOn", spec.residencyExpiresOn().toString());
+        payload.put("customerCategory", holder.customerCategory());
+        if (holder.residencyExpiresOn() != null) {
+            payload.put("residencyExpiresOn", holder.residencyExpiresOn().toString());
         }
         for (Licence.Condition c : spec.conditions()) {
             payload.put("condition." + c.code(), c.note() == null ? "" : c.note());
@@ -398,6 +402,25 @@ public class LicenceService {
     }
 
     /**
+     * The holder's customer category and residency end, read from the traffic file (DL-062; Q-076 a: the traffic
+     * file owns them, officer entry is no longer the source). A value the officer gives must agree with the file.
+     */
+    Ports.TrafficFiles.Holder holder(String trafficFileNumber, String givenCategory, LocalDate givenResidency) {
+        Ports.TrafficFiles.Holder h = trafficFiles.holder(trafficFileNumber).orElseThrow(() ->
+                DomainException.validation("TRAFFIC_FILE_UNKNOWN", "the traffic file does not exist",
+                        List.of("DL-062")));
+        if (givenCategory != null && !givenCategory.equals(h.customerCategory())) {
+            throw DomainException.validation("CUSTOMER_CATEGORY_MISMATCH", "the customer category differs from the "
+                    + "traffic file's", List.of("DL-062"));
+        }
+        if (givenResidency != null && !givenResidency.equals(h.residencyExpiresOn())) {
+            throw DomainException.validation("RESIDENCY_MISMATCH", "the residency end differs from the traffic "
+                    + "file's", List.of("DL-062"));
+        }
+        return h;
+    }
+
+    /**
      * Resolves each class's rule for the customer category on {@code today}: the licence lasts the shortest
      * validity among its classes from {@code from} and, when a class links validity to residency, never beyond the
      * residency.
@@ -415,7 +438,7 @@ public class LicenceService {
         if (resolved.stream().anyMatch(r -> r.rule().residencyLinked())) {
             if (residencyExpiresOn == null) {
                 throw DomainException.validation("RESIDENCY_EXPIRY_REQUIRED", "the licence validity is linked to the"
-                        + " holder's residency: give the residency end date", List.of("DL-062"));
+                        + " holder's residency, but the traffic file has no residency end", List.of("DL-062"));
             }
             if (!residencyExpiresOn.isAfter(today)) {
                 throw DomainException.validation("RESIDENCY_ENDED", "the holder's residency has ended",

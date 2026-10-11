@@ -65,7 +65,15 @@ itms:
     consumer:
       enabled: ${ITMS_NOTIFICATIONS_CONSUMER_ENABLED:false}
       group-id: notification-service
-      topics: ${ITMS_NOTIFICATIONS_CONSUMER_TOPICS:itms.transaction-service.events.v1,itms.workflow-service.events.v1,itms.hold-eligibility-service.events.v1,itms.violation-service.events.v1}
+      topics: ${ITMS_NOTIFICATIONS_CONSUMER_TOPICS:itms.transaction-service.events.v1,itms.workflow-service.events.v1,itms.hold-eligibility-service.events.v1,itms.violation-service.events.v1,itms.licensing-service.events.v1,itms.vehicle-service.events.v1,itms.permit-service.events.v1}
+    # Expiries registered from the owning services' events (CC-072): issue and renewal move the watch of the subject.
+    # Insurance expiries are not held by ITMS yet (insurance hub, ICD); they can be registered via POST /v1/expiry-watches.
+    expiry-events:
+      - { event-type: itms.licence.issued, subject-type: LICENCE, subject-field: licenceNumber, recipient-field: trafficFileNumber, expiry-field: expiresOn }
+      - { event-type: itms.licence.renewed, subject-type: LICENCE, subject-field: licenceNumber, recipient-field: trafficFileNumber, expiry-field: expiresOn }
+      - { event-type: itms.vehicle.registered, subject-type: REGISTRATION, subject-field: vin, recipient-field: ownerFileNumber, expiry-field: registrationExpiry }
+      - { event-type: itms.vehicle.renewed, subject-type: REGISTRATION, subject-field: vin, recipient-field: ownerFileNumber, expiry-field: registrationExpiry }
+      - { event-type: itms.permit.status-changed, subject-type: PERMIT, subject-field: number, recipient-field: trafficFileNumber, expiry-field: expiresOn }
   # API_SPECIFICATION §2, ADR-032: publishing templates and sending need an Idempotency-Key.
   idempotency:
     enabled: true

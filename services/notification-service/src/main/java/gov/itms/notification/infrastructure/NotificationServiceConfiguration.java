@@ -3,11 +3,13 @@ package gov.itms.notification.infrastructure;
 import gov.itms.notification.application.ChannelGateway;
 import gov.itms.notification.application.NotificationService;
 import gov.itms.notification.domain.DeliveryChannel;
+import gov.itms.notification.domain.Subscriptions;
 import gov.itms.platform.audit.AuditRecorder;
 import gov.itms.platform.events.ProcessedEvents;
 import java.net.http.HttpClient;
 import java.time.Clock;
 import java.util.EnumMap;
+import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,7 +51,15 @@ public class NotificationServiceConfiguration {
                                             NotificationProperties properties, Clock clock) {
         return new NotificationService(new JdbcNotificationRepository(jdbc, json), gateway, audit, processed,
                 new NotificationService.Settings(properties.maxAttempts(), properties.retryDelay(),
-                        properties.reminderOffsetDays()), clock);
+                        properties.reminderOffsetDays(), expiryEvents(properties)), clock);
+    }
+
+    private static List<NotificationService.ExpiryEvent> expiryEvents(NotificationProperties properties) {
+        return properties.expiryEvents().stream()
+                .map(e -> new NotificationService.ExpiryEvent(e.eventType(),
+                        e.subjectType() == null ? null : Subscriptions.SubjectType.valueOf(e.subjectType()),
+                        e.subjectField(), e.recipientField(), e.expiryField()))
+                .toList();
     }
 
     /** Sends queued notifications and the daily expiry reminders (CC-072, CC-074); safe on every instance. */

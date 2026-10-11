@@ -5,6 +5,12 @@ info:
   description: |
     Documents, media and certificates (CC-080..CC-085; ADR-051).
 
+    Certificates of other modules (CC-082; Q-075 f, Q-078 a): vehicle certificates (`itms.vehicle.certificate-issued`,
+    template `VL_CERT_<kind>`) and licence no-objection certificates (`itms.licence.noc-issued`, template
+    `LICENCE_NOC`) are rendered here from their events, with the holder's name from traffic-file-service; the owning
+    module keeps its number and state, which becomes the certificate's `reference`. Configured in
+    `itms.documents.certificates.events`.
+
     Documents (CC-080): declared first (`POST /v1/documents`: type, owner, title, classification, expiry date), then
     their content is uploaded once as `application/octet-stream` by the person who declared them. Each document type
     has configured allowed file types, recognised from the bytes, and a maximum size (CC-081); every upload is scanned

@@ -116,8 +116,10 @@ public class LicenceTransactions implements LicenceService.PaidHandler {
                 .orElseThrow(() -> DomainException.validation("EYE_TEST_REQUIRED", "a passed eye test of the last "
                         + rules.eyeTestValidityDays() + " days covering every class is needed", List.of("DL-051"),
                         rules.eyeTestValidityDays()));
-        String category = spec.customerCategory() == null ? l.customerCategory() : spec.customerCategory();
-        LocalDate residency = spec.residencyExpiresOn() == null ? l.residencyExpiresOn() : spec.residencyExpiresOn();
+        Ports.TrafficFiles.Holder holder = licences.holder(l.trafficFileNumber(), spec.customerCategory(),
+                spec.residencyExpiresOn());
+        String category = holder.customerCategory();
+        LocalDate residency = holder.residencyExpiresOn();
         LocalDate from = l.expiresOn().isBefore(today) ? today : l.expiresOn();
         LocalDate newExpiry = licences.terms(classCodes, category, residency, from, today).expiresOn();
         if (!newExpiry.isAfter(l.expiresOn())) {
@@ -190,8 +192,10 @@ public class LicenceTransactions implements LicenceService.PaidHandler {
         Licence l = repo.licence(licenceId).orElseThrow();
         l.requireNotEnded();
         licences.requireNoOpenRequest(l);
-        String category = spec.customerCategory() == null ? l.customerCategory() : spec.customerCategory();
-        LocalDate residency = spec.residencyExpiresOn() == null ? l.residencyExpiresOn() : spec.residencyExpiresOn();
+        Ports.TrafficFiles.Holder holder = licences.holder(l.trafficFileNumber(), spec.customerCategory(),
+                spec.residencyExpiresOn());
+        String category = holder.customerCategory();
+        LocalDate residency = holder.residencyExpiresOn();
         if (residency != null && !residency.isAfter(licences.today())
                 && residencyLinked(l, category, licences.today())) {
             throw DomainException.validation("RESIDENCY_ENDED", "the holder's residency has ended", List.of("DL-062"));

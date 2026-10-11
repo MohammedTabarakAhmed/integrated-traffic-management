@@ -127,7 +127,16 @@ public class PermitService {
         Instant validTo = "ISSUED".equals(target) ? now.plusSeconds(repo.type(permit.typeCode()).orElseThrow().validityDays() * 86400L) : null;
         repo.transition(id, target, "ISSUED".equals(target) ? now : null, validTo, actor, reason, now);
         audit.record("TRAINING_PERMIT_" + target, "Permit", id.toString(), Map.of("status", permit.status()), Map.of("status", target), reason);
-        events.record("itms.permit.status-changed", id.toString(), Map.of("permitId", id.toString(), "number", permit.number(), "status", target));
+        Map<String, Object> event = new java.util.LinkedHashMap<>();
+        event.put("permitId", id.toString());
+        event.put("number", permit.number());
+        event.put("status", target);
+        if (validTo != null) {
+            // CC-072: notification-service registers the expiry reminder from these two fields.
+            event.put("trafficFileNumber", permit.trafficFileNumber());
+            event.put("expiresOn", java.time.LocalDate.ofInstant(validTo, clock.getZone()).toString());
+        }
+        events.record("itms.permit.status-changed", id.toString(), event);
         return get(id);
     }
 

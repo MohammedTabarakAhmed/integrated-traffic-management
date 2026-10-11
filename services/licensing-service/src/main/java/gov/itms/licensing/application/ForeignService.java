@@ -228,16 +228,18 @@ public class ForeignService implements LicenceService.PaidHandler {
             throw DomainException.conflict("REQUEST_OPEN", "an exchange of this person waits for payment",
                     List.of("DL-054"));
         }
-        licences.terms(local, spec.customerCategory(), spec.residencyExpiresOn(), today, today);
+        Ports.TrafficFiles.Holder holder = licences.holder(f.trafficFileNumber(), spec.customerCategory(),
+                spec.residencyExpiresOn());
+        licences.terms(local, holder.customerCategory(), holder.residencyExpiresOn(), today, today);
         String serviceCode = licences.rules().serviceCode(LicenceRequest.Kind.EXCHANGE);
         licences.requireNoHolds(serviceCode, f.trafficFileNumber(), null, channel);
-        Ports.FeeQuotes.Quote quote = licences.fees().quote(serviceCode, spec.region(), spec.customerCategory(),
+        Ports.FeeQuotes.Quote quote = licences.fees().quote(serviceCode, spec.region(), holder.customerCategory(),
                 f.countryCode(), Map.of("CLASSES", local.size()), null);
         Map<String, String> payload = new LinkedHashMap<>();
         payload.put("foreignLicenceId", f.id().toString());
-        payload.put("customerCategory", spec.customerCategory());
-        if (spec.residencyExpiresOn() != null) {
-            payload.put("residencyExpiresOn", spec.residencyExpiresOn().toString());
+        payload.put("customerCategory", holder.customerCategory());
+        if (holder.residencyExpiresOn() != null) {
+            payload.put("residencyExpiresOn", holder.residencyExpiresOn().toString());
         }
         payload.put("classes", String.join(",", local));
         LicenceService.delivery(payload, spec.delivery(), spec.address());

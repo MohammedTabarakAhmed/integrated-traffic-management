@@ -17,7 +17,7 @@ class NotificationPropertiesTest {
 
     private static NotificationProperties props(Map<String, URI> gateways, Duration timeout, int attempts,
                                                 Duration retry, List<Integer> offsets, Duration interval, int batch) {
-        return new NotificationProperties(gateways, timeout, attempts, retry, offsets, interval, batch);
+        return new NotificationProperties(gateways, timeout, attempts, retry, offsets, interval, batch, null);
     }
 
     private static NotificationProperties defaults() {

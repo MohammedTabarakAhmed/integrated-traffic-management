@@ -5,6 +5,10 @@ info:
   description: |
     Notifications (CC-070..CC-074; ADR-050).
 
+    Expiry reminders (CC-072): besides `POST /v1/expiry-watches`, expiries are registered from the owning services'
+    events (`itms.notifications.expiry-events`): licence issue and renewal, vehicle registration and renewal, and
+    training permit issue. A newer event moves the watch of the same subject.
+
     Templates (CC-070): bilingual content per channel (SMS, EMAIL, PUSH, INBOX) with `{{placeholder}}` fields, a
     category and a `mandatory` flag for legal notices. Publishing creates a new version.
 

@@ -162,6 +162,8 @@ public class LicensingServiceConfiguration {
                 new Adapters.RemoteFeeQuotes(ServiceClients.create(client(environment, "fees"), clock, registry)),
                 new Adapters.RemotePayables(ServiceClients.create(client(environment, "payments"), clock, registry)),
                 new Adapters.RemoteEligibility(ServiceClients.create(client(environment, "holds"), clock, registry)),
+                new Adapters.RemoteTrafficFiles(ServiceClients.create(client(environment, "traffic-files"), clock,
+                        registry)),
                 properties.rules(), audit, events, clock);
     }
 

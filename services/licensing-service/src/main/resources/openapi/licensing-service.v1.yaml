@@ -11,6 +11,14 @@ info:
     licence never outlives the residency. A rule without `customerCategory` applies to every category not listed. A
     class may record the gearbox of the test vehicle (`gearboxRecorded`, DL-022).
 
+    Customer category and residency (DL-062, Q-076 a): issue, renewal, change and exchange read the holder's customer
+    category (the traffic file's `type`, for example CITIZEN, RESIDENT, VISITOR) and residency end
+    (`identity.residencyExpiry`, from the identity register) from traffic-file-service with this service's own account.
+    `customerCategory` and `residencyExpiresOn` in a request are optional checks: a value that differs from the
+    traffic file is refused (422 `CUSTOMER_CATEGORY_MISMATCH`, `RESIDENCY_MISMATCH`); an unknown traffic file is 422
+    `TRAFFIC_FILE_UNKNOWN`; when traffic-file-service does not answer, nothing is changed (503
+    `TRAFFIC_FILE_UNAVAILABLE`).
+
     Versions: a class version is submitted PENDING (`licensing.class.submit`) and approved or rejected once by someone
     else (`licensing.class.approve`); the maker may withdraw their own pending version. A version never starts in the
     past. Approving a version ends the previous approved version of the class the day before; an approved version that
@@ -566,7 +574,7 @@ paths:
         `LICENCE_CLASS_DUPLICATE`); the person holds no licence in force (409 `LICENCE_EXISTS`, use add class, DL-053)
         and has no other issue request waiting (409 `REQUEST_OPEN`); the conditions are in the list (422
         `CONDITION_UNKNOWN`); each class has a rule in force for the customer category (404 `CLASS_NOT_IN_FORCE`,
-        `CLASS_RULE_NOT_FOUND`); a residency end date is given when a class links validity to it (422
+        `CLASS_RULE_NOT_FOUND`); the traffic file has a residency end when a class links validity to it (422
         `RESIDENCY_EXPIRY_REQUIRED`, `RESIDENCY_ENDED`); no hold blocks service `LIC_ISSUE` for the traffic file (422
         `ELIGIBILITY_BLOCKED` with `blocks` and `nextStep`). Then the fee is quoted at fees-service (quantity `CLASSES`)
         and the payable registered at payment-service (item reference `LR-<request id>`). When payment-service
@@ -1359,10 +1367,10 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [region, customerCategory]
+              required: [region]
               properties:
                 region: { $ref: '#/components/schemas/Region' }
-                customerCategory: { $ref: '#/components/schemas/CustomerCategory' }
+                customerCategory: { oneOf: [ { $ref: '#/components/schemas/CustomerCategory' }, { type: 'null' } ] }
                 residencyExpiresOn: { type: [string, 'null'], format: date }
                 delivery: { oneOf: [ { $ref: '#/components/schemas/Delivery' }, { type: 'null' } ] }
                 address: { type: [string, 'null'], minLength: 5, maxLength: 300 }
@@ -1823,7 +1831,7 @@ components:
     IssueRequest:
       type: object
       additionalProperties: false
-      required: [trafficFileNumber, region, transferIds, customerCategory]
+      required: [trafficFileNumber, region, transferIds]
       properties:
         trafficFileNumber: { $ref: '#/components/schemas/Ref' }
         region: { $ref: '#/components/schemas/Region' }
@@ -1832,7 +1840,7 @@ components:
           minItems: 1
           maxItems: 10
           items: { type: string, format: uuid }
-        customerCategory: { $ref: '#/components/schemas/CustomerCategory' }
+        customerCategory: { oneOf: [ { $ref: '#/components/schemas/CustomerCategory' }, { type: 'null' } ] }
         residencyExpiresOn: { oneOf: [ { type: string, format: date }, { type: 'null' } ] }
         conditions:
           oneOf:

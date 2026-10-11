@@ -92,6 +92,17 @@ public class CertificateService {
                                     Caller caller) {
         DocumentService.channelOf(caller);
         DocumentService.require(caller.grants().holds(ISSUE));
+        return issueAs(templateCode, holderNameNl, holderNameEn, subjectType, subjectId, data, reference,
+                caller.actor(), null);
+    }
+
+    /**
+     * Issues for {@code actor}; {@code system} is set when no user acts (a certificate requested by another module's
+     * event, {@link CertificateHandOff}) and is then the audit and event actor.
+     */
+    Certificate.Issued issueAs(String templateCode, String holderNameNl, String holderNameEn, String subjectType,
+                               String subjectId, Map<String, String> data, String reference,
+                               gov.itms.document.domain.Actor actor, CurrentActor system) {
         Certificate.Template t = repo.latestTemplate(templateCode).orElseThrow(() -> new DomainException(
                 DomainException.Kind.NOT_FOUND, "CERTIFICATE_TEMPLATE_NOT_FOUND",
                 "certificate template " + templateCode + " not found", List.of("CC-082"), templateCode));
@@ -114,20 +125,25 @@ public class CertificateService {
         UUID documentId = UUID.randomUUID();
         Certificate.Issued issued = new Certificate.Issued(number, code, t.code(), t.versionNo(), holderNameNl,
                 holderNameEn, subjectType, subjectId, values, reference, today, validUntil,
-                Certificate.Status.ISSUED, null, null, documentId, caller.actor(), now);
+                Certificate.Status.ISSUED, null, null, documentId, actor, now);
         Ports.CertificateRenderer.Rendered rendered = renderer.render(t, issued, bodyNl, bodyEn,
                 verificationUrl(number, code));
         String sha = sha256(rendered.content());
         String key = "certificates/" + number;
         store.put(key, rendered.content(), rendered.mediaType(), sha);
-        Document doc = Document.create(documentId, subject, caller.actor(), now);
+        Document doc = Document.create(documentId, subject, actor, now);
         repo.insert(doc);
         doc.available(rendered.mediaType(), rendered.content().length, sha, key, "GENERATED", now);
         repo.saveContent(doc);
         repo.insertCertificate(issued);
         Map<String, Object> snapshot = snapshot(issued);
-        audit.record("CERTIFICATE_ISSUED", ENTITY, number, null, snapshot, null);
-        events.record("itms.document.certificate-issued", number, snapshot);
+        if (system == null) {
+            audit.record("CERTIFICATE_ISSUED", ENTITY, number, null, snapshot, null);
+            events.record("itms.document.certificate-issued", number, snapshot);
+        } else {
+            audit.recordAs(system, "CERTIFICATE_ISSUED", ENTITY, number, null, snapshot, null);
+            events.recordAs(system, "itms.document.certificate-issued", number, snapshot);
+        }
         return issued;
     }
 

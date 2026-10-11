@@ -51,9 +51,31 @@ public class NotificationService {
     private static final Logger LOG = LoggerFactory.getLogger(NotificationService.class);
 
     /** Delivery settings (configuration, NFR-042). */
-    public record Settings(int maxAttempts, Duration retryDelay, List<Integer> reminderOffsetDays) {
+    public record Settings(int maxAttempts, Duration retryDelay, List<Integer> reminderOffsetDays,
+                           List<ExpiryEvent> expiryEvents) {
         public Settings {
             reminderOffsetDays = List.copyOf(reminderOffsetDays);
+            expiryEvents = expiryEvents == null ? List.of() : List.copyOf(expiryEvents);
+        }
+
+        public Settings(int maxAttempts, Duration retryDelay, List<Integer> reminderOffsetDays) {
+            this(maxAttempts, retryDelay, reminderOffsetDays, List.of());
+        }
+    }
+
+    /**
+     * An owning service's event that registers or moves an expiry (CC-072): the event's {@code subjectField},
+     * {@code recipientField} and {@code expiryField} (ISO date) give the watch. An event without the expiry field (for
+     * example a permit status change other than issue) registers nothing.
+     */
+    public record ExpiryEvent(String eventType, Subscriptions.SubjectType subjectType, String subjectField,
+                              String recipientField, String expiryField) {
+        public ExpiryEvent {
+            if (eventType == null || eventType.isBlank() || subjectType == null || subjectField == null
+                    || recipientField == null || expiryField == null) {
+                throw new IllegalArgumentException("an expiry event needs eventType, subjectType, subjectField, "
+                        + "recipientField and expiryField (CC-072)");
+            }
         }
     }
 
@@ -249,7 +271,33 @@ public class NotificationService {
                         e.code());
             }
         }
+        for (ExpiryEvent x : settings.expiryEvents()) {
+            if (x.eventType().equals(eventType)) {
+                watchExpiry(x, values, eventId, system);
+            }
+        }
         return count;
+    }
+
+    private void watchExpiry(ExpiryEvent x, Map<String, String> values, String eventId, CurrentActor system) {
+        String expiry = values.get(x.expiryField());
+        if (expiry == null || expiry.isBlank()) {
+            return;
+        }
+        Subscriptions.ExpiryWatch watch;
+        try {
+            watch = new Subscriptions.ExpiryWatch(x.subjectType(), values.get(x.subjectField()),
+                    values.get(x.recipientField()), LocalDate.parse(expiry.length() > 10 ? expiry.substring(0, 10)
+                            : expiry), values.get(x.subjectField()));
+        } catch (RuntimeException e) {
+            LOG.warn("Event {} of type {} has no usable expiry ({}); no reminder registered", eventId, x.eventType(),
+                    e.getClass().getSimpleName());
+            return;
+        }
+        repo.saveExpiryWatch(watch);
+        audit.recordAs(system, "EXPIRY_REGISTERED", "ExpiryWatch", watch.subjectType() + ":" + watch.subjectId(),
+                null, Map.of("expiryDate", watch.expiryDate().toString(), "event", x.eventType(), "eventId", eventId),
+                null);
     }
 
     // ---- expiry reminders (CC-072)

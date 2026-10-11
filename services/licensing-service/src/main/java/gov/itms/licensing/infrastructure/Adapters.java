@@ -16,10 +16,14 @@ import org.springframework.http.MediaType;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestClientResponseException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
-/** Adapters of licensing-service: fees-service, payment-service, hold-eligibility-service and the payment events. */
+/**
+ * Adapters of licensing-service: fees-service, payment-service, hold-eligibility-service, traffic-file-service and the
+ * payment events.
+ */
 final class Adapters {
 
     private Adapters() {
@@ -161,6 +165,56 @@ final class Adapters {
         private static Ports.UnavailableException unavailable(Throwable cause) {
             return new Ports.UnavailableException("ELIGIBILITY_UNAVAILABLE", "eligibility cannot be checked right now",
                     cause);
+        }
+    }
+
+    /**
+     * traffic-file-service {@code GET /v1/traffic-files/{fileNumber}} with this service's own account (role
+     * LICENSING_SERVICE, {@code trafficfile.read}): the file's type is the customer category, the identity's
+     * residency expiry the residency end (DL-062, Q-076 a). 404 is "no such file"; anything else that is not a
+     * complete answer is "unavailable", so nothing is decided on officer input alone.
+     */
+    static class RemoteTrafficFiles implements Ports.TrafficFiles {
+
+        private final RestClient client;
+
+        RemoteTrafficFiles(RestClient client) {
+            this.client = client;
+        }
+
+        record IdentityBody(LocalDate residencyExpiry) {
+        }
+
+        record FileBody(String fileNumber, String type, IdentityBody identity) {
+        }
+
+        @Override
+        public java.util.Optional<Holder> holder(String trafficFileNumber) {
+            FileBody f;
+            try {
+                f = client.get().uri("/v1/traffic-files/{n}", trafficFileNumber).header("X-Channel", "BACKOFFICE")
+                        .accept(MediaType.APPLICATION_JSON).retrieve().body(FileBody.class);
+            } catch (RestClientResponseException e) {
+                if (e.getStatusCode().value() == 404) {
+                    return java.util.Optional.empty();
+                }
+                LOG.warn("Traffic file lookup failed: HTTP {}", e.getStatusCode().value());
+                throw unavailable(e);
+            } catch (RestClientException | ServiceCallException e) {
+                LOG.warn("Traffic file lookup failed: {}", e.getClass().getSimpleName());
+                throw unavailable(e);
+            }
+            if (f == null || f.type() == null || !trafficFileNumber.equals(f.fileNumber())) {
+                LOG.warn("Traffic file lookup: incomplete answer");
+                throw unavailable(null);
+            }
+            return java.util.Optional.of(new Holder(f.type(),
+                    f.identity() == null ? null : f.identity().residencyExpiry()));
+        }
+
+        private static Ports.UnavailableException unavailable(Throwable cause) {
+            return new Ports.UnavailableException("TRAFFIC_FILE_UNAVAILABLE", "the traffic file cannot be read right "
+                    + "now", cause);
         }
     }
 

@@ -99,6 +99,13 @@ itms:
       client-id: ${ITMS_SERVICE_CLIENT_ID:itms-licensing-service}
       client-secret: ${ITMS_SERVICE_CLIENT_SECRET:}
       timeout: ${ITMS_HOLDS_TIMEOUT:3s}
+    # DL-062, Q-076 a: customer category and residency end come from the traffic file.
+    traffic-files:
+      base-url: ${ITMS_TRAFFIC_FILES_URL:http://localhost:8085}
+      token-uri: ${ITMS_OIDC_TOKEN_URI:http://localhost:8180/realms/itms/protocol/openid-connect/token}
+      client-id: ${ITMS_SERVICE_CLIENT_ID:itms-licensing-service}
+      client-secret: ${ITMS_SERVICE_CLIENT_SECRET:}
+      timeout: ${ITMS_TRAFFIC_FILES_TIMEOUT:3s}
   # API_SPECIFICATION §2, ADR-032: submitting and deciding licence class versions need an Idempotency-Key; a retry with
   # the same key and request replays the stored response.
   idempotency:

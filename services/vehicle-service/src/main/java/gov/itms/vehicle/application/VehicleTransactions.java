@@ -837,10 +837,16 @@ public class VehicleTransactions implements PaidHandler {
                 content, by, now);
         records.insertCertificate(c);
         Map<String, Object> issued = Map.of("number", c.number(), "kind", kind.name());
+        // CC-082, Q-075 f: document-service renders the certificate from this event; vehicle-service keeps the
+        // number and state.
+        Map<String, Object> event = Map.of("number", c.number(), "kind", kind.name(), "vin", v.vin(),
+                "ownerFileNumber", v.ownerFileNumber(), "region", v.region());
         if (as == null) {
             audit.record("VEHICLE_CERTIFICATE_ISSUED", VehicleService.ENTITY, v.vin(), null, issued, null);
+            events.record("itms.vehicle.certificate-issued", c.number(), event);
         } else {
             audit.recordAs(as, "VEHICLE_CERTIFICATE_ISSUED", VehicleService.ENTITY, v.vin(), null, issued, null);
+            events.recordAs(as, "itms.vehicle.certificate-issued", c.number(), event);
         }
         return c;
     }

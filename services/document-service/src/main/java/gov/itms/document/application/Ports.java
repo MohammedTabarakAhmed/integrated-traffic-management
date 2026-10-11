@@ -87,6 +87,18 @@ public final class Ports {
         }
     }
 
+    /**
+     * traffic-file-service: the holder's printed name in both languages, from the identity register or the company
+     * licence (CC-082). Empty when the file does not exist.
+     */
+    public interface HolderNames {
+
+        record Names(String nameNl, String nameEn) {
+        }
+
+        java.util.Optional<Names> of(String trafficFileNumber);
+    }
+
     /** Renders an issued certificate as a bilingual document with its QR code (CC-082, CC-083). */
     public interface CertificateRenderer {
 

@@ -67,7 +67,7 @@ class ForeignController {
         }
     }
 
-    record ExchangeRequest(@NotBlank String region, @NotBlank String customerCategory, LocalDate residencyExpiresOn,
+    record ExchangeRequest(@NotBlank String region, String customerCategory, LocalDate residencyExpiresOn,
                            Records.Delivery delivery, @Size(max = 300) String address) {
     }
 

@@ -93,7 +93,7 @@ class LicensingApiIT {
 
     @DynamicPropertySource
     static void partners(DynamicPropertyRegistry registry) {
-        for (String client : List.of("fees", "payments", "holds")) {
+        for (String client : List.of("fees", "payments", "holds", "traffic-files")) {
             registry.add("itms.clients." + client + ".base-url", PARTNERS::baseUrl);
             registry.add("itms.clients." + client + ".token-uri", () -> PARTNERS.baseUrl() + "/token");
             registry.add("itms.clients." + client + ".client-id", () -> PartnerStub.CLIENT_ID);
@@ -463,6 +463,7 @@ class LicensingApiIT {
         m.put("customerCategory", category);
         m.put("residencyExpiresOn", residency);
         m.put("conditions", conditions);
+        PARTNERS.files.put(file, new String[] {category, residency});
         return m;
     }
 
@@ -588,8 +589,25 @@ class LicensingApiIT {
         assertThat(code(down)).isEqualTo("FEES_UNAVAILABLE");
 
         LocalDate residency = TODAY.plusMonths(6);
-        MvcResult opened = postAs("/v1/licence-issues", issue(file, "IT_LIC", "RESIDENT", residency.toString(), null,
-                transfer), officer());
+        Map<String, Object> given = issue(file, "IT_LIC", "RESIDENT", residency.toString(), null, transfer);
+        PARTNERS.files.put(file, new String[] {"CITIZEN", null});
+        assertThat(code(postAs("/v1/licence-issues", given, officer()))).as("the traffic file decides (Q-076 a)")
+                .isEqualTo("CUSTOMER_CATEGORY_MISMATCH");
+        PARTNERS.files.put(file, new String[] {"RESIDENT", residency.plusDays(1).toString()});
+        assertThat(code(postAs("/v1/licence-issues", given, officer()))).isEqualTo("RESIDENCY_MISMATCH");
+        PARTNERS.unknownFiles.add(file);
+        assertThat(code(postAs("/v1/licence-issues", given, officer()))).isEqualTo("TRAFFIC_FILE_UNKNOWN");
+        PARTNERS.unknownFiles.remove(file);
+        PARTNERS.trafficFilesDown = true;
+        MvcResult fileDown = postAs("/v1/licence-issues", given, officer());
+        PARTNERS.trafficFilesDown = false;
+        assertThat(fileDown.getResponse().getStatus()).isEqualTo(503);
+        assertThat(code(fileDown)).isEqualTo("TRAFFIC_FILE_UNAVAILABLE");
+        PARTNERS.files.put(file, new String[] {"RESIDENT", residency.toString()});
+        Map<String, Object> fromFile = new HashMap<>(given);
+        fromFile.remove("customerCategory");
+        fromFile.remove("residencyExpiresOn");
+        MvcResult opened = postAs("/v1/licence-issues", fromFile, officer());
         assertThat(opened.getResponse().getStatus()).as(opened.getResponse().getContentAsString()).isEqualTo(201);
         assertThat(licences.onPaid("LR-" + body(opened).get("id").asString().toUpperCase())).isTrue();
         JsonNode licence = body(getAs("/v1/licences?trafficFileNumber=" + file, officer())).get("items").get(0);

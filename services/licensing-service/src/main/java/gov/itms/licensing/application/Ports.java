@@ -2,6 +2,7 @@ package gov.itms.licensing.application;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /** The other services licensing-service calls (ADR-034: with its own client-credentials account). */
@@ -49,6 +50,19 @@ public final class Ports {
 
         /** Every block of {@code serviceCode} for the subjects; empty when the service may go ahead. */
         List<Block> blocks(String serviceCode, List<Subject> subjects, String channel);
+    }
+
+    /**
+     * traffic-file-service (DL-001, DL-012): the holder's customer category (the file's type, for example CITIZEN,
+     * RESIDENT, VISITOR) and residency end from the identity register (DL-062, Q-076 a). Empty when the file does not
+     * exist.
+     */
+    public interface TrafficFiles {
+
+        record Holder(String customerCategory, LocalDate residencyExpiresOn) {
+        }
+
+        Optional<Holder> holder(String trafficFileNumber);
     }
 
     /** A partner service did not answer; nothing was changed (fail closed). */

@@ -155,7 +155,7 @@ final class ApiModels {
 
     record IssueRequest(@NotBlank String trafficFileNumber, @NotBlank String region,
                         @NotNull @Size(min = 1, max = 10) List<@NotNull UUID> transferIds,
-                        @NotBlank String customerCategory, LocalDate residencyExpiresOn,
+                        String customerCategory, LocalDate residencyExpiresOn,
                         @Size(max = 20) List<@NotNull @Valid ConditionRequest> conditions,
                         Records.Delivery delivery, @Size(max = 300) String address) {
 

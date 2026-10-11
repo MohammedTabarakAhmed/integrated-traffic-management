@@ -73,7 +73,11 @@ class NotificationServiceTest {
                     return seenEvents.add(consumer + "/" + eventId);
                 }
             },
-            new NotificationService.Settings(2, Duration.ofSeconds(30), List.of(30, 7, 1)),
+            new NotificationService.Settings(2, Duration.ofSeconds(30), List.of(30, 7, 1), List.of(
+                    new NotificationService.ExpiryEvent("itms.licence.issued", Subscriptions.SubjectType.LICENCE,
+                            "licenceNumber", "trafficFileNumber", "expiresOn"),
+                    new NotificationService.ExpiryEvent("itms.permit.status-changed",
+                            Subscriptions.SubjectType.PERMIT, "number", "trafficFileNumber", "expiresOn"))),
             Clock.fixed(NOW, ZoneOffset.UTC));
 
     private static Caller caller(String id, String... permissions) {
@@ -190,6 +194,30 @@ class NotificationServiceTest {
         Notification reminder = repo.notifications.values().iterator().next();
         assertThat(reminder.body()).isEqualTo("Expires " + TODAY.plusDays(7) + " in 7 days");
         assertThat(audit).contains("EXPIRY_REMINDER_SENT LICENCE:DL-1");
+    }
+
+    @Test
+    @Tag("CC-072")
+    @DisplayName("CC-072: an issue event of the owning service registers and moves the expiry; others register nothing")
+    void expiriesFromEvents() {
+        templates();
+        service.onEvent("evt-l1", "itms.licence.issued", Map.of("licenceNumber", "DL-9", "trafficFileNumber", "c-1",
+                "expiresOn", TODAY.plusDays(30).toString(), "classes", List.of()));
+        assertThat(repo.watches).containsExactly(new Subscriptions.ExpiryWatch(Subscriptions.SubjectType.LICENCE,
+                "DL-9", "c-1", TODAY.plusDays(30), "DL-9"));
+        assertThat(audit).contains("EXPIRY_REGISTERED LICENCE:DL-9");
+        service.onEvent("evt-p1", "itms.permit.status-changed", Map.of("number", "TP-1", "status", "SUSPENDED"));
+        service.onEvent("evt-p2", "itms.permit.status-changed", Map.of("number", "TP-1", "status", "ISSUED",
+                "trafficFileNumber", "c-1", "expiresOn", "not-a-date"));
+        assertThat(repo.watches).as("no expiry, or no usable one: nothing registered").hasSize(1);
+        service.onEvent("evt-l1", "itms.licence.issued", Map.of("licenceNumber", "DL-9", "trafficFileNumber", "c-1",
+                "expiresOn", TODAY.plusDays(400).toString()));
+        assertThat(repo.watches.getFirst().expiryDate()).as("redelivery ignored").isEqualTo(TODAY.plusDays(30));
+        service.onEvent("evt-l2", "itms.licence.issued", Map.of("licenceNumber", "DL-9", "trafficFileNumber", "c-1",
+                "expiresOn", TODAY.plusDays(7).toString()));
+        assertThat(repo.watches).singleElement().extracting(Subscriptions.ExpiryWatch::expiryDate)
+                .isEqualTo(TODAY.plusDays(7));
+        assertThat(service.sendDueReminders(100)).isEqualTo(1);
     }
 
     @Test

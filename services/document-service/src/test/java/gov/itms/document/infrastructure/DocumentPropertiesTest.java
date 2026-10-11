@@ -21,7 +21,7 @@ class DocumentPropertiesTest {
     private static final DocumentProperties.Scanner SCANNER = new DocumentProperties.Scanner("clamav", 3310,
             Duration.ofSeconds(60));
     private static final DocumentProperties.Certificates CERTS = new DocumentProperties.Certificates("CRT",
-            "https://verify.itms.example/v1/certificate-verifications");
+            "https://verify.itms.example/v1/certificate-verifications", null);
 
     private static DocumentProperties.Type type(String code, List<String> media, DataSize max) {
         return new DocumentProperties.Type(code, media, max, Document.Classification.CONFIDENTIAL);
@@ -72,9 +72,9 @@ class DocumentPropertiesTest {
                 .hasMessageContaining("host");
         assertThatThrownBy(() -> new DocumentProperties.Scanner("clamav", 70000, Duration.ofSeconds(60)))
                 .hasMessageContaining("port");
-        assertThatThrownBy(() -> new DocumentProperties.Certificates("C1", "https://x"))
+        assertThatThrownBy(() -> new DocumentProperties.Certificates("C1", "https://x", null))
                 .hasMessageContaining("number-prefix");
-        assertThatThrownBy(() -> new DocumentProperties.Certificates("CRT", "http://verify.example"))
+        assertThatThrownBy(() -> new DocumentProperties.Certificates("CRT", "http://verify.example", null))
                 .hasMessageContaining("https");
     }
 }

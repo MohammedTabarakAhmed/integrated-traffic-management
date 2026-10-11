@@ -64,6 +64,16 @@ itms:
     certificates:
       number-prefix: ${ITMS_DOCUMENTS_CERTIFICATE_PREFIX:CRT}
       verification-base-url: ${ITMS_DOCUMENTS_VERIFICATION_URL:http://localhost:9080/v1/certificate-verifications}
+      # Certificates of other modules rendered here from their events (CC-082; Q-075 f, Q-078 a). The owning service
+      # keeps the number and state; its number becomes the certificate's reference.
+      events:
+        - { event-type: itms.vehicle.certificate-issued, template-code: 'VL_CERT_{kind}', subject-type: VEHICLE, subject-field: vin, holder-file-field: ownerFileNumber, reference-field: number }
+        - { event-type: itms.licence.noc-issued, template-code: LICENCE_NOC, subject-type: LICENCE, subject-field: licenceNumber, holder-file-field: trafficFileNumber, reference-field: certificateNumber }
+    # The certificate hand-off needs the broker; off by default like the outbox relay.
+    consumer:
+      enabled: ${ITMS_DOCUMENTS_CONSUMER_ENABLED:false}
+      group-id: document-service
+      topics: ${ITMS_DOCUMENTS_CONSUMER_TOPICS:itms.vehicle-service.events.v1,itms.licensing-service.events.v1}
     types:
       - code: IDENTITY_DOCUMENT
         media-types: [application/pdf, image/jpeg, image/png]
@@ -93,6 +103,14 @@ itms:
         media-types: [image/jpeg, image/png, image/tiff]
         max-size: 25MB
         classification: CONFIDENTIAL
+  # The holder's name on rendered certificates (CC-082) with this service's own account (ADR-034).
+  clients:
+    traffic-files:
+      base-url: ${ITMS_TRAFFIC_FILES_URL:http://localhost:8085}
+      token-uri: ${ITMS_OIDC_TOKEN_URI:http://localhost:8180/realms/itms/protocol/openid-connect/token}
+      client-id: ${ITMS_SERVICE_CLIENT_ID:itms-document-service}
+      client-secret: ${ITMS_SERVICE_CLIENT_SECRET:}
+      timeout: ${ITMS_TRAFFIC_FILES_TIMEOUT:3s}
   # API_SPECIFICATION §2, ADR-032: declaring documents, issuing and revoking certificates need an Idempotency-Key.
   idempotency:
     enabled: true

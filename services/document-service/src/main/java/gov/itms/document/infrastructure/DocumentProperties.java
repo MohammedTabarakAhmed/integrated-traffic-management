@@ -18,7 +18,8 @@ import org.springframework.util.unit.DataSize;
  * @param store        object store (S3 API, ADR-005)
  * @param scanner      clamd address (CC-081)
  * @param types        allowed file types and maximum size per document type (CC-081), at least one
- * @param certificates certificate number prefix and the public verification page (CC-083)
+ * @param certificates certificate number prefix, the public verification page (CC-083) and the other modules'
+ *                     certificate events rendered here (CC-082)
  */
 @ConfigurationProperties("itms.documents")
 public record DocumentProperties(Store store, Scanner scanner, List<Type> types, @DefaultValue Certificates certificates) {
@@ -78,8 +79,14 @@ public record DocumentProperties(Store store, Scanner scanner, List<Type> types,
 
     public record Certificates(@DefaultValue("CRT") String numberPrefix,
                                @DefaultValue("https://verify.itms.example/v1/certificate-verifications")
-                               String verificationBaseUrl) {
+                               String verificationBaseUrl,
+                               List<gov.itms.document.application.CertificateHandOff.CertificateEvent> events) {
+
         public Certificates {
+            events = events == null ? List.of() : List.copyOf(events);
+            if (events.size() > 30) {
+                throw new IllegalArgumentException("itms.documents.certificates.events allows at most 30 entries");
+            }
             if (!numberPrefix.matches("^[A-Z]{2,6}$")) {
                 throw new IllegalArgumentException("itms.documents.certificates.number-prefix is 2-6 letters");
             }

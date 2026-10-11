@@ -297,6 +297,7 @@ public class LicenceStatusService implements LicenceService.PaidHandler {
         Map<String, Object> detail = new LinkedHashMap<>();
         detail.put("certificateNumber", c.number());
         detail.put("licenceNumber", l.licenceNumber());
+        detail.put("trafficFileNumber", l.trafficFileNumber());
         detail.put("purpose", c.purpose());
         detail.put("validUntil", c.validUntil().toString());
         detail.put("requestId", r.id().toString());

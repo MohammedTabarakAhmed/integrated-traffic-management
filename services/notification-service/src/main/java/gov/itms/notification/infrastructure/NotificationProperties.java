@@ -20,6 +20,8 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  *                           values of 0-365
  * @param dispatchInterval   pause between dispatcher runs, 1 s to 10 min
  * @param batchSize          notifications per dispatcher batch, 1-500
+ * @param expiryEvents       events of the owning services that register an expiry for reminders (CC-072): event type,
+ *                           subject type and the event fields of subject, recipient and expiry date; at most 20
  */
 @ConfigurationProperties("itms.notifications")
 public record NotificationProperties(
@@ -29,7 +31,12 @@ public record NotificationProperties(
         @DefaultValue("30s") Duration retryDelay,
         @DefaultValue({"30", "7", "1"}) List<Integer> reminderOffsetDays,
         @DefaultValue("5s") Duration dispatchInterval,
-        @DefaultValue("50") int batchSize) {
+        @DefaultValue("50") int batchSize,
+        List<ExpiryEvent> expiryEvents) {
+
+    /** One event that registers an expiry (CC-072). */
+    public record ExpiryEvent(String eventType, String subjectType, String subjectField, String recipientField,
+                              String expiryField) { }
 
     public NotificationProperties {
         java.util.Map<String, URI> upper = new java.util.HashMap<>();
@@ -64,6 +71,10 @@ public record NotificationProperties(
         }
         if (batchSize < 1 || batchSize > 500) {
             throw new IllegalArgumentException("itms.notifications.batch-size must be 1-500 (NFR-042)");
+        }
+        expiryEvents = expiryEvents == null ? List.of() : List.copyOf(expiryEvents);
+        if (expiryEvents.size() > 20) {
+            throw new IllegalArgumentException("itms.notifications.expiry-events allows at most 20 entries (CC-072)");
         }
     }
 }

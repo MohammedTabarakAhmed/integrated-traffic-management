@@ -337,6 +337,28 @@ class NotificationApiIT {
     }
 
     @Test
+    @Tag("CC-062")
+    @Tag("CC-071")
+    @DisplayName("CC-062: an overdue case notifies its customer of the delay; a case without a customer is skipped")
+    void caseDelayNotice() {
+        String customer = "TF-DELAY-" + CODES.incrementAndGet();
+        String reference = "VEH_RENEWAL-NORTH-2026-" + CODES.incrementAndGet();
+        Map<String, Object> overdue = new HashMap<>(Map.of("itemId", UUID.randomUUID().toString(), "reference",
+                reference, "serviceCode", "VEH_RENEWAL", "status", "ESCALATED", "customerId", customer,
+                "overdueSince", "2026-10-09T08:00:00Z"));
+        String eventId = UUID.randomUUID().toString();
+        assertThat(notifications.onEvent(eventId, "itms.workflow.item-overdue", overdue)).isEqualTo(1);
+        assertThat(db.sql("select count(*) from notification where recipient_id = :r and source_event_id = :e "
+                        + "and channel = 'INBOX' and not mandatory and reference = :ref and body like :body")
+                .param("r", customer).param("e", eventId).param("ref", reference).param("body", "%" + reference + "%")
+                .query(Long.class).single()).isEqualTo(1);
+
+        overdue.remove("customerId");
+        assertThat(notifications.onEvent(UUID.randomUUID().toString(), "itms.workflow.item-overdue", overdue))
+                .as("no customer on the case").isZero();
+    }
+
+    @Test
     @DisplayName("ADR-032: a repeated send with the same Idempotency-Key replays and queues nothing new")
     void idempotentSend() throws Exception {
         String template = published(false);

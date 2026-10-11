@@ -23,6 +23,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -346,6 +347,25 @@ class ViolationServiceTest {
         assertThat(repo.unpaid.stream().filter(h -> h.violationNumber().equals(owners.number()))).hasSize(2);
     }
 
+    @Test
+    @Tag("VF-052")
+    @Tag("VF-023")
+    @DisplayName("VF-052 (Q-074 f): no unpaid hold while an objection is pending; held once the objection is decided")
+    void noUnpaidHoldUnderObjection() {
+        publish("PARKING", null, 20_000, 0, null, null);
+        Violation objected = record("PARKING", "NORTH", "TF-DRIVER");
+        clock.set(NOW.plus(Duration.ofDays(60)).plus(Duration.ofHours(1)));
+        repo.objected.add(objected.id());
+        assertThat(service.overdueForHold()).as("payment is paused under objection").isEmpty();
+        assertThat(service.holdIfOverdue(objected.number())).as("re-checked under the row lock").isFalse();
+        assertThat(unpaidPlaced).isEmpty();
+
+        repo.objected.remove(objected.id());
+        assertThat(service.overdueForHold()).containsExactly(objected.number());
+        assertThat(service.holdIfOverdue(objected.number())).isTrue();
+        assertThat(unpaidPlaced).containsExactly("TRAFFIC_FILE TF-DRIVER");
+    }
+
     private static final class MutableClock extends Clock {
         private Instant now;
 
@@ -510,12 +530,19 @@ class ViolationServiceTest {
         }
 
         final List<UnpaidHold> unpaid = new ArrayList<>();
+        final Set<UUID> objected = new HashSet<>();
 
         @Override
         public List<Violation> overdueWithoutHold(Instant recordedBefore, int limit) {
             return violations.values().stream().filter(v -> v.status() == Violation.Status.OPEN)
                     .filter(v -> v.recordedAt().isBefore(recordedBefore))
-                    .filter(v -> activeUnpaidHold(v.id()).isEmpty()).limit(limit).toList();
+                    .filter(v -> activeUnpaidHold(v.id()).isEmpty())
+                    .filter(v -> !underObjection(v.id())).limit(limit).toList();
+        }
+
+        @Override
+        public boolean underObjection(UUID violationId) {
+            return objected.contains(violationId);
         }
 
         @Override

@@ -384,8 +384,10 @@ public class ViolationService {
     }
 
     /**
-     * Places an UNPAID_FINES hold for the violation if it is still open, overdue and not held (VF-023, Q-012). The
-     * violation row stays locked while the hold is placed, so a second instance or a payment waits for it.
+     * Places an UNPAID_FINES hold for the violation if it is still open, overdue, not held and not under objection
+     * (VF-023, Q-012; VF-052 and Q-074 (f): payment is paused while an objection is pending or referred to court, so
+     * the hold waits until it is decided). The violation row stays locked while the hold is placed, so a second
+     * instance, a payment or a new objection waits for it.
      */
     @Transactional
     public boolean holdIfOverdue(String number) {
@@ -393,7 +395,8 @@ public class ViolationService {
         Violation v = repo.findForUpdate(number).orElse(null);
         Instant now = clock.instant();
         if (!policy.enabled() || v == null || v.status() != Violation.Status.OPEN
-                || v.recordedAt().isAfter(now.minus(policy.after())) || repo.activeUnpaidHold(v.id()).isPresent()) {
+                || v.recordedAt().isAfter(now.minus(policy.after())) || repo.activeUnpaidHold(v.id()).isPresent()
+                || repo.underObjection(v.id())) {
             return false;
         }
         UnpaidHold.Subject subject = UnpaidHold.subjectOf(v);

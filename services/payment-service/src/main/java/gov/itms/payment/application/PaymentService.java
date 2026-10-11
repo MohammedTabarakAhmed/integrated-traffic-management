@@ -443,7 +443,9 @@ public class PaymentService {
         if (q.limit() < 1 || q.limit() > 500) {
             throw DomainException.validation("FIELD_INVALID", "limit must be 1..500", List.of("FN-014"), "limit");
         }
-        List<Receipt> found = repo.searchReceipts(q);
+        // CC-001: only receipts of regions the caller's receipt.read grants reach (a page may then hold fewer rows).
+        List<Receipt> found = repo.searchReceipts(q).stream()
+                .filter(r -> caller.grants().allowsInRegion(RECEIPT_READ, r.region())).toList();
         audit.record("RECEIPTS_SEARCHED", "Receipt", "search", null, Map.of("count", found.size()), null);
         return found;
     }

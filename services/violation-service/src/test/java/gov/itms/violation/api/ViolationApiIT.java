@@ -13,8 +13,11 @@ import com.atlassian.oai.validator.model.SimpleResponse;
 import com.atlassian.oai.validator.report.ValidationReport;
 import gov.itms.violation.application.CrossborderViolations;
 import gov.itms.violation.application.ObjectionService;
+import gov.itms.violation.application.Ports;
 import gov.itms.violation.application.ViolationService;
+import gov.itms.violation.domain.Violation;
 import gov.itms.violation.infrastructure.PartnerStub;
+import gov.itms.violation.infrastructure.RepositoryAccess;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
@@ -389,6 +392,11 @@ class ViolationApiIT {
     @Autowired
     ObjectionService objectionService;
 
+
+    private Ports.ViolationRepository repository() {
+        return RepositoryAccess.violations(db, json);
+    }
+
     private static RequestPostProcessor customer() {
         return user("c-objector", "CUSTOMER", "violation.objection.submit", "violation.read");
     }
@@ -435,6 +443,12 @@ class ViolationApiIT {
                 "it-" + UUID.randomUUID()))).isEqualTo("OBJECTION_EXISTS");
         expect(postAs("/v1/violations/" + rejected + "/objections", objection, customer(), "it-" + UUID.randomUUID()),
                 201);
+        // Q-074 (f), VF-052: no unpaid hold while the objection is pending (the job's query and its re-check).
+        UUID rejectedViolation = db.sql("select id from violation where number = :n").param("n", rejected)
+                .query(UUID.class).single();
+        assertThat(repository().underObjection(rejectedViolation)).isTrue();
+        assertThat(repository().overdueWithoutHold(clock.instant().plus(Duration.ofDays(1)), 500))
+                .extracting(Violation::number).doesNotContain(rejected);
 
         String acceptedId = objectionId(accepted);
         String rejectedId = objectionId(rejected);
@@ -455,6 +469,9 @@ class ViolationApiIT {
                 "photo shows the plate"), reviewer(), "it-" + UUID.randomUUID()), 200);
         assertThat(PARTNERS.payableHolds).anyMatch(h -> h.startsWith("LIFT ") && h.endsWith("OBJECTION:" + rejected));
         assertThat(body(getAs("/v1/violations/" + rejected, officer())).get("status").asString()).isEqualTo("OPEN");
+        assertThat(repository().underObjection(rejectedViolation)).as("rejected: payment resumes").isFalse();
+        assertThat(repository().overdueWithoutHold(clock.instant().plus(Duration.ofDays(1)), 500))
+                .extracting(Violation::number).contains(rejected);
         assertThat(code(postAs("/v1/objections/" + UUID.randomUUID() + "/decisions", Map.of("decision", "REJECT",
                 "reason", "no such thing"), reviewer(), "it-" + UUID.randomUUID()))).isEqualTo("OBJECTION_NOT_FOUND");
         assertThat(db.sql("select count(*) from event_outbox where event_type = 'itms.violation.objection-decided' "

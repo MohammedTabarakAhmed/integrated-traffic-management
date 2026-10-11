@@ -95,6 +95,35 @@ class AccidentApiIT {
     }
 
     @Test
+    @Tag("AC-006")
+    @DisplayName("AC-006: each person's role, seat, injury degree, transport of the injured and intoxication are kept")
+    void personDetails() throws Exception {
+        Map<String, Object> driver = party("TF-P1", "P 1", null, false);
+        driver.putAll(Map.of("seatPosition", "FRONT_LEFT", "injuryDegree", "MINOR", "intoxicationStatus",
+                "NEGATIVE"));
+        Map<String, Object> passenger = new HashMap<>(Map.of("role", "PASSENGER", "agrees", false, "unknownParty",
+                false, "trafficFileNumber", "TF-P2", "vehiclePlate", "P 1", "seatPosition", "REAR_RIGHT",
+                "injuryDegree", "SEVERE", "transportMethod", "AMBULANCE", "intoxicationStatus", "NOT_TESTED"));
+        Map<String, Object> pedestrian = new HashMap<>(Map.of("role", "PEDESTRIAN", "agrees", false, "unknownParty",
+                false, "trafficFileNumber", "TF-P3", "injuryDegree", "MODERATE", "transportMethod", "PRIVATE_CAR"));
+        String id = api.expect(api.post("/v1/accidents", report(List.of(driver, passenger, pedestrian)), OFFICER),
+                201).get("id").asString();
+
+        JsonNode parties = api.expect(api.get("/v1/accidents/" + id, OFFICER), 200).get("parties");
+        assertThat(parties).hasSize(3);
+        assertThat(parties.get(0).get("role").asString()).isEqualTo("DRIVER");
+        assertThat(parties.get(0).get("seatPosition").asString()).isEqualTo("FRONT_LEFT");
+        assertThat(parties.get(0).get("intoxicationStatus").asString()).isEqualTo("NEGATIVE");
+        assertThat(parties.get(1).get("role").asString()).isEqualTo("PASSENGER");
+        assertThat(parties.get(1).get("seatPosition").asString()).isEqualTo("REAR_RIGHT");
+        assertThat(parties.get(1).get("injuryDegree").asString()).isEqualTo("SEVERE");
+        assertThat(parties.get(1).get("transportMethod").asString()).isEqualTo("AMBULANCE");
+        assertThat(parties.get(2).get("role").asString()).isEqualTo("PEDESTRIAN");
+        assertThat(parties.get(2).get("injuryDegree").asString()).isEqualTo("MODERATE");
+        assertThat(parties.get(2).get("transportMethod").asString()).isEqualTo("PRIVATE_CAR");
+    }
+
+    @Test
     @Tag("AC-002")
     @Tag("AC-005")
     @Tag("AC-009")

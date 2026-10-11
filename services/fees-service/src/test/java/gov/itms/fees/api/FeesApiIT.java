@@ -211,6 +211,7 @@ class FeesApiIT {
 
     @Test
     @Tag("CC-047")
+    @Tag("CC-042")
     @DisplayName("a quote is itemised, most specific version per fee, frozen against later fee changes")
     void quote() throws Exception {
         String service = newService();
@@ -231,6 +232,12 @@ class FeesApiIT {
         assertThat(quote.get("lines").get(0).get("feeCode").asString()).isEqualTo("BASE_" + service);
         assertThat(quote.get("lines").get(0).get("amount").asLong()).isEqualTo(12000);
         assertThat(quote.get("lines").get(1).get("amount").asLong()).isEqualTo(17500);
+        // CC-042: every line names its financial item (revenue account) and beneficiary entity.
+        for (JsonNode line : quote.get("lines")) {
+            assertThat(line.get("financialItem").asString()).isEqualTo("REV_" + line.get("feeCode").asString()
+                    .substring(0, line.get("feeCode").asString().indexOf('_')));
+            assertThat(line.get("beneficiary").asString()).isEqualTo("AUTHORITY");
+        }
         assertThat(quote.get("total").asLong()).isEqualTo(29500);
         assertThat(quote.get("currency").asString()).isEqualTo("XTS");
         String quoteId = quote.get("id").asString();

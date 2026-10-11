@@ -253,9 +253,19 @@ class JdbcViolationRepository implements Ports.ViolationRepository {
                           where status = 'OPEN' and recorded_at < :c
                            and not exists (select 1 from unpaid_hold h
                                            where h.violation_id = violation.id and h.lifted_at is null)
+                           and not exists (select 1 from violation_objection o
+                                           where o.violation_id = violation.id and o.status in ('PENDING', 'COURT'))
                          order by recorded_at limit :l""")
                 .param("c", ts(recordedBefore)).param("l", limit)
                 .query(JdbcViolationRepository::mapViolation).list();
+    }
+
+    @Override
+    public boolean underObjection(UUID violationId) {
+        return jdbc.sql("""
+                        select exists (select 1 from violation_objection
+                                        where violation_id = :v and status in ('PENDING', 'COURT'))""")
+                .param("v", violationId).query(Boolean.class).single();
     }
 
     @Override

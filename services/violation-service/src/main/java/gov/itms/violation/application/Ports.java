@@ -60,8 +60,14 @@ public final class Ports {
 
         void insertSuspension(BlackPoints.Suspension suspension);
 
-        /** Open violations recorded before {@code recordedBefore} without an active unpaid hold, oldest first. */
+        /**
+         * Open violations recorded before {@code recordedBefore} without an active unpaid hold and not under objection
+         * (VF-052, Q-074 (f)), oldest first.
+         */
         List<Violation> overdueWithoutHold(Instant recordedBefore, int limit);
+
+        /** True while the violation has an objection awaiting review or referred to court (VF-052). */
+        boolean underObjection(UUID violationId);
 
         /** Active unpaid holds whose violation is no longer open (paid or cancelled), oldest first. */
         List<UnpaidHold> settledWithActiveHold(int limit);

@@ -275,6 +275,8 @@ public class FinanceOperations {
         PaymentContext p = repo.payment(paymentId, true).orElseThrow(() -> new DomainException(
                 DomainException.Kind.NOT_FOUND, "PAYMENT_NOT_FOUND", "payment " + paymentId + " has no receipt",
                 List.of("FN-012")));
+        // CC-001: the request is made in the payment's region, like its approval (the approval limit is per region).
+        requireFinanceRegion(caller, REFUND_REQUEST, p.region());
         if (!"CONFIRMED".equals(p.status())) {
             throw DomainException.conflict("PAYMENT_NOT_CONFIRMED", "only a confirmed payment can be refunded",
                     List.of("FN-012"));

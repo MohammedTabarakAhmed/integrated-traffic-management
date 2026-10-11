@@ -145,8 +145,11 @@ class PaymentApiIT {
                 List<Authorisation.ApprovalLimit> limits = limit == null ? List.of()
                         : List.of(new Authorisation.ApprovalLimit("REFUND_AMOUNT", ((Number) limit).longValue(), "XTS"));
                 String role = Objects.requireNonNullElse(jwt.getClaimAsStringList("roles"), List.of("TEST")).getFirst();
+                String region = jwt.getClaimAsString("region");
+                Scopes scopes = region == null ? Scopes.NATIONAL
+                        : new Scopes(Set.of(region), Set.of(Scopes.ALL), Set.of(Scopes.ALL));
                 return new Authorisation(jwt.getSubject(), List.of(new Authorisation.Grant(role, permissions,
-                        Scopes.NATIONAL, jwt.getExpiresAt(), limits)), jwt.getIssuedAt());
+                        scopes, jwt.getExpiresAt(), limits)), jwt.getIssuedAt());
             };
         }
     }
@@ -404,6 +407,11 @@ class PaymentApiIT {
         JsonNode found = body(getAs("/v1/receipts?region=" + region + "&financialItem=FINE_REVENUE", cashier()));
         assertThat(found.get("items").findValuesAsString("number")).containsExactly(number);
         assertThat(getAs("/v1/receipts?region=" + region, customer("c-s")).getResponse().getStatus()).isEqualTo(403);
+        RequestPostProcessor elsewhere = jwt().jwt(j -> j.subject("u-elsewhere").claim("preferred_username",
+                "u-elsewhere").claim("roles", List.of("CASHIER")).claim("region", "ELSEWHERE")
+                .claim("permissions", List.of("payment.receipt.read")));
+        assertThat(body(getAs("/v1/receipts?region=" + region, elsewhere)).get("items"))
+                .as("CC-001: receipts of other regions are not returned").isEmpty();
 
         assertThat(postAs("/v1/receipts/" + number + "/cancellations", Map.of("reason", "wrong item"), cashier())
                 .getResponse().getStatus()).isEqualTo(403);
@@ -596,6 +604,12 @@ class PaymentApiIT {
                 .isEqualTo(2);
         assertThat(postAs("/v1/payments/" + cash[0] + "/refund-requests", Map.of("amountMinor", 1, "reason", "x y z"),
                 cashier()).getResponse().getStatus()).isEqualTo(403);
+        RequestPostProcessor otherRegion = jwt().jwt(j -> j.subject("u-elsewhere").claim("preferred_username",
+                "u-elsewhere").claim("roles", List.of("FINANCE")).claim("region", "ELSEWHERE")
+                .claim("permissions", List.of("payment.refund.request")));
+        assertThat(code(postAs("/v1/payments/" + cash[0] + "/refund-requests", Map.of("amountMinor", 1,
+                "reason", "x y z"), otherRegion))).as("CC-001: refunds are requested in the payment's region")
+                .isEqualTo("FINANCE_REGION_REQUIRED");
     }
 
     @Test

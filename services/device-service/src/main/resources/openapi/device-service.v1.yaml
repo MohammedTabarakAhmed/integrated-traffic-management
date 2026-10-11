@@ -27,10 +27,13 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/DeviceRequest'}
       responses:
-        '201': {description: Registered device}
-        '409': {description: Device code already exists}
-        '401': {description: Authentication required}
-        '403': {description: Permission denied}
+        '201': {description: Registered device, content: {application/json: {schema: {$ref: '#/components/schemas/Device'}}}}
+        '409': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
     get:
       operationId: listDevices
       summary: Enforcement devices in a region (VF-080)
@@ -43,9 +46,11 @@ paths:
           required: true
           schema: {type: string}
       responses:
-        '200': {description: Devices visible in the region}
-        '401': {description: Authentication required}
-        '403': {description: Permission denied}
+        '200': {description: Devices visible in the region, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/Device'}}}}}}}
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
   /v1/devices/{code}/calibrations:
     post:
       operationId: recordDeviceCalibration
@@ -71,10 +76,13 @@ paths:
                 validFrom: {type: string, format: date-time}
                 validUntil: {type: string, format: date-time}
       responses:
-        '200': {description: Calibration recorded}
-        '404': {description: Device does not exist}
-        '401': {description: Authentication required}
-        '403': {description: Permission denied}
+        '200': {description: Calibration recorded, content: {application/json: {schema: {$ref: '#/components/schemas/Device'}}}}
+        '404': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /v1/device-captures:
     post:
       operationId: ingestDeviceCapture
@@ -90,10 +98,14 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/CaptureRequest'}
       responses:
-        '201': {description: Capture accepted or queued for review}
-        '422': {description: Capture exceeded its permitted age}
-        '401': {description: Authentication required}
-        '403': {description: Permission denied}
+        '503': { $ref: '#/components/responses/Problem' }
+        '201': {description: Capture accepted or queued for review, content: {application/json: {schema: {$ref: '#/components/schemas/Capture'}}}}
+        '422': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
   /v1/device-captures/review-queue:
     get:
       operationId: listCaptureReviewQueue
@@ -110,9 +122,12 @@ paths:
           name: limit
           schema: {type: integer, default: 100, minimum: 1, maximum: 1000}
       responses:
-        '200': {description: Captures that need manual review}
-        '401': {description: Authentication required}
-        '403': {description: Permission denied}
+        '422': { $ref: '#/components/responses/Problem' }
+        '200': {description: Captures that need manual review, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/Capture'}}}}}}}
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
   /v1/device-captures/{id}/reviews:
     post:
       operationId: reviewDeviceCapture
@@ -138,11 +153,30 @@ paths:
                 accept: {type: boolean}
                 ownerFileNumber: {type: string, maxLength: 60}
       responses:
-        '200': {description: Capture accepted or rejected}
-        '404': {description: Capture does not exist}
-        '401': {description: Authentication required}
-        '403': {description: Permission denied}
+        '503': { $ref: '#/components/responses/Problem' }
+        '200': {description: Capture accepted or rejected, content: {application/json: {schema: {$ref: '#/components/schemas/Capture'}}}}
+        '404': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
 components:
+  responses:
+    Problem:
+      description: Problem details (RFC 9457) in Arabic or English
+      content:
+        application/problem+json:
+          schema:
+            type: object
+            additionalProperties: true
+            required: [status, code]
+            properties:
+              type: { type: string }
+              title: { type: string }
+              status: { type: integer }
+              code: { type: string }
+              detail: { type: string }
   securitySchemes:
     bearerAuth:
       type: http
@@ -155,6 +189,45 @@ components:
       required: true
       schema: {type: string, minLength: 1, maxLength: 128}
   schemas:
+    Device:
+      type: object
+      required: [id, code, type, owner, region, latitude, longitude, road, direction, speedLimitKmh, status, createdAt, createdBy]
+      properties:
+        id: {type: string, format: uuid}
+        code: {type: string}
+        type: {type: string, enum: [RADAR, RED_LIGHT_CAMERA, MOBILE_CAMERA]}
+        owner: {type: string}
+        region: {type: string}
+        latitude: {type: number}
+        longitude: {type: number}
+        road: {type: string}
+        direction: {type: string}
+        speedLimitKmh: {type: integer}
+        status: {type: string, enum: [ACTIVE, SUSPENDED, RETIRED]}
+        calibratedAt: {type: [string, 'null'], format: date-time}
+        calibrationExpiresAt: {type: [string, 'null'], format: date-time}
+        createdAt: {type: string, format: date-time}
+        createdBy: {type: string}
+    Capture:
+      type: object
+      required: [id, sourceKey, deviceCode, capturedAt, catalogueCode, region, plate, location, speedLimitKmh, evidenceId, status, qualityReasons, receivedAt]
+      properties:
+        id: {type: string, format: uuid}
+        sourceKey: {type: string}
+        deviceCode: {type: string}
+        capturedAt: {type: string, format: date-time}
+        catalogueCode: {type: string}
+        region: {type: string}
+        plate: {type: string}
+        location: {type: string}
+        speedLimitKmh: {type: integer}
+        measuredSpeedKmh: {type: [integer, 'null']}
+        evidenceId: {type: string}
+        ownerFileNumber: {type: [string, 'null']}
+        status: {type: string, enum: [REVIEW, READY, RECORDED, REJECTED]}
+        qualityReasons: {type: array, items: {type: string}}
+        violationNumber: {type: [string, 'null']}
+        receivedAt: {type: string, format: date-time}
     DeviceRequest:
       type: object
       additionalProperties: false

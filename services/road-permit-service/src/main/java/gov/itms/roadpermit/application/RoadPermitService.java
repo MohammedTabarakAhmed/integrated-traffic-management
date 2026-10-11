@@ -15,7 +15,12 @@ public class RoadPermitService {
     public record Application(UUID id,String number,String type,String applicant,String eligibilityReference,
                               List<String> vehicles,List<String> routeSegments,String region,String status,
                               Instant startsAt,Instant endsAt,Double loadTonnes,Double widthMetres,
-                              Double heightMetres,Double lengthMetres,int vehicleLimit) { }
+                              Double heightMetres,Double lengthMetres,int vehicleLimit) {
+        public Application {
+            vehicles = vehicles == null ? null : java.util.Collections.unmodifiableList(new java.util.ArrayList<>(vehicles));
+            routeSegments = routeSegments == null ? null : java.util.Collections.unmodifiableList(new java.util.ArrayList<>(routeSegments));
+        }
+    }
     public interface Repository {
         void insert(Application application,String[] authorities,String actor,Instant at);
         Application get(UUID id);

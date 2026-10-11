@@ -18,7 +18,11 @@ public class RentalService {
     public record Contract(UUID id, String companyFile, String region, String vehiclePlate, String renterFile,
                            String visitorPassport, String foreignLicence, List<String> additionalDrivers,
                            Instant startsAt, Instant endsAt, String pickupBranch, String returnBranch,
-                           String type, long bondMinor, String status, Instant createdAt) { }
+                           String type, long bondMinor, String status, Instant createdAt) {
+        public Contract {
+            additionalDrivers = additionalDrivers == null ? null : java.util.Collections.unmodifiableList(new java.util.ArrayList<>(additionalDrivers));
+        }
+    }
     public record Inspection(UUID id, UUID contractId, String type, Instant inspectedAt, long odometerKm,
                              int fuelPercent, List<String> damageNotes, List<String> evidenceIds, String notes,
                              String inspectedBy) {

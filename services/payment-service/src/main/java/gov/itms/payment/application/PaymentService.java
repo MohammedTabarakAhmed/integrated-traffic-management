@@ -204,14 +204,15 @@ public class PaymentService {
             throw DomainException.conflict("PAYABLE_PAUSED", "a basket item is under objection", List.of("VF-052"));
         }
         boolean counter = Payment.COUNTER_METHODS.contains(method);
-        if (counter && repo.openTillForUpdate(caller.actor().id(), b.region()).isEmpty()) {
-            throw DomainException.conflict("TILL_NOT_OPEN", "open a till before collecting counter payments",
-                    List.of("FN-020"));
-        }
         if (counter) {
             require(caller.grants().allowsInRegion(COLLECT, b.region()));
         } else if (!b.createdBy().equals(caller.actor().id())) {
             require(caller.grants().holds(PAY_FOR_OTHERS));
+        }
+        // permission first, so a caller without it learns nothing about tills (FN-020)
+        if (counter && repo.openTillForUpdate(caller.actor().id(), b.region()).isEmpty()) {
+            throw DomainException.conflict("TILL_NOT_OPEN", "open a till before collecting counter payments",
+                    List.of("FN-020"));
         }
         if (!counter && !Payment.GATEWAY_METHODS.contains(method)) {
             throw DomainException.validation("METHOD_NOT_ACCEPTED", "this method is settled by partner integration",

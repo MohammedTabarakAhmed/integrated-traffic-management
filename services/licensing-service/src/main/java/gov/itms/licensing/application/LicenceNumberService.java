@@ -49,6 +49,9 @@ public class LicenceNumberService {
 
     /** The report of a region: one line per range, then the region's totals. */
     public record Report(String region, List<Usage> ranges, Usage totals) {
+        public Report {
+            ranges = ranges == null ? null : java.util.Collections.unmodifiableList(new java.util.ArrayList<>(ranges));
+        }
     }
 
     @Transactional

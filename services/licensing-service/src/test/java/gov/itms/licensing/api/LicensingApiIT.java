@@ -13,6 +13,8 @@ import com.atlassian.oai.validator.model.SimpleResponse;
 import com.atlassian.oai.validator.report.ValidationReport;
 import gov.itms.licensing.application.LicenceNumberService;
 import gov.itms.licensing.application.LicenceService;
+import gov.itms.licensing.application.LicenceStatusService;
+import gov.itms.licensing.application.LicenceTransactions;
 import gov.itms.licensing.infrastructure.PartnerStub;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
@@ -58,7 +60,10 @@ import tools.jackson.databind.ObjectMapper;
 @SpringBootTest(properties = {
         "itms.security.issuer=https://idp.test/realms/itms",
         "itms.security.jwk-set-uri=https://idp.test/realms/itms/protocol/openid-connect/certs",
-        "itms.security.authorisation-source=token-claims"})
+        "itms.security.authorisation-source=token-claims",
+        "itms.licensing.auto-renewal.enabled=false",
+        "itms.licensing.auto-renewal.notice-days=0",
+        "itms.licensing.foreign.idp-printers=AUTO_CLUB"})
 @AutoConfigureMockMvc
 @Testcontainers
 @Tag("DL-020")
@@ -603,5 +608,295 @@ class LicensingApiIT {
                 officer()))).isEqualTo("TRANSFER_NOT_OPEN");
         assertThat(db.sql("select count(*) from event_outbox where event_type = 'itms.licensing.transfer-reversed'")
                 .query(Long.class).single()).isGreaterThanOrEqualTo(1);
+    }
+
+    // ---- slices 3.4-3.6: renewal, replacement, change, eye tests, auto-renewal, status, NOC, foreign licences
+
+    @Autowired
+    LicenceTransactions transactions;
+    @Autowired
+    LicenceStatusService statuses;
+
+    private static RequestPostProcessor counter() {
+        return user("u-counter", "counter", "LICENSING_OFFICER", "licensing.licence.read", "licensing.licence.renew",
+                "licensing.licence.replace", "licensing.licence.change", "licensing.auto-renewal.manage",
+                "licensing.licence.cancel", "licensing.licence.status", "licensing.noc.request",
+                "licensing.foreign.record", "licensing.licence.exchange", "licensing.permit.issue",
+                "licensing.idp.issue", "licensing.idp.print", "licensing.exchange-country.submit");
+    }
+
+    private static RequestPostProcessor optician() {
+        return user("svc-optometry", "optometry", "OPTOMETRY_CENTRE", "licensing.eye-test.record");
+    }
+
+    private JsonNode expect(MvcResult r, int status) throws Exception {
+        String text = r.getResponse().getContentAsString(StandardCharsets.UTF_8);
+        assertThat(r.getResponse().getStatus()).as(text).isEqualTo(status);
+        return text.isEmpty() ? null : json.readTree(text);
+    }
+
+    /** Pays the licence request and returns it again. */
+    private JsonNode paid(JsonNode request) throws Exception {
+        String id = request.get("id").asString();
+        assertThat(licences.onPaid("LR-" + id.toUpperCase())).isTrue();
+        return body(getAs("/v1/licence-requests/" + id, counter()));
+    }
+
+    /** An issued CITIZEN licence of a class valid {@code months} for citizens: {file, licenceId, classCode}. */
+    private String[] issued(String region, int months) throws Exception {
+        String classCode = newClass();
+        approved(version(classCode, TODAY, months));
+        licensable(region, "LY");
+        String file = newFile();
+        String transfer = transferred(file, classCode, "MANUAL", region);
+        JsonNode request = expect(postAs("/v1/licence-issues", issue(file, region, "CITIZEN", null, null, transfer),
+                officer()), 201);
+        return new String[] {file, paid(request).get("licenceId").asString(), classCode};
+    }
+
+    private void eyeTest(String file, String classCode, boolean lenses) throws Exception {
+        expect(postAs("/v1/eye-tests", Map.of("trafficFileNumber", file, "centreCode", "OPT_1", "reference",
+                "ET-" + newFile(), "testedOn", TODAY.toString(), "result", "PASS", "correctiveLenses", lenses,
+                "permittedClasses", List.of(classCode)), optician()), 201);
+    }
+
+    @Test
+    @Tag("DL-051")
+    @Tag("DL-052")
+    @Tag("DL-057")
+    @Tag("DL-007")
+    @DisplayName("DL-051/052/057: renewal in its window with an eye test, replacement of a lost card, change with "
+            + "evidence; each completes on payment with a new card")
+    void renewalReplacementChange() throws Exception {
+        String[] early = issued("IT_TX", 120);
+        assertThat(code(postAs("/v1/licences/" + early[1] + "/renewals", Map.of(), counter())))
+                .isEqualTo("RENEWAL_TOO_EARLY");
+
+        String[] l = issued("IT_TX", 2);
+        String renewals = "/v1/licences/" + l[1] + "/renewals";
+        assertThat(code(postAs(renewals, Map.of(), counter()))).isEqualTo("EYE_TEST_REQUIRED");
+        assertThat(code(postAs("/v1/eye-tests", Map.of("trafficFileNumber", l[0], "centreCode", "OPT_1", "reference",
+                "ET-F", "testedOn", TODAY.plusDays(1).toString(), "result", "PASS", "correctiveLenses", false,
+                "permittedClasses", List.of(l[2])), optician()))).isEqualTo("TESTED_IN_FUTURE");
+        Map<String, Object> eye = Map.of("trafficFileNumber", l[0], "centreCode", "OPT_1", "reference", "ET-" + l[0],
+                "testedOn", TODAY.toString(), "result", "PASS", "correctiveLenses", true, "permittedClasses",
+                List.of(l[2]));
+        expect(postAs("/v1/eye-tests", eye, optician()), 201);
+        assertThat(code(postAs("/v1/eye-tests", eye, optician()))).isEqualTo("EYE_TEST_EXISTS");
+        assertThat(body(getAs("/v1/eye-tests?trafficFileNumber=" + l[0], counter())).get("items")).hasSize(1);
+
+        JsonNode before = body(getAs("/v1/licences/" + l[1], counter()));
+        JsonNode renewal = expect(postAs(renewals, Map.of("delivery", "COURIER", "address", "1 Main St"), counter()),
+                201);
+        assertThat(code(postAs(renewals, Map.of(), counter()))).isEqualTo("REQUEST_OPEN");
+        assertThat(PARTNERS.quotes.getLast().get("serviceCode").asString()).isEqualTo("LIC_RENEWAL");
+        paid(renewal);
+        JsonNode renewed = body(getAs("/v1/licences/" + l[1], counter()));
+        assertThat(LocalDate.parse(renewed.get("expiresOn").asString()))
+                .isAfter(LocalDate.parse(before.get("expiresOn").asString()));
+        assertThat(renewed.get("conditions").findValuesAsString("code")).contains("CORRECTIVE_LENSES");
+
+        expect(postAs("/v1/licences/" + l[1] + "/replacements", Map.of("reason", "LOST"), counter()), 201);
+        assertThat(code(postAs("/v1/licences/" + l[1] + "/replacements", Map.of("reason", "LOST"), counter())))
+                .isEqualTo("REQUEST_OPEN");
+        JsonNode open = body(getAs("/v1/licences/" + l[1] + "/history", counter()));
+        assertThat(open.get("items").findValuesAsString("event")).contains("RENEWED", "CARD_CANCELLED");
+        db.sql("select id from licence_request where licence_id = cast(:l as uuid) and kind = 'REPLACEMENT'")
+                .param("l", l[1]).query(String.class).list()
+                .forEach(id -> assertThat(licences.onPaid("LR-" + id.toUpperCase())).isTrue());
+        JsonNode cards = body(getAs("/v1/licences/" + l[1] + "/cards", counter())).get("items");
+        assertThat(cards.findValuesAsString("reason")).contains("ISSUE", "RENEWAL", "REPLACEMENT");
+
+        Map<String, Object> change = new HashMap<>(Map.of("customerCategory", "CITIZEN", "description",
+                "name corrected", "evidenceDocumentId", "!bad"));
+        assertThat(code(postAs("/v1/licences/" + l[1] + "/changes", change, counter()))).isEqualTo("EVIDENCE_REQUIRED");
+        change.put("evidenceDocumentId", "DOC-CHG-1");
+        paid(expect(postAs("/v1/licences/" + l[1] + "/changes", change, counter()), 201));
+        assertThat(body(getAs("/v1/licences/" + l[1] + "/history", counter())).get("items")
+                .findValuesAsString("event")).contains("REPLACED", "CHANGED");
+
+        String event = "evt-" + UUID.randomUUID();
+        assertThat(transactions.onRegisterChange(event, l[0], "NAME")).isEqualTo(1);
+        assertThat(transactions.onRegisterChange(event, l[0], "NAME")).as("each event once").isZero();
+        assertThat(db.sql("select count(*) from event_outbox where event_type = 'itms.licence.renewed' and subject = :n")
+                .param("n", renewed.get("licenceNumber").asString()).query(Long.class).single()).isEqualTo(1);
+    }
+
+    @Test
+    @Tag("DL-065")
+    @DisplayName("DL-065: consent, notice, then an automatic renewal attempt; withdrawal stops it")
+    void autoRenewal() throws Exception {
+        String[] l = issued("IT_TX", 2);
+        String consent = "/v1/licences/" + l[1] + "/auto-renewal";
+        assertThat(expect(postAs(consent, Map.of("paymentMethodRef", "PM-1"), counter()), 200).get("status")
+                .asString()).isEqualTo("ACTIVE");
+        assertThat(body(getAs(consent, counter())).get("paymentMethodRef").asString()).isEqualTo("PM-1");
+        assertThat(transactions.autoRenewalsDue(1000)).contains(UUID.fromString(l[1]));
+        assertThat(transactions.autoRenewOne(UUID.fromString(l[1]))).isEqualTo("NOTICE");
+        assertThat(transactions.autoRenewOne(UUID.fromString(l[1]))).as("no eye test yet").isEqualTo("FAILED");
+        assertThat(transactions.autoRenewOne(UUID.fromString(l[1]))).as("one attempt per expiry").isEqualTo("NOTHING");
+        assertThat(db.sql("select count(*) from event_outbox where event_type = 'itms.licence.auto-renewal-failed'")
+                .query(Long.class).single()).isPositive();
+
+        String[] ok = issued("IT_TX", 2);
+        eyeTest(ok[0], ok[2], false);
+        expect(postAs("/v1/licences/" + ok[1] + "/auto-renewal", Map.of("paymentMethodRef", "PM-2"), counter()), 200);
+        assertThat(transactions.autoRenewOne(UUID.fromString(ok[1]))).isEqualTo("NOTICE");
+        assertThat(transactions.autoRenewOne(UUID.fromString(ok[1]))).isEqualTo("RENEWAL");
+        assertThat(db.sql("select count(*) from event_outbox where event_type = 'itms.licence.auto-renewal-due' "
+                + "and data->>'paymentMethodRef' = 'PM-2'").query(Long.class).single()).isEqualTo(1);
+
+        assertThat(expect(postAs(consent + "/withdrawal", null, counter()), 200).get("status").asString())
+                .isEqualTo("WITHDRAWN");
+        assertThat(transactions.autoRenewOne(UUID.fromString(l[1]))).isEqualTo("NOTHING");
+    }
+
+    @Test
+    @Tag("DL-058")
+    @Tag("DL-059")
+    @Tag("VF-032")
+    @DisplayName("DL-058/059: status enquiry, paid no-objection certificate, black-point suspension, surrender and "
+            + "death")
+    void statusSuspensionAndEnd() throws Exception {
+        String[] l = issued("IT_TX", 120);
+        JsonNode licence = body(getAs("/v1/licences/" + l[1], counter()));
+        String number = licence.get("licenceNumber").asString();
+        assertThat(body(getAs("/v1/licence-status/" + number, counter())).get("status").asString())
+                .isEqualTo("ACTIVE");
+        assertThat(code(getAs("/v1/licence-status/NOPE1", counter()))).isEqualTo("LICENCE_NOT_FOUND");
+
+        paid(expect(postAs("/v1/licences/" + l[1] + "/no-objection-certificates", Map.of("purpose",
+                "car rental abroad", "addressee", "Rental Co"), counter()), 201));
+        JsonNode certificate = body(getAs("/v1/licences/" + l[1] + "/no-objection-certificates", counter()))
+                .get("items").get(0);
+        String noc = certificate.get("number").asString();
+        JsonNode verified = body(getAs("/v1/no-objection-certificates/" + noc + "?code="
+                + certificate.get("verificationCode").asString(), counter()));
+        assertThat(verified.get("valid").asBoolean()).isTrue();
+        assertThat(code(getAs("/v1/no-objection-certificates/" + noc + "?code=WRONG", counter())))
+                .isEqualTo("CERTIFICATE_NOT_FOUND");
+
+        String event = "evt-" + UUID.randomUUID();
+        assertThat(statuses.onBlackPointSuspension(event, l[0], "SUSP-1", 1, TODAY, TODAY.plusMonths(3))).isEqualTo(1);
+        assertThat(statuses.onBlackPointSuspension(event, l[0], "SUSP-1", 1, TODAY, TODAY.plusMonths(3))).isZero();
+        assertThat(body(getAs("/v1/licence-status/" + number, counter())).get("status").asString())
+                .isEqualTo("SUSPENDED");
+        assertThat(body(getAs("/v1/licences/" + l[1] + "/suspensions", counter())).get("items")).hasSize(1);
+        assertThat(statuses.endSuspension(UUID.fromString(l[1]))).as("not over yet").isFalse();
+        assertThat(statuses.suspensionsEnded(100)).doesNotContain(UUID.fromString(l[1]));
+
+        String cancel = "/v1/licences/" + l[1] + "/cancellations";
+        assertThat(code(postAs(cancel, Map.of("ground", "COURT_ORDER", "reason", "court ruling"), counter())))
+                .isEqualTo("REFERENCE_REQUIRED");
+        assertThat(code(postAs(cancel, Map.of("ground", "BLACK_POINTS", "reason", "points"), counter())))
+                .isEqualTo("FIELD_INVALID");
+        assertThat(expect(postAs(cancel, Map.of("ground", "REQUEST", "reason", "moving abroad"), counter()), 200)
+                .get("status").asString()).isEqualTo("SURRENDERED");
+
+        String[] other = issued("IT_TX", 120);
+        String death = "evt-" + UUID.randomUUID();
+        assertThat(statuses.onDeceased(death, other[0])).isEqualTo(1);
+        assertThat(statuses.onDeceased(death, other[0])).isZero();
+        assertThat(body(getAs("/v1/licences/" + other[1], counter())).get("status").asString()).isEqualTo("CANCELLED");
+    }
+
+    @Test
+    @Tag("DL-054")
+    @Tag("DL-055")
+    @Tag("DL-056")
+    @Tag("DL-063")
+    @Tag("CC-002")
+    @DisplayName("DL-054..056, DL-063: country rules by maker-checker, foreign licence exchange, temporary permits and "
+            + "international permits")
+    void foreignLicences() throws Exception {
+        String classCode = newClass();
+        approved(version(classCode, TODAY, 120));
+        licensable("IT_TX", "LY");
+        String country = "Q" + (char) ('A' + FILES.incrementAndGet() % 26);
+        RequestPostProcessor ruleChecker = user("u-checker", "checker", "EXCHANGE_RULE_CHECKER",
+                "licensing.exchange-country.approve", "licensing.licence.read");
+        String rule = expect(postAs("/v1/exchange-country-rules", Map.of("countryCode", country, "mode",
+                "DIRECT_EXCHANGE", "classMap", Map.of("B", classCode), "reason", "bilateral agreement"), counter()),
+                201).get("id").asString();
+        assertThat(postAs("/v1/exchange-country-rules/" + rule + "/approvals", Map.of("reason", "own rule"),
+                counter()).getResponse().getStatus()).isEqualTo(403);
+        assertThat(expect(postAs("/v1/exchange-country-rules/" + rule + "/approvals", Map.of("reason", "checked"),
+                ruleChecker), 200).get("status").asString()).isEqualTo("APPROVED");
+        String testCountry = country.charAt(0) + "Z" + country.charAt(1);
+        String testRule = expect(postAs("/v1/exchange-country-rules", Map.of("countryCode", testCountry, "mode",
+                "TEST_REQUIRED", "reason", "no agreement"), counter()), 201).get("id").asString();
+        expect(postAs("/v1/exchange-country-rules/" + testRule + "/approvals", Map.of("reason", "checked"),
+                ruleChecker), 200);
+        String withdrawn = expect(postAs("/v1/exchange-country-rules", Map.of("countryCode", country, "mode",
+                "TEST_REQUIRED", "reason", "second thoughts"), counter()), 201).get("id").asString();
+        assertThat(expect(postAs("/v1/exchange-country-rules/" + withdrawn + "/rejections", Map.of("reason",
+                "entered by mistake"), counter()), 200).get("status").asString()).isEqualTo("REJECTED");
+        assertThat(body(getAs("/v1/exchange-country-rules?countryCode=" + country, counter())).get("items"))
+                .hasSize(2);
+
+        String file = newFile();
+        Map<String, Object> foreign = new HashMap<>(Map.of("trafficFileNumber", file, "countryCode", country,
+                "foreignNumber", "F-" + file, "classes", List.of("B"), "expiresOn", TODAY.plusYears(1).toString(),
+                "language", "fr", "documentId", "DOC-F-" + file));
+        String untranslated = expect(postAs("/v1/foreign-licences", foreign, counter()), 201).get("id").asString();
+        assertThat(code(postAs("/v1/foreign-licences", foreign, counter()))).isEqualTo("FOREIGN_LICENCE_EXISTS");
+        Map<String, Object> exchange = Map.of("region", "IT_TX", "customerCategory", "CITIZEN");
+        assertThat(code(postAs("/v1/foreign-licences/" + untranslated + "/exchanges", exchange, counter())))
+                .isEqualTo("TRANSLATION_REQUIRED");
+
+        // DL-055 visitor permit on the foreign licence, before it is exchanged
+        JsonNode visitor = expect(postAs("/v1/temporary-permits", Map.of("kind", "VISITOR", "trafficFileNumber", file,
+                "region", "IT_TX", "foreignLicenceId", untranslated), counter()), 201);
+        assertThat(code(postAs("/v1/temporary-permits", Map.of("kind", "VISITOR", "trafficFileNumber", file,
+                "region", "IT_TX", "foreignLicenceId", untranslated), counter()))).isEqualTo("REQUEST_OPEN");
+        paid(visitor);
+        JsonNode permit = body(getAs("/v1/temporary-permits?trafficFileNumber=" + file, counter())).get("items").get(0);
+        assertThat(permit.get("validUntil").asString()).isEqualTo(TODAY.plusDays(29).toString());
+        assertThat(code(postAs("/v1/temporary-permits", Map.of("kind", "VISITOR", "trafficFileNumber", file,
+                "region", "IT_TX", "foreignLicenceId", untranslated), counter()))).isEqualTo("PERMIT_EXISTS");
+        assertThat(expect(postAs("/v1/temporary-permits/" + permit.get("id").asString() + "/cancellation",
+                Map.of("reason", "left the country"), counter()), 200).get("status").asString()).isEqualTo("CANCELLED");
+
+        foreign.put("foreignNumber", "F2-" + file);
+        foreign.put("translationDocumentId", "DOC-T-" + file);
+        String translated = expect(postAs("/v1/foreign-licences", foreign, counter()), 201).get("id").asString();
+        JsonNode done = paid(expect(postAs("/v1/foreign-licences/" + translated + "/exchanges", exchange, counter()),
+                201));
+        String licenceId = done.get("licenceId").asString();
+        assertThat(body(getAs("/v1/licences/" + licenceId, counter())).get("classes").get(0).get("classCode")
+                .asString()).isEqualTo(classCode);
+        assertThat(code(postAs("/v1/foreign-licences/" + translated + "/exchanges", exchange, counter())))
+                .isEqualTo("FOREIGN_LICENCE_USED");
+        assertThat(body(getAs("/v1/foreign-licences?trafficFileNumber=" + file, counter())).get("items")
+                .findValuesAsString("status")).contains("EXCHANGED", "RECORDED");
+        assertThat(code(getAs("/v1/foreign-licences?countryCode=" + country + "&limit=0", counter())))
+                .isIn("PAGE_INVALID", "VALIDATION_FAILED");
+
+        Map<String, Object> other = new HashMap<>(foreign);
+        other.put("trafficFileNumber", newFile());
+        other.put("countryCode", testCountry);
+        other.put("foreignNumber", "F3-" + file);
+        String testOnly = expect(postAs("/v1/foreign-licences", other, counter()), 201).get("id").asString();
+        assertThat(code(postAs("/v1/foreign-licences/" + testOnly + "/exchanges", exchange, counter())))
+                .isEqualTo("TEST_REQUIRED");
+        other.put("countryCode", "ZZQ");
+        other.put("foreignNumber", "F4-" + file);
+        String noRule = expect(postAs("/v1/foreign-licences", other, counter()), 201).get("id").asString();
+        assertThat(code(postAs("/v1/foreign-licences/" + noRule + "/exchanges", exchange, counter())))
+                .isEqualTo("COUNTRY_RULE_MISSING");
+
+        // DL-055 card-pending permit and DL-056 international permit on the exchanged licence
+        JsonNode pending = expect(postAs("/v1/temporary-permits", Map.of("kind", "CARD_PENDING", "trafficFileNumber",
+                file, "region", "IT_TX", "licenceId", licenceId), counter()), 201);
+        paid(pending);
+        String idps = "/v1/licences/" + licenceId + "/international-permits";
+        assertThat(code(postAs(idps, Map.of("printer", "NOT_LISTED"), counter()))).isEqualTo("PRINTER_NOT_APPROVED");
+        paid(expect(postAs(idps, Map.of("printer", "AUTO_CLUB"), counter()), 201));
+        assertThat(code(postAs(idps, Map.of(), counter()))).isEqualTo("IDP_EXISTS");
+        String idp = body(getAs(idps, counter())).get("items").get(0).get("id").asString();
+        assertThat(code(postAs("/v1/international-permits/" + idp + "/printed", Map.of("printer", "CENTRE"),
+                counter()))).isEqualTo("PRINTER_MISMATCH");
+        assertThat(expect(postAs("/v1/international-permits/" + idp + "/printed", Map.of("printer", "AUTO_CLUB"),
+                counter()), 200).get("status").asString()).isEqualTo("PRINTED");
     }
 }

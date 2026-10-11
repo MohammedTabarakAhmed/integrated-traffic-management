@@ -26,6 +26,10 @@ public final class PartnerStub implements AutoCloseable {
     public final List<JsonNode> payables = new CopyOnWriteArrayList<>();
     public final List<String> payableKeys = new CopyOnWriteArrayList<>();
     public final List<String> cancelledPayables = new CopyOnWriteArrayList<>();
+    /** Payable holds and lifts as "HOLD id sourceRef" / "LIFT id sourceRef" (VF-052). */
+    public final List<String> payableHolds = new CopyOnWriteArrayList<>();
+    /** vehicle-service: plate to {vin, ownerFileNumber, region}; other plates answer 404 (XB-002). */
+    public final java.util.Map<String, String[]> vehicles = new java.util.concurrent.ConcurrentHashMap<>();
     public final List<JsonNode> holds = new CopyOnWriteArrayList<>();
     public final List<String> holdKeys = new CopyOnWriteArrayList<>();
     public volatile boolean holdsDown;
@@ -43,6 +47,17 @@ public final class PartnerStub implements AutoCloseable {
         server.createContext("/token", ex -> respond(ex, 200,
                 "{\"access_token\":\"it-token\",\"token_type\":\"Bearer\",\"expires_in\":300}"));
         server.createContext("/v1/payables", this::payables);
+        server.createContext("/v1/vehicles", ex -> {
+            String query = java.net.URLDecoder.decode(String.valueOf(ex.getRequestURI().getRawQuery()),
+                    StandardCharsets.UTF_8);
+            String[] v = vehicles.get(query.startsWith("plate=") ? query.substring(6) : "");
+            if (v == null) {
+                respond(ex, 404, "{\"code\":\"VEHICLE_NOT_FOUND\"}");
+                return;
+            }
+            respond(ex, 200, "{\"vin\":\"" + v[0] + "\",\"ownerFileNumber\":\"" + v[1] + "\",\"region\":\""
+                    + v[2] + "\"}");
+        });
         server.createContext("/v1/holds", ex -> {
             JsonNode body = json.readTree(ex.getRequestBody().readAllBytes());
             if (holdsDown) {
@@ -70,6 +85,13 @@ public final class PartnerStub implements AutoCloseable {
     private void payables(HttpExchange ex) throws IOException {
         String path = ex.getRequestURI().getPath();
         byte[] raw = ex.getRequestBody().readAllBytes();
+        if (path.endsWith("/holds") || path.endsWith("/hold-lifts")) {
+            JsonNode body = json.readTree(raw);
+            payableHolds.add((path.endsWith("/holds") ? "HOLD " : "LIFT ") + path.split("/")[3] + " "
+                    + body.get("sourceRef").asString());
+            respond(ex, 204, "");
+            return;
+        }
         if (path.endsWith("/cancellations")) {
             cancelledPayables.add(path.split("/")[3]);
             respond(ex, 200, "{}");
@@ -86,6 +108,11 @@ public final class PartnerStub implements AutoCloseable {
 
     private static void respond(HttpExchange ex, int status, String body) throws IOException {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        if (bytes.length == 0) {
+            ex.sendResponseHeaders(status, -1);
+            ex.close();
+            return;
+        }
         ex.getResponseHeaders().add("Content-Type", "application/json");
         ex.sendResponseHeaders(status, bytes.length);
         try (OutputStream out = ex.getResponseBody()) {

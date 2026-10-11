@@ -30,7 +30,7 @@ class JdbcCrossborderLinks implements Ports.CrossborderLinks {
                 insert into violation_crossborder (violation_id, partner_code, direction, external_id, recorded_at)
                 values (:id, :partner, :direction, :external, :at)
                 """).param("id", link.violationId()).param("partner", link.partner())
-                .param("direction", link.direction().name()).param("external", link.externalId()).param("at", at)
+                .param("direction", link.direction().name()).param("external", link.externalId()).param("at", ts(at))
                 .update();
     }
 
@@ -50,5 +50,9 @@ class JdbcCrossborderLinks implements Ports.CrossborderLinks {
         return new Link(rs.getObject("violation_id", UUID.class), rs.getString("number"),
                 rs.getString("partner_code"), Direction.valueOf(rs.getString("direction")),
                 rs.getString("external_id"));
+    }
+
+    private static java.sql.Timestamp ts(java.time.Instant at) {
+        return at == null ? null : java.sql.Timestamp.from(at);
     }
 }

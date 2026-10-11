@@ -50,24 +50,28 @@ class VehicleServiceTest {
     private final Map<String, Ports.Eligibility.Block> heldSubjects = new HashMap<>();
     private final List<String> eligibilityChecks = new ArrayList<>();
 
-    private final VehicleService service = new VehicleService(repo, (vin, asOf) -> {
+    private final Ports.InsuranceRegister insurance = (vin, asOf) -> {
         if (insurerDown) {
             throw new Ports.UnavailableException("INSURANCE_UNAVAILABLE", "down", null);
         }
         LocalDate end = policyEnds.get(vin);
         return end == null ? List.of() : List.of(new Ports.InsuranceRegister.Policy("POL-1", "INS1", "COMPREHENSIVE",
                 end.minusYears(1), end, "ACTIVE"));
-    }, (serviceCode, region, customerCategory, subjectCategory, expiryDate) -> {
+    };
+    private final Ports.FeeQuotes fees = (serviceCode, region, customerCategory, subjectCategory, expiryDate) -> {
         quotes.add(serviceCode + " " + subjectCategory + " " + expiryDate);
         return new Ports.FeeQuotes.Quote("Q-1", List.of(new Ports.FeeQuotes.Line("REG_FEE", "AUTHORITY", "fee",
                 40000)), 40000, "XTS");
-    }, (itemRef, file, region, currency, lines) -> {
+    };
+    private final Ports.Payables payables = (itemRef, file, region, currency, lines) -> {
         payablesRegistered.add(itemRef);
         return UUID.randomUUID();
-    }, (serviceCode, subjects, channel) -> {
+    };
+    private final Ports.Eligibility eligibility = (serviceCode, subjects, channel) -> {
         eligibilityChecks.add(serviceCode + " " + subjects.stream().map(s -> s.type() + ":" + s.id()).toList());
         return subjects.stream().map(s -> heldSubjects.get(s.id())).filter(Objects::nonNull).toList();
-    }, VehicleRulesTest.rules(), new AuditRecorder() {
+    };
+    private final AuditRecorder auditRecorder = new AuditRecorder() {
         @Override
         public void record(String action, String entityType, String entityId, Object oldValue, Object newValue,
                            String reason) {
@@ -79,7 +83,12 @@ class VehicleServiceTest {
                              Object newValue, String reason) {
             record(action, entityType, entityId, oldValue, newValue, reason);
         }
-    }, new DomainEventRecorder() {
+    };
+    private final Ports.RecordsRepository records = org.mockito.Mockito.mock(Ports.RecordsRepository.class);
+    private final RequestDesk desk = new RequestDesk(repo, records, fees, payables, eligibility,
+            VehicleRulesTest.rules(), serviceRules(), auditRecorder, clock);
+    private final VehicleService service = new VehicleService(repo, insurance, fees, payables, eligibility, records,
+            desk, VehicleRulesTest.rules(), auditRecorder, new DomainEventRecorder() {
         @Override
         public void record(String eventType, String subject, Object data) {
             events.add(eventType + " " + subject);
@@ -90,6 +99,16 @@ class VehicleServiceTest {
             record(eventType, subject, data);
         }
     }, clock);
+
+    /** Interim Increment 2 rules (Q-075): no customs certificate or approvals needed in these tests. */
+    static ServiceRules serviceRules() {
+        Map<Registration.Kind, String> codes = new java.util.EnumMap<>(Registration.Kind.class);
+        for (Registration.Kind k : Registration.Kind.values()) {
+            codes.put(k, "VEH_" + k.name());
+        }
+        return new ServiceRules(codes, 10, Set.of(java.time.DayOfWeek.FRIDAY, java.time.DayOfWeek.SATURDAY), 12,
+                "TRADE", 30, 90, false, List.of(), "PLATE_AUCTION", "AUTHORITY", "XTS");
+    }
 
     private static Caller caller(String id, Set<String> regions, String... permissions) {
         Set<String> held = Set.of(permissions);

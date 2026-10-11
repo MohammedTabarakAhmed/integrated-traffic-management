@@ -20,7 +20,7 @@ public class JdbcRentalRepository implements Ports.RentalRepository {
         jdbc.sql("insert into rental_company(id,traffic_file_number,commercial_licence,region,status,created_at,created_by) "
                         + "values (:id,:file,:licence,:region,'ACTIVE',:at,:actor)")
                 .param("id", id).param("file", file).param("licence", licence).param("region", region)
-                .param("at", at).param("actor", actor).update();
+                .param("at", ts(at)).param("actor", actor).update();
     }
 
     @Override
@@ -39,7 +39,7 @@ public class JdbcRentalRepository implements Ports.RentalRepository {
     @Override
     public RentalService.Branch insertBranch(String companyFile,String code,String name,String region,String actor,Instant at) {
         jdbc.sql("insert into rental_branch(company_file,branch_code,name,region,active,created_at,created_by) values (:company,:code,:name,:region,true,:at,:actor)")
-                .param("company",companyFile).param("code",code).param("name",name).param("region",region).param("at",at).param("actor",actor).update();
+                .param("company",companyFile).param("code",code).param("name",name).param("region",region).param("at",ts(at)).param("actor",actor).update();
         return new RentalService.Branch(companyFile,code,name,region,true,at);
     }
 
@@ -52,7 +52,7 @@ public class JdbcRentalRepository implements Ports.RentalRepository {
     @Override
     public RentalService.Company setCompanyStatus(String file,String status,String reason,String actor,Instant at) {
         jdbc.sql("update rental_company set status=:status,status_reason=:reason,status_changed_at=:at,status_changed_by=:actor where traffic_file_number=:file")
-                .param("status",status).param("reason",reason).param("at",at).param("actor",actor).param("file",file).update();
+                .param("status",status).param("reason",reason).param("at",ts(at)).param("actor",actor).param("file",file).update();
         return companyForUpdate(file).orElseThrow();
     }
 
@@ -65,9 +65,9 @@ public class JdbcRentalRepository implements Ports.RentalRepository {
                         + "status,created_at,created_by) values (:id,:company,:plate,:renter,:passport,:licence,"
                         + ":starts,:ends,:pickup,:return,:type,:bond,'ACTIVE',:at,:actor)")
                 .param("id", id).param("company", companyFile).param("plate", plate).param("renter", renterFile)
-                .param("passport", passport).param("licence", foreignLicence).param("starts", startsAt)
-                .param("ends", endsAt).param("pickup", pickup).param("return", returns).param("type", type)
-                .param("bond", bondMinor).param("at", at).param("actor", actor).update();
+                .param("passport", passport).param("licence", foreignLicence).param("starts", ts(startsAt))
+                .param("ends", ts(endsAt)).param("pickup", pickup).param("return", returns).param("type", type)
+                .param("bond", bondMinor).param("at", ts(at)).param("actor", actor).update();
         for (int i = 0; i < drivers.size(); i++) {
             jdbc.sql("insert into rental_contract_driver(contract_id,driver_no,traffic_file_number) "
                             + "values (:id,:no,:driver)")
@@ -93,7 +93,7 @@ public class JdbcRentalRepository implements Ports.RentalRepository {
                         + "damage_notes,evidence_ids,notes,inspected_by) values (:id,:contract,:type,:at,:odometer,"
                         + ":fuel,:damage,:evidence,:notes,:by)")
                 .param("id", inspection.id()).param("contract", inspection.contractId())
-                .param("type", inspection.type()).param("at", inspection.inspectedAt())
+                .param("type", inspection.type()).param("at", ts(inspection.inspectedAt()))
                 .param("odometer", inspection.odometerKm()).param("fuel", inspection.fuelPercent())
                 .param("damage", inspection.damageNotes().toArray(String[]::new))
                 .param("evidence", inspection.evidenceIds().toArray(String[]::new))
@@ -131,5 +131,9 @@ public class JdbcRentalRepository implements Ports.RentalRepository {
     private static List<String> arrayValues(java.sql.Array array) throws SQLException {
         Object[] values = (Object[]) array.getArray();
         return java.util.Arrays.stream(values).map(Object::toString).toList();
+    }
+
+    private static java.sql.Timestamp ts(java.time.Instant at) {
+        return at == null ? null : java.sql.Timestamp.from(at);
     }
 }

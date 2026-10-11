@@ -53,7 +53,7 @@ public class ForeignService implements LicenceService.PaidHandler {
             Records.CardStatus.RETURNED);
 
     /**
-     * {@code itms.licensing.foreign.*} (Q-079 for the periods).
+     * {@code itms.licensing.foreign.*} (Q-080 for the periods).
      *
      * @param acceptedLanguages      languages that need no certified translation (DL-054)
      * @param visitorPermitDays      fixed validity of a visitor's temporary permit (DL-055)

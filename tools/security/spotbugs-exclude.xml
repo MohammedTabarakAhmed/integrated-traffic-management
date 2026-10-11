@@ -45,10 +45,34 @@
       <And><Class name="gov.itms.audit.application.AuditService"/><Field name="store"/></And>
       <And><Class name="gov.itms.payment.application.PaymentService"/><Field name="repo"/></And>
       <And><Class name="gov.itms.payment.infrastructure.PaymentServiceConfiguration$PendingJob"/><Field name="payments"/></And>
-      <And><Class name="gov.itms.vehicle.application.VehicleService"/><Field name="repo"/></And>
       <And><Class name="gov.itms.violation.application.ViolationService"/><Field name="repo"/></And>
       <And><Class name="gov.itms.licensing.application.LicenceClassService"/><Field name="classes"/></And>
       <And><Class name="gov.itms.licensing.application.LicenceNumberService"/><Field name="ranges"/></And>
+      <And><Class name="gov.itms.accident.application.AccidentService"/><Field name="repo"/></And>
+      <And><Class name="gov.itms.accident.application.AccidentWorkflowService"/><Field name="~accidents|workflow|json"/></And>
+      <And><Class name="gov.itms.crossborder.application.CrossborderService"/><Field name="repo"/></And>
+      <And><Class name="gov.itms.crossborder.application.ExchangeDelivery"/><Field name="exchange"/></And>
+      <And><Class name="gov.itms.crossborder.infrastructure.JdbcExchangeRepository"/><Field name="json"/></And>
+      <And><Class name="gov.itms.device.application.DeviceService"/><Field name="repo"/></And>
+      <And><Class name="gov.itms.geo.application.GeoService"/><Field name="repo"/></And>
+      <And><Class name="gov.itms.licensing.application.ForeignService"/><Field name="~foreign|licences"/></And>
+      <And><Class name="gov.itms.licensing.application.LicenceService"/><Field name="repo"/></And>
+      <And><Class name="gov.itms.licensing.application.LicenceStatusService"/><Field name="licences"/></And>
+      <And><Class name="gov.itms.licensing.application.LicenceTransactions"/><Field name="licences"/></And>
+      <And><Class name="gov.itms.marine.application.MarineService"/><Field name="repo"/></And>
+      <And><Class name="gov.itms.payment.application.FinanceOperations"/><Field name="repo"/></And>
+      <And><Class name="gov.itms.permit.application.PermitService"/><Field name="repo"/></And>
+      <And><Class name="gov.itms.rental.application.RentalService"/><Field name="repo"/></And>
+      <And><Class name="gov.itms.roadpermit.application.RoadPermitService"/><Field name="repo"/></And>
+      <And><Class name="gov.itms.vehicle.application.PlateService"/><Field name="~repo|records"/></And>
+      <And><Class name="gov.itms.vehicle.application.RequestDesk"/><Field name="~repo|records"/></And>
+      <And><Class name="gov.itms.vehicle.application.VehicleService"/><Field name="~repo|records"/></And>
+      <And><Class name="gov.itms.vehicle.application.VehicleTransactions"/><Field name="~repo|records|vehicles"/></And>
+      <And><Class name="gov.itms.vehicle.infrastructure.VehicleServiceConfiguration$PlateExpiryJob"/><Field name="plates"/></And>
+      <And><Class name="gov.itms.violation.application.CrossborderViolations"/><Field name="~violations|repo|links"/></And>
+      <And><Class name="gov.itms.violation.application.ObjectionService"/><Field name="~objections|links|violations"/></And>
+      <And><Class name="gov.itms.violation.application.ViolationBooks"/><Field name="repo"/></And>
+      <And><Class name="gov.itms.violation.infrastructure.ViolationServiceConfiguration$UnpaidHoldJob"/><Field name="violations"/></And>
     </Or>
   </Match>
 
@@ -66,6 +90,49 @@
       <And><Class name="gov.itms.iam.domain.Role"/><Field name="permissions"/></And>
       <And><Class name="gov.itms.trafficfile.domain.Company"/><Field name="~activities|signatories|fleetManagers"/></And>
       <And><Class name="gov.itms.trafficfile.domain.Profile"/><Field name="~languages|physicalConditions"/></And>
+      <And><Class name="gov.itms.accident.application.AccidentService$Report"/><Field name="~parties|evidenceDocumentIds"/></And>
+      <And><Class name="gov.itms.crossborder.application.CrossborderService$Message"/><Field name="payload"/></And>
+      <And><Class name="gov.itms.crossborder.application.CrossborderService$StatementView"/><Field name="lines"/></And>
+      <And><Class name="gov.itms.crossborder.application.Ports$Proposal"/><Field name="payload"/></And>
+      <And><Class name="gov.itms.licensing.application.LicenceNumberService$Report"/><Field name="ranges"/></And>
+      <And><Class name="gov.itms.licensing.application.LicenceRepository$HistoryEntry"/><Field name="detail"/></And>
+      <And><Class name="gov.itms.licensing.application.LicenceStatusService$Status"/><Field name="classes"/></And>
+      <And><Class name="gov.itms.licensing.domain.LicenceRequest"/><Field name="~payload|transferIds"/></And>
+      <And><Class name="gov.itms.licensing.infrastructure.LicensingServiceConfiguration$ForeignProperties"/><Field name="~acceptedLanguages|idpPrinters"/></And>
+      <And><Class name="gov.itms.payment.application.FinanceOperations$ClosedTill"/><Field name="totals"/></And>
+      <And><Class name="gov.itms.rental.application.RentalService$Contract"/><Field name="additionalDrivers"/></And>
+      <And><Class name="gov.itms.roadpermit.application.RoadPermitService$Application"/><Field name="~vehicles|routeSegments"/></And>
+      <And><Class name="gov.itms.vehicle.application.PlateService$AuctionView"/><Field name="~lots|highestBids"/></And>
+      <And><Class name="gov.itms.vehicle.application.PlateService$OrderView"/><Field name="items"/></And>
+      <And><Class name="gov.itms.vehicle.application.VehicleTransactions$FileRecords"/><Field name="~bans|approvals|mortgages|cards|certificates"/></And>
+      <And><Class name="gov.itms.vehicle.domain.Records$Approval"/><Field name="detail"/></And>
+      <And><Class name="gov.itms.vehicle.domain.Registration$Request"/><Field name="payload"/></And>
+    </Or>
+  </Match>
+
+  <!-- EI_EXPOSE_REP2 on the same records (Increments 2-9): their compact constructors store an unmodifiable copy
+       (Collections.unmodifiableList/Map of a new ArrayList/LinkedHashMap, or List.copyOf), so the caller's collection
+       is never kept. SpotBugs reports the parameter before the reassignment. -->
+  <Match>
+    <Bug pattern="EI_EXPOSE_REP2"/>
+    <Or>
+      <And><Class name="gov.itms.accident.application.AccidentService$Report"/><Field name="~parties|evidenceDocumentIds"/></And>
+      <And><Class name="gov.itms.crossborder.application.CrossborderService$Message"/><Field name="payload"/></And>
+      <And><Class name="gov.itms.crossborder.application.CrossborderService$StatementView"/><Field name="lines"/></And>
+      <And><Class name="gov.itms.crossborder.application.Ports$Proposal"/><Field name="payload"/></And>
+      <And><Class name="gov.itms.licensing.application.LicenceNumberService$Report"/><Field name="ranges"/></And>
+      <And><Class name="gov.itms.licensing.application.LicenceRepository$HistoryEntry"/><Field name="detail"/></And>
+      <And><Class name="gov.itms.licensing.application.LicenceStatusService$Status"/><Field name="classes"/></And>
+      <And><Class name="gov.itms.licensing.domain.LicenceRequest"/><Field name="~payload|transferIds"/></And>
+      <And><Class name="gov.itms.licensing.infrastructure.LicensingServiceConfiguration$ForeignProperties"/><Field name="~acceptedLanguages|idpPrinters"/></And>
+      <And><Class name="gov.itms.payment.application.FinanceOperations$ClosedTill"/><Field name="totals"/></And>
+      <And><Class name="gov.itms.rental.application.RentalService$Contract"/><Field name="additionalDrivers"/></And>
+      <And><Class name="gov.itms.roadpermit.application.RoadPermitService$Application"/><Field name="~vehicles|routeSegments"/></And>
+      <And><Class name="gov.itms.vehicle.application.PlateService$AuctionView"/><Field name="~lots|highestBids"/></And>
+      <And><Class name="gov.itms.vehicle.application.PlateService$OrderView"/><Field name="items"/></And>
+      <And><Class name="gov.itms.vehicle.application.VehicleTransactions$FileRecords"/><Field name="~bans|approvals|mortgages|cards|certificates"/></And>
+      <And><Class name="gov.itms.vehicle.domain.Records$Approval"/><Field name="detail"/></And>
+      <And><Class name="gov.itms.vehicle.domain.Registration$Request"/><Field name="payload"/></And>
     </Or>
   </Match>
 
@@ -116,6 +183,20 @@
   <Match>
     <Bug pattern="CT_CONSTRUCTOR_THROW"/>
     <Class name="gov.itms.trafficfile.application.DuplicateMergeService"/>
+  </Match>
+
+  <!-- CT_CONSTRUCTOR_THROW (Increments 4, 6, 9): these services refuse an out-of-range setting (objection window,
+       maximum capture lag, delivery batch size) when Spring creates the singleton from configuration, so a
+       misconfigured service never starts. A finalizer attack needs hostile code subclassing them inside the service;
+       they stay non-final because Spring proxies them for @Transactional. -->
+  <Match>
+    <Bug pattern="CT_CONSTRUCTOR_THROW"/>
+    <Or>
+      <Class name="gov.itms.accident.application.AccidentWorkflowService"/>
+      <Class name="gov.itms.crossborder.application.ExchangeDelivery"/>
+      <Class name="gov.itms.device.application.DeviceService"/>
+      <Class name="gov.itms.violation.application.ObjectionService"/>
+    </Or>
   </Match>
 
   <!-- UNENCRYPTED_SOCKET: ClamAV's clamd INSTREAM protocol has no TLS. The scanner runs beside document-service in the

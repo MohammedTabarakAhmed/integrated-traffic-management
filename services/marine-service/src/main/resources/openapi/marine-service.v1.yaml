@@ -11,7 +11,7 @@ paths:
       security: [{bearerAuth: []}]
       parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Craft'}}}}
-      responses: {'201': {description: Craft registered}, '400': {$ref: '#/components/responses/Problem'}, '401': {description: Authentication required}, '403': {description: Permission denied}}
+      responses: {'201': {description: Craft registered, content: {application/json: {schema: {$ref: '#/components/schemas/CraftView'}}}}, '400': {$ref: '#/components/responses/Problem'}, '401': { $ref: '#/components/responses/Problem' }, '403': { $ref: '#/components/responses/Problem' }, '404': {$ref: '#/components/responses/Problem'}, '409': {$ref: '#/components/responses/Problem'}, '422': {$ref: '#/components/responses/Problem'}}
   /v1/marine-craft/{hullId}/inspections:
     post:
       operationId: recordMarineInspection
@@ -22,7 +22,7 @@ paths:
       security: [{bearerAuth: []}]
       parameters: [{name: hullId, in: path, required: true, schema: {type: string, maxLength: 80}}, {$ref: '#/components/parameters/IdempotencyKey'}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Inspection'}}}}
-      responses: {'200': {description: Inspection recorded}, '400': {$ref: '#/components/responses/Problem'}, '401': {description: Authentication required}, '403': {description: Permission denied}}
+      responses: {'200': {description: Inspection recorded, content: {application/json: {schema: {$ref: '#/components/schemas/InspectionView'}}}}, '400': {$ref: '#/components/responses/Problem'}, '401': { $ref: '#/components/responses/Problem' }, '403': { $ref: '#/components/responses/Problem' }, '404': {$ref: '#/components/responses/Problem'}, '409': {$ref: '#/components/responses/Problem'}, '422': {$ref: '#/components/responses/Problem'}}
   /v1/marine-craft/{hullId}/renewals:
     post:
       operationId: renewMarineRegistration
@@ -33,7 +33,7 @@ paths:
       security: [{bearerAuth: []}]
       parameters: [{name: hullId, in: path, required: true, schema: {type: string, maxLength: 80}}, {$ref: '#/components/parameters/IdempotencyKey'}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Renewal'}}}}
-      responses: {'200': {description: Registration renewed}, '400': {$ref: '#/components/responses/Problem'}, '401': {description: Authentication required}, '403': {description: Permission denied}}
+      responses: {'200': {description: Registration renewed, content: {application/json: {schema: {$ref: '#/components/schemas/CraftView'}}}}, '400': {$ref: '#/components/responses/Problem'}, '401': { $ref: '#/components/responses/Problem' }, '403': { $ref: '#/components/responses/Problem' }, '404': {$ref: '#/components/responses/Problem'}, '409': {$ref: '#/components/responses/Problem'}, '422': {$ref: '#/components/responses/Problem'}}
   /v1/marine-craft/{hullId}/ownership-transfers:
     post:
       operationId: transferMarineCraft
@@ -44,7 +44,7 @@ paths:
       security: [{bearerAuth: []}]
       parameters: [{name: hullId, in: path, required: true, schema: {type: string, maxLength: 80}}, {$ref: '#/components/parameters/IdempotencyKey'}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Transfer'}}}}
-      responses: {'200': {description: Ownership transferred}, '400': {$ref: '#/components/responses/Problem'}, '401': {description: Authentication required}, '403': {description: Permission denied}}
+      responses: {'200': {description: Ownership transferred, content: {application/json: {schema: {$ref: '#/components/schemas/CraftView'}}}}, '400': {$ref: '#/components/responses/Problem'}, '401': { $ref: '#/components/responses/Problem' }, '403': { $ref: '#/components/responses/Problem' }, '404': {$ref: '#/components/responses/Problem'}, '409': {$ref: '#/components/responses/Problem'}, '422': {$ref: '#/components/responses/Problem'}}
   /v1/marine-operator-licences:
     post:
       operationId: issueMarineOperatorLicence
@@ -55,7 +55,7 @@ paths:
       security: [{bearerAuth: []}]
       parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Licence'}}}}
-      responses: {'201': {description: Operator licence issued}, '400': {$ref: '#/components/responses/Problem'}, '401': {description: Authentication required}, '403': {description: Permission denied}}
+      responses: {'201': {description: Operator licence issued, content: {application/json: {schema: {$ref: '#/components/schemas/LicenceView'}}}}, '400': {$ref: '#/components/responses/Problem'}, '401': { $ref: '#/components/responses/Problem' }, '403': { $ref: '#/components/responses/Problem' }, '404': {$ref: '#/components/responses/Problem'}, '409': {$ref: '#/components/responses/Problem'}, '422': {$ref: '#/components/responses/Problem'}}
 components:
   securitySchemes: {bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}}
   parameters:
@@ -63,6 +63,41 @@ components:
   responses:
     Problem: {description: Invalid request, content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
   schemas:
+    CraftView:
+      type: object
+      required: [id, hullId, type, lengthMetres, engineCount, capacity, homePort, owner, status]
+      properties:
+        id: {type: string, format: uuid}
+        hullId: {type: string}
+        type: {type: string}
+        lengthMetres: {type: number}
+        engineCount: {type: integer}
+        capacity: {type: integer}
+        homePort: {type: string}
+        owner: {type: string}
+        status: {type: string}
+    InspectionView:
+      type: object
+      required: [id, hullId, purpose, result, workshop, inspectedAt]
+      properties:
+        id: {type: string, format: uuid}
+        hullId: {type: string}
+        purpose: {type: string}
+        result: {type: string}
+        workshop: {type: string}
+        documentId: {type: [string, 'null']}
+        inspectedAt: {type: string, format: date-time}
+    LicenceView:
+      type: object
+      required: [id, number, trafficFile, craftType, status, issuedAt, expiresAt]
+      properties:
+        id: {type: string, format: uuid}
+        number: {type: string}
+        trafficFile: {type: string}
+        craftType: {type: string}
+        status: {type: string}
+        issuedAt: {type: string, format: date-time}
+        expiresAt: {type: string, format: date-time}
     Craft:
       type: object
       additionalProperties: false

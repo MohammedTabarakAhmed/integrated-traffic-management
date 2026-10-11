@@ -19,13 +19,13 @@ public class JdbcGeoRepository implements Ports.GeoRepository {
                 .param("ar",n.nameAr()).param("region",n.region()).param("lat",n.latitude()).param("lon",n.longitude())
                 .param("speed",n.speedLimitKmh()).param("load",n.bridgeLoadTonnes()).param("restrictions",n.restrictions())
                 .param("hours",n.openingHours()).param("roadType",n.roadType()).param("lanes",n.laneCount())
-                .param("direction",n.direction()).param("authority",n.owningAuthority()).param("actor",actor).param("at",at).update();
+                .param("direction",n.direction()).param("authority",n.owningAuthority()).param("actor",actor).param("at",ts(at)).update();
     }
     @Override public Optional<GeoService.Node> find(UUID id) {
         return jdbc.sql("select * from geo_node where id=:id").param("id",id).query(JdbcGeoRepository::map).optional();
     }
     @Override public List<GeoService.Node> children(UUID parent,String type) {
-        return jdbc.sql("select * from geo_node where parent_id=:parent and (:type is null or node_type=:type) order by code")
+        return jdbc.sql("select * from geo_node where parent_id=:parent and (cast(:type as varchar) is null or node_type=:type) order by code")
                 .param("parent",parent).param("type",type).query(JdbcGeoRepository::map).list();
     }
     private static GeoService.Node map(ResultSet r,int row)throws SQLException {
@@ -37,4 +37,8 @@ public class JdbcGeoRepository implements Ports.GeoRepository {
     }
     private static Double nullableDouble(ResultSet r,String col)throws SQLException { double v=r.getDouble(col);return r.wasNull()?null:v; }
     private static Integer nullableInt(ResultSet r,String col)throws SQLException { int v=r.getInt(col);return r.wasNull()?null:v; }
+
+    private static java.sql.Timestamp ts(java.time.Instant at) {
+        return at == null ? null : java.sql.Timestamp.from(at);
+    }
 }

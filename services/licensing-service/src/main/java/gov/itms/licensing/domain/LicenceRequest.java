@@ -17,6 +17,10 @@ public record LicenceRequest(UUID id, Kind kind, Status status, UUID licenceId, 
                              String region, String quoteId, UUID payableId, long amountMinor, String currency,
                              Map<String, String> payload, List<UUID> transferIds, String requestedBy,
                              Channel channel, Instant requestedAt, Instant completedAt) {
+    public LicenceRequest {
+        payload = payload == null ? null : java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(payload));
+    }
+
 
     public enum Kind { ISSUE, RENEWAL, REPLACEMENT, CHANGE, NOC, EXCHANGE, TEMP_PERMIT, IDP }
 

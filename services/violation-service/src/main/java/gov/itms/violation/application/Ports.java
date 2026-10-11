@@ -125,6 +125,24 @@ public final class Ports {
         java.util.Optional<Link> byNumber(String violationNumber);
     }
 
+    /** Customer and partner objections (VF-050..VF-052, XB-005). */
+    public interface Objections {
+
+        /** False when the violation already has an objection. */
+        boolean insert(gov.itms.violation.domain.Objection objection);
+
+        /** Pending objections in submission order, without those to partner-state violations. */
+        java.util.List<gov.itms.violation.domain.Objection> pendingLocal(int limit);
+
+        java.util.Optional<gov.itms.violation.domain.Objection> lock(UUID id);
+
+        void saveDecision(gov.itms.violation.domain.Objection decided);
+
+        /** Decides the pending objection to a violation; false when none was pending. */
+        boolean decidePending(String violationNumber, gov.itms.violation.domain.Objection.Decision decision,
+                              String decidedBy, java.time.Instant at, String reason);
+    }
+
     /** vehicle-service: the local vehicle carrying a plate (XB-002). */
     public interface Vehicles {
 

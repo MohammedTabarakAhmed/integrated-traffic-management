@@ -73,14 +73,22 @@ public class CrossborderService {
                           String localReference, String externalCode, String mappedCode, String vehiclePlate,
                           String ownerFile, String currency, long amountMinor, Instant occurredAt,
                           Instant receivedAt, String detail, UUID relatedMessageId, Map<String, Object> payload,
-                          Instant paidAt, String paidIn, String paymentReference, Integer commissionBasisPoints) { }
+                          Instant paidAt, String paidIn, String paymentReference, Integer commissionBasisPoints) {
+        public Message {
+            payload = payload == null ? null : java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(payload));
+        }
+    }
 
     /** The amounts the next statement for a partner and currency would contain (XB-004). */
     public record Settlement(String partner, Instant from, Instant to, String currency, long collectedHereMinor,
                              long commissionHereMinor, long owedToPartnerMinor, long collectedByPartnerMinor,
                              long commissionPartnerMinor, long owedByPartnerMinor, long netMinor, int messageCount) { }
 
-    public record StatementView(Ports.Statement statement, List<Ports.StatementLine> lines) { }
+    public record StatementView(Ports.Statement statement, List<Ports.StatementLine> lines) {
+        public StatementView {
+            lines = lines == null ? null : java.util.Collections.unmodifiableList(new java.util.ArrayList<>(lines));
+        }
+    }
 
     private final Ports.ExchangeRepository repo;
     private final AuditRecorder audit;

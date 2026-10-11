@@ -31,9 +31,11 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Proposal'}
         '400': {$ref: '#/components/responses/Problem'}
-        '401': {description: Authentication required}
-        '403': {description: Permission denied}
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
         '409': {$ref: '#/components/responses/Problem'}
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /v1/partner-states/{code}:
     get:
       operationId: getPartnerState
@@ -49,9 +51,10 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Partner'}
-        '401': {description: Authentication required}
-        '403': {description: Permission denied}
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
         '404': {description: Not configured}
+        '400': { $ref: '#/components/responses/Problem' }
   /v1/partner-states/{code}/mappings:
     post:
       operationId: proposePartnerCodeMapping
@@ -75,10 +78,11 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Proposal'}
         '400': {$ref: '#/components/responses/Problem'}
-        '401': {description: Authentication required}
-        '403': {description: Permission denied}
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
         '404': {$ref: '#/components/responses/Problem'}
         '409': {$ref: '#/components/responses/Problem'}
+        '422': { $ref: '#/components/responses/Problem' }
   /v1/config-proposals:
     get:
       operationId: listConfigProposals
@@ -98,8 +102,9 @@ paths:
                 properties:
                   items: {type: array, items: {$ref: '#/components/schemas/Proposal'}}
         '400': {$ref: '#/components/responses/Problem'}
-        '401': {description: Authentication required}
-        '403': {description: Permission denied}
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
   /v1/config-proposals/{id}/decisions:
     post:
       operationId: decideConfigProposal
@@ -129,10 +134,11 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Proposal'}
         '400': {$ref: '#/components/responses/Problem'}
-        '401': {description: Authentication required}
-        '403': {description: Permission denied}
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
         '404': {$ref: '#/components/responses/Problem'}
         '409': {$ref: '#/components/responses/Problem'}
+        '422': { $ref: '#/components/responses/Problem' }
   /v1/partner-states/{code}/violations:
     post:
       operationId: queueOutboundViolation
@@ -153,10 +159,11 @@ paths:
       responses:
         '201': {$ref: '#/components/responses/Message'}
         '400': {$ref: '#/components/responses/Problem'}
-        '401': {description: Authentication required}
-        '403': {description: Permission denied}
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
         '404': {$ref: '#/components/responses/Problem'}
         '409': {$ref: '#/components/responses/Problem'}
+        '422': { $ref: '#/components/responses/Problem' }
   /v1/partner-states/{code}/inbound-violations:
     post:
       operationId: receiveInboundViolation
@@ -177,10 +184,11 @@ paths:
       responses:
         '201': {$ref: '#/components/responses/Message'}
         '400': {$ref: '#/components/responses/Problem'}
-        '401': {description: Authentication required}
-        '403': {description: Permission denied}
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
         '404': {$ref: '#/components/responses/Problem'}
         '409': {$ref: '#/components/responses/Problem'}
+        '422': { $ref: '#/components/responses/Problem' }
   /v1/partner-states/{code}/payment-notices:
     post:
       operationId: applyPartnerPaymentNotice
@@ -200,10 +208,11 @@ paths:
       responses:
         '200': {$ref: '#/components/responses/Message'}
         '400': {$ref: '#/components/responses/Problem'}
-        '401': {description: Authentication required}
-        '403': {description: Permission denied}
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
         '404': {$ref: '#/components/responses/Problem'}
         '409': {$ref: '#/components/responses/Problem'}
+        '422': { $ref: '#/components/responses/Problem' }
   /v1/partner-states/{code}/objections:
     post:
       operationId: forwardObjection
@@ -224,10 +233,11 @@ paths:
       responses:
         '200': {$ref: '#/components/responses/Message'}
         '400': {$ref: '#/components/responses/Problem'}
-        '401': {description: Authentication required}
-        '403': {description: Permission denied}
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
         '404': {$ref: '#/components/responses/Problem'}
         '409': {$ref: '#/components/responses/Problem'}
+        '422': { $ref: '#/components/responses/Problem' }
   /v1/partner-states/{code}/objection-decisions:
     post:
       operationId: applyPartnerObjectionDecision
@@ -254,10 +264,11 @@ paths:
       responses:
         '200': {$ref: '#/components/responses/Message'}
         '400': {$ref: '#/components/responses/Problem'}
-        '401': {description: Authentication required}
-        '403': {description: Permission denied}
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
         '404': {$ref: '#/components/responses/Problem'}
         '409': {$ref: '#/components/responses/Problem'}
+        '422': { $ref: '#/components/responses/Problem' }
   /v1/partner-states/{code}/inbound-objections:
     post:
       operationId: receivePartnerObjection
@@ -283,10 +294,11 @@ paths:
       responses:
         '200': {$ref: '#/components/responses/Message'}
         '400': {$ref: '#/components/responses/Problem'}
-        '401': {description: Authentication required}
-        '403': {description: Permission denied}
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
         '404': {$ref: '#/components/responses/Problem'}
         '409': {$ref: '#/components/responses/Problem'}
+        '422': { $ref: '#/components/responses/Problem' }
   /v1/partner-states/{code}/data-exchanges:
     post:
       operationId: sendPartnerData
@@ -306,10 +318,11 @@ paths:
       responses:
         '201': {$ref: '#/components/responses/Message'}
         '400': {$ref: '#/components/responses/Problem'}
-        '401': {description: Authentication required}
-        '403': {description: Permission denied}
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
         '404': {$ref: '#/components/responses/Problem'}
         '409': {$ref: '#/components/responses/Problem'}
+        '422': { $ref: '#/components/responses/Problem' }
   /v1/partner-states/{code}/inbound-data:
     post:
       operationId: receivePartnerData
@@ -329,10 +342,11 @@ paths:
       responses:
         '201': {$ref: '#/components/responses/Message'}
         '400': {$ref: '#/components/responses/Problem'}
-        '401': {description: Authentication required}
-        '403': {description: Permission denied}
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
         '404': {$ref: '#/components/responses/Problem'}
         '409': {$ref: '#/components/responses/Problem'}
+        '422': { $ref: '#/components/responses/Problem' }
   /v1/partner-states/{code}/batches:
     post:
       operationId: deliverDueMessages
@@ -348,7 +362,7 @@ paths:
         required: false
         content:
           application/json:
-            schema: {$ref: '#/components/schemas/Window'}
+            schema: {$ref: '#/components/schemas/DeliveryWindow'}
       responses:
         '200':
           description: Messages the partner accepted
@@ -358,10 +372,12 @@ paths:
                 type: object
                 properties:
                   accepted: {type: integer, minimum: 0}
-        '401': {description: Authentication required}
-        '403': {description: Permission denied}
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
         '404': {$ref: '#/components/responses/Problem'}
         '409': {$ref: '#/components/responses/Problem'}
+        '400': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /v1/exchange-messages/{id}/acknowledgements:
     post:
       operationId: acknowledgeDelivery
@@ -388,9 +404,11 @@ paths:
       responses:
         '200': {$ref: '#/components/responses/Message'}
         '400': {$ref: '#/components/responses/Problem'}
-        '401': {description: Authentication required}
-        '403': {description: Permission denied}
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
         '404': {$ref: '#/components/responses/Problem'}
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /v1/partner-states/{code}/settlements:
     get:
       operationId: previewSettlement
@@ -413,8 +431,8 @@ paths:
                 properties:
                   items: {type: array, items: {$ref: '#/components/schemas/Settlement'}}
         '400': {$ref: '#/components/responses/Problem'}
-        '401': {description: Authentication required}
-        '403': {description: Permission denied}
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
         '404': {$ref: '#/components/responses/Problem'}
   /v1/partner-states/{code}/settlement-statements:
     post:
@@ -442,9 +460,11 @@ paths:
                 properties:
                   items: {type: array, items: {$ref: '#/components/schemas/StatementView'}}
         '400': {$ref: '#/components/responses/Problem'}
-        '401': {description: Authentication required}
-        '403': {description: Permission denied}
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
         '404': {$ref: '#/components/responses/Problem'}
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
     get:
       operationId: listSettlementStatements
       summary: A partner's statements, newest period first
@@ -465,8 +485,9 @@ paths:
                 properties:
                   items: {type: array, items: {$ref: '#/components/schemas/Statement'}}
         '400': {$ref: '#/components/responses/Problem'}
-        '401': {description: Authentication required}
-        '403': {description: Permission denied}
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
   /v1/settlement-statements/{id}:
     get:
       operationId: getSettlementStatement
@@ -482,9 +503,10 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/StatementView'}
-        '401': {description: Authentication required}
-        '403': {description: Permission denied}
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
         '404': {$ref: '#/components/responses/Problem'}
+        '400': { $ref: '#/components/responses/Problem' }
   /v1/exchange-messages:
     get:
       operationId: listExchangeMessages
@@ -508,8 +530,9 @@ paths:
                 properties:
                   items: {type: array, items: {$ref: '#/components/schemas/Message'}}
         '400': {$ref: '#/components/responses/Problem'}
-        '401': {description: Authentication required}
-        '403': {description: Permission denied}
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
   /v1/exchange-messages/{id}:
     get:
       operationId: getExchangeMessage
@@ -521,9 +544,10 @@ paths:
       parameters: [{$ref: '#/components/parameters/Id'}]
       responses:
         '200': {$ref: '#/components/responses/Message'}
-        '401': {description: Authentication required}
-        '403': {description: Permission denied}
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
         '404': {$ref: '#/components/responses/Problem'}
+        '400': { $ref: '#/components/responses/Problem' }
   /v1/exchange-messages/{id}/history:
     get:
       operationId: getExchangeMessageHistory
@@ -542,9 +566,10 @@ paths:
                 type: object
                 properties:
                   items: {type: array, items: {$ref: '#/components/schemas/History'}}
-        '401': {description: Authentication required}
-        '403': {description: Permission denied}
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
         '404': {$ref: '#/components/responses/Problem'}
+        '400': { $ref: '#/components/responses/Problem' }
 components:
   securitySchemes:
     bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
@@ -699,6 +724,13 @@ components:
       additionalProperties:
         type: [string, number, boolean]
         maxLength: 2000
+    DeliveryWindow:
+      type: object
+      additionalProperties: false
+      description: Optional; only messages that occurred in [from, to) are delivered
+      properties:
+        from: {type: [string, 'null'], format: date-time}
+        to: {type: [string, 'null'], format: date-time}
     Window:
       type: object
       additionalProperties: false

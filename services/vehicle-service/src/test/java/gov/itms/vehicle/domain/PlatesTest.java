@@ -22,18 +22,19 @@ class PlatesTest {
     }
 
     @Test
-    @DisplayName("VL-031: every allowed status transition, and nothing else")
+    @DisplayName("VL-031, VL-033, VL-034, VL-037: every allowed status transition, and nothing else")
     void transitions() {
         Map<Plates.Status, Set<Plates.Status>> allowed = Map.of(
                 Plates.Status.AVAILABLE, EnumSet.of(Plates.Status.RESERVED, Plates.Status.ASSIGNED,
-                        Plates.Status.WITHDRAWN),
+                        Plates.Status.WITHDRAWN, Plates.Status.RETAINED),
                 Plates.Status.RESERVED, EnumSet.of(Plates.Status.ASSIGNED, Plates.Status.AVAILABLE,
-                        Plates.Status.CANCELLED),
+                        Plates.Status.CANCELLED, Plates.Status.RETAINED),
                 Plates.Status.ASSIGNED, EnumSet.of(Plates.Status.RETAINED, Plates.Status.RETURNED, Plates.Status.LOST,
                         Plates.Status.CANCELLED),
                 Plates.Status.RETAINED, EnumSet.of(Plates.Status.ASSIGNED, Plates.Status.RETURNED,
-                        Plates.Status.CANCELLED),
-                Plates.Status.WITHDRAWN, EnumSet.of(Plates.Status.ASSIGNED, Plates.Status.RETAINED),
+                        Plates.Status.CANCELLED, Plates.Status.LOST),
+                Plates.Status.WITHDRAWN, EnumSet.of(Plates.Status.ASSIGNED, Plates.Status.RETAINED,
+                        Plates.Status.AVAILABLE),
                 Plates.Status.RETURNED, EnumSet.noneOf(Plates.Status.class),
                 Plates.Status.CANCELLED, EnumSet.noneOf(Plates.Status.class),
                 Plates.Status.LOST, EnumSet.noneOf(Plates.Status.class));

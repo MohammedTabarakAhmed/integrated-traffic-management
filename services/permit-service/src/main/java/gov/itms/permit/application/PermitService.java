@@ -3,6 +3,7 @@ package gov.itms.permit.application;
 import gov.itms.permit.domain.DomainException;
 import gov.itms.platform.audit.AuditRecorder;
 import gov.itms.platform.events.DomainEventRecorder;
+import gov.itms.platform.security.CurrentActor;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
@@ -133,12 +134,13 @@ public class PermitService {
     @Transactional
     public int suspendByTrafficEvent(String trafficFile, String reason) {
         List<Permit> permits = repo.activeByTrafficFile(trafficFile);
+        CurrentActor system = CurrentActor.system("permit-traffic-events");
         int count = 0;
         for (Permit permit : permits) {
-            repo.transition(permit.id(), "SUSPENDED", null, null, "SYSTEM", reason, clock.instant());
-            audit.record("TRAINING_PERMIT_SUSPENDED", "Permit", permit.id().toString(), Map.of("status", "ISSUED"),
+            repo.transition(permit.id(), "SUSPENDED", null, null, system.userId(), reason, clock.instant());
+            audit.recordAs(system, "TRAINING_PERMIT_SUSPENDED", "Permit", permit.id().toString(), Map.of("status", "ISSUED"),
                     Map.of("status", "SUSPENDED"), reason);
-            events.record("itms.permit.status-changed", permit.id().toString(), Map.of("permitId", permit.id().toString(),
+            events.recordAs(system, "itms.permit.status-changed", permit.id().toString(), Map.of("permitId", permit.id().toString(),
                     "number", permit.number(), "status", "SUSPENDED", "reason", reason));
             count++;
         }
@@ -152,13 +154,14 @@ public class PermitService {
             throw invalid("PERMIT_EXPIRY_BATCH_INVALID", "expiry batch size must be 1..1000", "TR-001");
         }
         Instant now = clock.instant();
+        CurrentActor system = CurrentActor.system("permit-expiry");
         List<Permit> due = repo.expired(now, batchSize);
         for (Permit permit : due) {
-            repo.transition(permit.id(), "EXPIRED", null, null, "SYSTEM", "validity period elapsed", now);
-            audit.record("TRAINING_PERMIT_EXPIRED", "Permit", permit.id().toString(),
+            repo.transition(permit.id(), "EXPIRED", null, null, system.userId(), "validity period elapsed", now);
+            audit.recordAs(system, "TRAINING_PERMIT_EXPIRED", "Permit", permit.id().toString(),
                     Map.of("status", "ISSUED", "validTo", permit.validTo().toString()),
                     Map.of("status", "EXPIRED"), "validity period elapsed");
-            events.record("itms.permit.status-changed", permit.id().toString(), Map.of(
+            events.recordAs(system, "itms.permit.status-changed", permit.id().toString(), Map.of(
                     "permitId", permit.id().toString(), "number", permit.number(), "status", "EXPIRED"));
         }
         return due.size();

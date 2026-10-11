@@ -209,7 +209,8 @@ public class JdbcExchangeRepository implements Ports.ExchangeRepository {
                              int maxAttempts) {
         return jdbc.sql("""
                 update exchange_delivery set attempt_count = attempt_count + 1, last_attempt_at = :at,
-                    next_attempt_at = :at + make_interval(secs => least(:max, :base * power(2, attempt_count)))
+                    next_attempt_at = cast(:at as timestamptz)
+                        + make_interval(secs => least(:max, :base * power(2, attempt_count)))
                 where message_id = :id and status = 'PENDING' and next_attempt_at <= :at and attempt_count < :attempts
                 """).param("at", Timestamp.from(at)).param("base", retryBaseSeconds).param("max", retryMaxSeconds)
                 .param("id", messageId).param("attempts", maxAttempts).update();
@@ -222,7 +223,7 @@ public class JdbcExchangeRepository implements Ports.ExchangeRepository {
                 update exchange_delivery set
                     status = case when :accepted then 'ACKNOWLEDGED'
                                   when :permanent or attempt_count >= :attempts then 'FAILED' else 'PENDING' end,
-                    acknowledged_at = case when :accepted then :at else null end,
+                    acknowledged_at = case when :accepted then cast(:at as timestamptz) else null end,
                     last_response = :response, partner_reference = :partnerRef
                 where message_id = :id and status = 'PENDING' returning status
                 """).param("accepted", accepted).param("permanent", permanent).param("attempts", maxAttempts)

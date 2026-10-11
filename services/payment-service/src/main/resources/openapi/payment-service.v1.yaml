@@ -64,6 +64,7 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
 
   /v1/payables/{payableId}:
     get:
@@ -255,6 +256,7 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
 
   /v1/receipts:
     get:
@@ -288,6 +290,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
 
   /v1/receipts/{number}:
     get:
@@ -352,11 +355,13 @@ paths:
                 amountMinor: { type: integer, minimum: 1 }
                 reason: { type: string, minLength: 3, maxLength: 500 }
       responses:
-        '201': { description: Refund request awaiting independent approval }
+        '201': { description: 'Refund request awaiting independent approval', content: { application/json: { schema: { $ref: '#/components/schemas/Refund' } } } }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
-        '401': {description: Authentication required}
+        '401': { $ref: '#/components/responses/Problem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
 
   /v1/payables/{id}/holds:
     post:
@@ -381,10 +386,12 @@ paths:
                 reason: { type: string, minLength: 3, maxLength: 500 }
       responses:
         '204': { description: Payable paused }
+        '422': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
-        '401': {description: Authentication required}
-        '403': {description: Permission denied}
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '400': { $ref: '#/components/responses/Problem' }
 
   /v1/payables/{id}/hold-lifts:
     post:
@@ -409,9 +416,12 @@ paths:
                 reason: { type: string, minLength: 3, maxLength: 500 }
       responses:
         '204': { description: Payable resumed }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
-        '401': {description: Authentication required}
-        '403': {description: Permission denied}
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '400': { $ref: '#/components/responses/Problem' }
 
   /v1/refund-requests/{id}/approvals:
     post:
@@ -434,11 +444,13 @@ paths:
               properties:
                 reason: { type: string, minLength: 3, maxLength: 500 }
       responses:
-        '200': { description: Refund approved within the reviewer's limit }
+        '200': { description: 'Refund approved within the reviewer''s limit', content: { application/json: { schema: { $ref: '#/components/schemas/Refund' } } } }
         '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
-        '401': {description: Authentication required}
+        '401': { $ref: '#/components/responses/Problem' }
+        '400': { $ref: '#/components/responses/Problem' }
 
   /v1/refund-requests/{id}/rejections:
     post:
@@ -461,10 +473,13 @@ paths:
               properties:
                 reason: { type: string, minLength: 3, maxLength: 500 }
       responses:
-        '200': { description: Refund request rejected with reason }
+        '200': { description: 'Refund request rejected with reason', content: { application/json: { schema: { $ref: '#/components/schemas/Refund' } } } }
         '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
-        '401': {description: Authentication required}
+        '401': { $ref: '#/components/responses/Problem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
 
   /v1/settlement-imports:
     post:
@@ -500,10 +515,13 @@ paths:
                       currency: { type: string, pattern: '^[A-Z]{3}$' }
                       amountMinor: { type: integer, minimum: 0 }
       responses:
-        '200': { description: Imported rows with automatic matches and exceptions }
+        '200': { description: 'Imported rows with automatic matches and exceptions', content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/ReconciliationItem' } } } } } } }
         '403': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
-        '401': {description: Authentication required}
+        '401': { $ref: '#/components/responses/Problem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
 
   /v1/reconciliation-exceptions:
     get:
@@ -515,9 +533,11 @@ paths:
       parameters:
         - { name: limit, in: query, schema: { type: integer, default: 100, minimum: 1, maximum: 1000 } }
       responses:
-        '200': { description: Unmatched settlement lines for finance investigation }
+        '200': { description: 'Unmatched settlement lines for finance investigation', content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/ReconciliationItem' } } } } } } }
         '403': { $ref: '#/components/responses/Problem' }
-        '401': {description: Authentication required}
+        '401': { $ref: '#/components/responses/Problem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
 
   /v1/reconciliation-exceptions/{id}/resolutions:
     post:
@@ -541,12 +561,13 @@ paths:
                 paymentId: { type: string, format: uuid }
                 reason: { type: string, minLength: 3, maxLength: 500 }
       responses:
-        '200': { description: Reconciliation item resolved against a confirmed matching payment }
+        '200': { description: 'Reconciliation item resolved against a confirmed matching payment', content: { application/json: { schema: { $ref: '#/components/schemas/ReconciliationItem' } } } }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
-        '401': {description: Authentication required}
+        '401': { $ref: '#/components/responses/Problem' }
+        '400': { $ref: '#/components/responses/Problem' }
 
   /v1/bank-deposits:
     post:
@@ -571,11 +592,13 @@ paths:
                 receiptNumbers: { type: array, minItems: 1, maxItems: 500, uniqueItems: true,
                   items: { type: string, maxLength: 100 } }
       responses:
-        '201': { description: Deposit group created with receipt total }
+        '201': { description: 'Deposit group created with receipt total', content: { application/json: { schema: { $ref: '#/components/schemas/BankDeposit' } } } }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
 
   /v1/bank-statement-imports:
     post:
@@ -612,10 +635,13 @@ paths:
                       currency: { type: string, pattern: '^[A-Z]{3}$' }
                       amountMinor: { type: integer, minimum: 0 }
       responses:
-        '200': { description: Statement lines with exact deposit matches and exceptions }
+        '200': { description: 'Statement lines with exact deposit matches and exceptions', content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/BankStatementLine' } } } } } } }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
 
   /v1/bank-deposit-exceptions:
     get:
@@ -627,9 +653,11 @@ paths:
       parameters:
         - { name: limit, in: query, schema: { type: integer, default: 100, minimum: 1, maximum: 1000 } }
       responses:
-        '200': { description: Unmatched bank statement lines }
+        '200': { description: 'Unmatched bank statement lines', content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/BankStatementLine' } } } } } } }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
 
   /v1/bank-deposit-exceptions/{id}/resolutions:
     post:
@@ -653,12 +681,13 @@ paths:
                 depositId: { type: string, format: uuid }
                 reason: { type: string, minLength: 3, maxLength: 500 }
       responses:
-        '200': { description: Bank statement exception resolved against a matching deposit }
+        '200': { description: 'Bank statement exception resolved against a matching deposit', content: { application/json: { schema: { $ref: '#/components/schemas/BankStatementLine' } } } }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+        '400': { $ref: '#/components/responses/Problem' }
 
   /v1/tills:
     post:
@@ -681,10 +710,13 @@ paths:
                 region: { type: string, maxLength: 40 }
                 openingAmountMinor: { type: integer, minimum: 0 }
       responses:
-        '201': { description: Till opened }
+        '201': { description: 'Till opened', content: { application/json: { schema: { $ref: '#/components/schemas/Till' } } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /v1/tills/{id}/closures:
     post:
       tags: [Finance]
@@ -720,11 +752,13 @@ paths:
                       method: { type: string, enum: [CASH, CARD_TERMINAL, CHEQUE] }
                       actualMinor: { type: integer, minimum: 0 }
       responses:
-        '200': { description: Till closed with expected, actual and difference totals }
+        '200': { description: 'Till closed with expected, actual and difference totals', content: { application/json: { schema: { $ref: '#/components/schemas/Till' } } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
 
 components:
   securitySchemes:
@@ -792,6 +826,89 @@ components:
     Currency:
       type: string
       pattern: '^[A-Z]{3}$'
+    Refund:
+      type: object
+      required: [id, paymentId, receiptNumber, region, currency, amountMinor, status, requestedBy, requestedAt]
+      properties:
+        id: { type: string, format: uuid }
+        paymentId: { type: string, format: uuid }
+        receiptNumber: { type: string }
+        region: { type: string }
+        currency: { type: string }
+        amountMinor: { type: integer }
+        reason: { $ref: '#/components/schemas/NullableString' }
+        status: { type: string, enum: [PENDING, APPROVED, SUBMITTED, REJECTED, FAILED] }
+        requestedBy: { type: string }
+        requestedAt: { type: string, format: date-time }
+        decidedBy: { $ref: '#/components/schemas/NullableString' }
+        decidedAt: { $ref: '#/components/schemas/NullableTime' }
+        remoteRef: { $ref: '#/components/schemas/NullableString' }
+    ReconciliationItem:
+      type: object
+      required: [id, source, externalRef, region, currency, amountMinor, status, receivedAt]
+      properties:
+        id: { type: string, format: uuid }
+        source: { type: string }
+        externalRef: { type: string }
+        paidAt: { $ref: '#/components/schemas/NullableTime' }
+        region: { type: string }
+        currency: { type: string }
+        amountMinor: { type: integer }
+        paymentId: { oneOf: [ { type: string, format: uuid }, { type: 'null' } ] }
+        status: { type: string, enum: [MATCHED, EXCEPTION, RESOLVED] }
+        reason: { $ref: '#/components/schemas/NullableString' }
+        receivedAt: { type: string, format: date-time }
+    BankDeposit:
+      type: object
+      required: [id, depositRef, bank, region, currency, totalMinor, status, createdBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        depositRef: { type: string }
+        bank: { type: string }
+        region: { type: string }
+        currency: { type: string }
+        totalMinor: { type: integer }
+        status: { type: string, enum: [OPEN, MATCHED, EXCEPTION] }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        matchedAt: { $ref: '#/components/schemas/NullableTime' }
+        reason: { $ref: '#/components/schemas/NullableString' }
+    BankStatementLine:
+      type: object
+      required: [id, source, externalRef, bank, region, currency, amountMinor, status, receivedAt]
+      properties:
+        id: { type: string, format: uuid }
+        source: { type: string }
+        externalRef: { type: string }
+        bank: { type: string }
+        region: { type: string }
+        currency: { type: string }
+        amountMinor: { type: integer }
+        depositId: { oneOf: [ { type: string, format: uuid }, { type: 'null' } ] }
+        status: { type: string, enum: [MATCHED, EXCEPTION, RESOLVED] }
+        reason: { $ref: '#/components/schemas/NullableString' }
+        receivedAt: { type: string, format: date-time }
+    Till:
+      type: object
+      required: [id, cashierId, region, openingAmountMinor, openedAt, status, totals]
+      properties:
+        id: { type: string, format: uuid }
+        cashierId: { type: string }
+        region: { type: string }
+        openingAmountMinor: { type: integer }
+        openedAt: { type: string, format: date-time }
+        status: { type: string, enum: [OPEN, CLOSED] }
+        closedAt: { $ref: '#/components/schemas/NullableTime' }
+        totals:
+          type: array
+          items:
+            type: object
+            required: [method, expectedMinor, actualMinor, differenceMinor]
+            properties:
+              method: { type: string, enum: [CASH, CARD_TERMINAL, CHEQUE] }
+              expectedMinor: { type: integer }
+              actualMinor: { type: integer }
+              differenceMinor: { type: integer }
     NullableString:
       oneOf: [ { type: string }, { type: 'null' } ]
     NullableTime:

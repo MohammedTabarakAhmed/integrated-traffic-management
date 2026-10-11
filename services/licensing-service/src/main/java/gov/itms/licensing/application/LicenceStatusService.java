@@ -64,6 +64,9 @@ public class LicenceStatusService implements LicenceService.PaidHandler {
     /** What the holder and partners may see of a licence (DL-059): no conditions, no personal details. */
     public record Status(String licenceNumber, String status, LocalDate expiresOn, LocalDate suspendedUntil,
                          boolean probationary, List<Licence.LicenceClass> classes) {
+        public Status {
+            classes = classes == null ? null : java.util.Collections.unmodifiableList(new java.util.ArrayList<>(classes));
+        }
     }
 
     private final LicenceService licences;

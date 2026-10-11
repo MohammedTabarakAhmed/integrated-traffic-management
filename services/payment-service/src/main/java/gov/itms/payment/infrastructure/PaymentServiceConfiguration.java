@@ -109,7 +109,7 @@ public class PaymentServiceConfiguration {
     @Bean
     FinanceOperations financeOperations(JdbcClient jdbc, CurrentActorProvider actors, AuditRecorder audit,
                                         DomainEventRecorder events, Clock clock, Ports.PaymentGateway gateway) {
-        return new FinanceOperations(jdbc, actors, audit, events, clock, gateway);
+        return new FinanceOperations(new JdbcFinanceRepository(jdbc), actors, audit, events, clock, gateway);
     }
 
     /** Resolves PENDING payments (FN-005); safe on every instance (rows locked, others skip them). */

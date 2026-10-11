@@ -76,5 +76,9 @@ public final class Ports {
 
     public record Proposal(UUID id, String kind, String subject, Map<String, Object> payload, String status,
                            String proposedBy, Instant proposedAt, String reason, String decidedBy,
-                           Instant decidedAt, String decisionReason) { }
+                           Instant decidedAt, String decisionReason) {
+        public Proposal {
+            payload = payload == null ? null : java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(payload));
+        }
+    }
 }

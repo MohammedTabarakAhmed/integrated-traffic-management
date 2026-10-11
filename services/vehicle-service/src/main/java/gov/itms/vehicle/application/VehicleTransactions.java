@@ -422,7 +422,7 @@ public class VehicleTransactions implements PaidHandler {
         content.put("insurer", checkedCode("insurerCode", insurerCode));
         content.put("claimRef", checkedRef("claimRef", claimRef));
         content.put("reason", reason);
-        return issue(v, Records.CertificateKind.INSURANCE_RECOVERY, content, caller.actor().id(), clock.instant());
+        return issue(v, Records.CertificateKind.INSURANCE_RECOVERY, content, caller.actor().id(), null, clock.instant());
     }
 
     @Transactional
@@ -575,6 +575,13 @@ public class VehicleTransactions implements PaidHandler {
     public record FileRecords(List<Records.Ban> bans, List<Records.Approval> approvals,
                               List<Records.Mortgage> mortgages, List<Records.Card> cards,
                               List<Records.Certificate> certificates) {
+        public FileRecords {
+            bans = bans == null ? null : java.util.Collections.unmodifiableList(new java.util.ArrayList<>(bans));
+            approvals = approvals == null ? null : java.util.Collections.unmodifiableList(new java.util.ArrayList<>(approvals));
+            mortgages = mortgages == null ? null : java.util.Collections.unmodifiableList(new java.util.ArrayList<>(mortgages));
+            cards = cards == null ? null : java.util.Collections.unmodifiableList(new java.util.ArrayList<>(cards));
+            certificates = certificates == null ? null : java.util.Collections.unmodifiableList(new java.util.ArrayList<>(certificates));
+        }
     }
 
     @Transactional
@@ -740,7 +747,7 @@ public class VehicleTransactions implements PaidHandler {
             case DEREGISTER -> deregistered(v, r, now, system);
             case CERTIFICATE -> {
                 Records.CertificateKind kind = Records.CertificateKind.valueOf(r.value("certificate"));
-                Records.Certificate c = issue(v, kind, content(v, kind), system.userId(), now);
+                Records.Certificate c = issue(v, kind, content(v, kind), system.userId(), system, now);
                 detail.put("certificate", c.number());
                 yield "CERTIFICATE_ISSUED";
             }
@@ -800,7 +807,7 @@ public class VehicleTransactions implements PaidHandler {
         if ("EXPORT".equals(r.value("reason"))) {
             Map<String, Object> content = new LinkedHashMap<>(VehicleService.snapshot(v));
             content.put("destinationCountry", r.value("destinationCountry"));
-            issue(v, Records.CertificateKind.EXPORT, content, system.userId(), now);
+            issue(v, Records.CertificateKind.EXPORT, content, system.userId(), system, now);
         }
         v.deregistered();
         repo.updateVehicle(v);
@@ -822,14 +829,19 @@ public class VehicleTransactions implements PaidHandler {
         return content;
     }
 
+    /** {@code as} is the system actor when a payment completes the request; null for a caller's own request. */
     private Records.Certificate issue(Vehicle v, Records.CertificateKind kind, Map<String, Object> content,
-                                      String by, Instant now) {
+                                      String by, CurrentActor as, Instant now) {
         Records.Certificate c = new Records.Certificate(UUID.randomUUID(),
                 records.nextCertificateNumber(LocalDate.ofInstant(now, clock.getZone()).getYear()), v.id(), kind,
                 content, by, now);
         records.insertCertificate(c);
-        audit.record("VEHICLE_CERTIFICATE_ISSUED", VehicleService.ENTITY, v.vin(), null,
-                Map.of("number", c.number(), "kind", kind.name()), null);
+        Map<String, Object> issued = Map.of("number", c.number(), "kind", kind.name());
+        if (as == null) {
+            audit.record("VEHICLE_CERTIFICATE_ISSUED", VehicleService.ENTITY, v.vin(), null, issued, null);
+        } else {
+            audit.recordAs(as, "VEHICLE_CERTIFICATE_ISSUED", VehicleService.ENTITY, v.vin(), null, issued, null);
+        }
         return c;
     }
 

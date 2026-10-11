@@ -231,6 +231,59 @@ class PaymentServiceTest {
                 .isEqualTo("PAYABLE_EXISTS");
     }
 
+    @Test
+    @Tag("VF-052")
+    @DisplayName("VF-052: a paused payable cannot be put in a basket or paid; lifting the hold reopens collection")
+    void payableHolds() {
+        Payable fine = payable("VF-H1", 900);
+        Basket early = service.basket(List.of(fine.id()), null, CUSTOMER);
+        Caller objections = caller("svc-objection", Set.of("NORTH"), PaymentService.PAYABLE_HOLD);
+        assertThatThrownBy(() -> service.placePayableHold(fine.id(), "OBJ-1", "under objection", CUSTOMER))
+                .isInstanceOf(DomainException.class).extracting("code").isEqualTo("SCOPE_EXCEEDED");
+        assertThatThrownBy(() -> service.placePayableHold(fine.id(), "obj 1", "under objection", objections))
+                .isInstanceOf(DomainException.class).extracting("code").isEqualTo("PAYABLE_HOLD_INVALID");
+        assertThatThrownBy(() -> service.placePayableHold(UUID.randomUUID(), "OBJ-1", "x", objections))
+                .isInstanceOf(DomainException.class);
+        service.placePayableHold(fine.id(), "OBJ-1", "under objection", objections);
+        assertThat(audit).contains("PAYABLE_PAUSED " + fine.id());
+
+        assertThatThrownBy(() -> service.basket(List.of(fine.id()), null, CUSTOMER))
+                .isInstanceOf(DomainException.class).extracting("code").isEqualTo("PAYABLE_PAUSED");
+        assertThatThrownBy(() -> service.pay(early.id(), Payment.Method.CASH, null, "TILL-1", CASHIER))
+                .isInstanceOf(DomainException.class).extracting("code").isEqualTo("PAYABLE_PAUSED");
+
+        assertThatThrownBy(() -> service.liftPayableHold(fine.id(), "OBJ-1", " ", objections))
+                .isInstanceOf(DomainException.class).extracting("code").isEqualTo("REASON_INVALID");
+        service.liftPayableHold(fine.id(), "OBJ-1", "objection rejected", objections);
+        assertThatThrownBy(() -> service.liftPayableHold(fine.id(), "OBJ-1", "again", objections))
+                .isInstanceOf(DomainException.class).extracting("code").isEqualTo("PAYABLE_HOLD_NOT_ACTIVE");
+        assertThat(service.pay(early.id(), Payment.Method.CASH, null, "TILL-1", CASHIER).receipt()).isNotNull();
+        assertThatThrownBy(() -> service.placePayableHold(fine.id(), "OBJ-2", "too late", objections))
+                .isInstanceOf(DomainException.class).extracting("code").isEqualTo("PAYABLE_NOT_OPEN");
+    }
+
+    @Test
+    @Tag("FN-020")
+    @Tag("FN-013")
+    @DisplayName("FN-020, FN-013: counter payments need an open till; each receipt posts to the ledger and the till")
+    void tillAndLedger() {
+        Payable fine = payable("VF-T1", 400);
+        Basket b = service.basket(List.of(fine.id()), null, CASHIER);
+        repo.tillOpen = false;
+        assertThatThrownBy(() -> service.pay(b.id(), Payment.Method.CASH, null, "TILL-1", CASHIER))
+                .isInstanceOf(DomainException.class).extracting("code").isEqualTo("TILL_NOT_OPEN");
+        repo.tillOpen = true;
+        Receipt r = service.pay(b.id(), Payment.Method.CASH, null, "TILL-1", CASHIER).receipt();
+        assertThat(repo.ledger).containsExactly(r.number());
+        assertThat(repo.tillPayments).containsExactly(r.number());
+
+        Payment online = startedOnline(300);
+        Receipt viaGateway = service.callback(online.id(), "gw-t", "SUCCESS", 300, "XTS", null, GOOD_SIGNATURE,
+                GATEWAY).receipt();
+        assertThat(repo.ledger).containsExactly(r.number(), viaGateway.number());
+        assertThat(repo.tillPayments).as("online receipts are not till takings").containsExactly(r.number());
+    }
+
     private static final class MutableClock extends Clock {
         private Instant now;
 
@@ -376,6 +429,42 @@ class PaymentServiceTest {
         @Override
         public List<Receipt> searchReceipts(ReceiptQuery query) {
             return List.copyOf(receipts.values());
+        }
+
+        final java.util.Set<UUID> held = new java.util.HashSet<>();
+        final List<String> ledger = new ArrayList<>();
+        final List<String> tillPayments = new ArrayList<>();
+        boolean tillOpen = true;
+
+        @Override
+        public boolean payableHeld(UUID id) {
+            return held.contains(id);
+        }
+
+        @Override
+        public void placePayableHold(UUID id, String sourceRef, String reason, String actor, Instant at) {
+            held.add(id);
+        }
+
+        @Override
+        public boolean liftPayableHold(UUID id, String sourceRef, String reason, String actor, Instant at) {
+            return held.remove(id);
+        }
+
+        @Override
+        public void insertLedgerPostings(Receipt receipt) {
+            ledger.add(receipt.number());
+        }
+
+        @Override
+        public Optional<UUID> openTillForUpdate(String cashierId, String region) {
+            return tillOpen ? Optional.of(UUID.nameUUIDFromBytes((cashierId + region).getBytes(
+                    java.nio.charset.StandardCharsets.UTF_8))) : Optional.empty();
+        }
+
+        @Override
+        public void recordTillPayment(Payment payment, Receipt receipt) {
+            tillPayments.add(receipt.number());
         }
     }
 }

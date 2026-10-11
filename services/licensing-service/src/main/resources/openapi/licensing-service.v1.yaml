@@ -71,6 +71,7 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
     get:
       tags: [Licence classes]
       operationId: listLicenceClassVersions
@@ -95,6 +96,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
 
   /v1/licence-class-versions/{versionId}:
     get:
@@ -201,6 +203,7 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
 
   /v1/licence-classes/{classCode}:
     get:
@@ -284,6 +287,7 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
     get:
       tags: [Licence numbers]
       operationId: listLicenceNumberRanges
@@ -307,6 +311,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
 
   /v1/licence-number-ranges/{rangeId}:
     get:
@@ -443,6 +448,7 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
 
   /v1/examination-transfers:
     post:
@@ -474,6 +480,7 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
     get:
       tags: [Licences]
       operationId: listExaminationTransfers
@@ -494,6 +501,7 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
 
   /v1/examination-transfers/{transferId}:
     get:
@@ -697,6 +705,7 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
 
   /v1/licences/{licenceId}/conditions:
     post:
@@ -925,6 +934,7 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
     get:
       tags: [Licence transactions]
       operationId: listEyeTests
@@ -945,6 +955,7 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
 
   /v1/licences/{licenceId}/auto-renewal:
     post:
@@ -1192,148 +1203,319 @@ paths:
   /v1/exchange-country-rules:
     post:
       operationId: submitExchangeCountryRule
-      summary: Propose a foreign-licence exchange rule for a country (maker)
+      summary: Propose a foreign-licence exchange rule for a country (maker; DL-054)
       tags: [Foreign licences]
       x-itms-permission: licensing.exchange-country.submit
       x-itms-scope: national
       parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
-      responses: { '201': { description: Rule submitted for approval }, '401': { description: Authentication required }, '403': { description: Permission denied } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [countryCode, mode, reason]
+              properties:
+                countryCode: { $ref: '#/components/schemas/CountryCode' }
+                mode: { type: string, enum: [DIRECT_EXCHANGE, TEST_REQUIRED] }
+                classMap:
+                  type: object
+                  maxProperties: 30
+                  propertyNames: { pattern: '^[A-Z][A-Z0-9_]{0,39}$' }
+                  additionalProperties: { $ref: '#/components/schemas/Code' }
+                reason: { type: string, minLength: 3, maxLength: 500 }
+      responses:
+        '201': { description: Rule submitted for approval, content: { application/json: { schema: { $ref: '#/components/schemas/CountryRule' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
     get:
       operationId: listExchangeCountryRules
-      summary: Foreign-licence exchange rules per country
+      summary: Foreign-licence exchange rules per country (DL-054)
       tags: [Foreign licences]
       x-itms-permission: licensing.licence.read
       x-itms-scope: national
-      responses: { '200': { description: Exchange country rules }, '401': { description: Authentication required }, '403': { description: Permission denied } }
+      parameters:
+        - { name: countryCode, in: query, required: false, schema: { $ref: '#/components/schemas/CountryCode' } }
+      responses:
+        '200': { description: Exchange country rules, content: { application/json: { schema: { $ref: '#/components/schemas/CountryRuleCollection' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
   /v1/exchange-country-rules/{ruleId}/approvals:
     post:
       operationId: approveExchangeCountryRule
-      summary: Approve a proposed exchange rule (checker, never the maker)
+      summary: Approve a proposed exchange rule (checker, never the maker; CC-002)
       tags: [Foreign licences]
       x-itms-permission: licensing.exchange-country.approve
       x-itms-scope: national
       parameters:
-        - in: path
-          name: ruleId
-          required: true
-          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/RuleId'
         - $ref: '#/components/parameters/IdempotencyKey'
-      responses: { '200': { description: Rule approved }, '401': { description: Authentication required }, '403': { description: Permission denied } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DecisionRequest' }
+      responses:
+        '200': { description: Rule approved; the earlier rule of the country is superseded, content: { application/json: { schema: { $ref: '#/components/schemas/CountryRule' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /v1/exchange-country-rules/{ruleId}/rejections:
     post:
       operationId: rejectExchangeCountryRule
-      summary: Reject a proposed exchange rule (checker)
+      summary: Reject a proposed exchange rule (checker), or withdraw it (its maker)
       tags: [Foreign licences]
       x-itms-permission: licensing.exchange-country.approve
       x-itms-scope: national
       parameters:
-        - in: path
-          name: ruleId
-          required: true
-          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/RuleId'
         - $ref: '#/components/parameters/IdempotencyKey'
-      responses: { '200': { description: Rule rejected }, '401': { description: Authentication required }, '403': { description: Permission denied } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RejectRequest' }
+      responses:
+        '200': { description: Rule rejected or withdrawn, content: { application/json: { schema: { $ref: '#/components/schemas/CountryRule' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /v1/foreign-licences:
     post:
       operationId: recordForeignLicence
-      summary: Record a foreign licence on a traffic file
+      summary: Record a foreign licence on a traffic file (DL-063)
       tags: [Foreign licences]
       x-itms-permission: licensing.foreign.record
-      x-itms-scope: [region]
+      x-itms-scope: national
       parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
-      responses: { '201': { description: Foreign licence recorded }, '401': { description: Authentication required }, '403': { description: Permission denied } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [trafficFileNumber, countryCode, foreignNumber, classes, expiresOn, language, documentId]
+              properties:
+                trafficFileNumber: { $ref: '#/components/schemas/Ref' }
+                countryCode: { $ref: '#/components/schemas/CountryCode' }
+                foreignNumber: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_./:-]{0,59}$' }
+                classes: { type: array, minItems: 1, maxItems: 30, uniqueItems: true, items: { $ref: '#/components/schemas/Code' } }
+                issuedOn: { type: [string, 'null'], format: date }
+                expiresOn: { type: string, format: date }
+                language: { type: string, pattern: '^[a-z]{2,3}$' }
+                documentId: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_./:-]{0,59}$' }
+                translationDocumentId: { type: [string, 'null'], pattern: '^[A-Za-z0-9][A-Za-z0-9_./:-]{0,59}$' }
+      responses:
+        '201': { description: Foreign licence recorded, content: { application/json: { schema: { $ref: '#/components/schemas/ForeignLicence' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
     get:
       operationId: listForeignLicences
-      summary: Foreign licences recorded on a traffic file
+      summary: Foreign licences of a traffic file, or the master file by country and expiry (DL-063)
       tags: [Foreign licences]
       x-itms-permission: licensing.licence.read
-      x-itms-scope: [own, region]
-      responses: { '200': { description: Foreign licence records }, '401': { description: Authentication required }, '403': { description: Permission denied } }
+      x-itms-scope: national
+      parameters:
+        - { name: trafficFileNumber, in: query, required: false, schema: { $ref: '#/components/schemas/Ref' } }
+        - { name: countryCode, in: query, required: false, schema: { $ref: '#/components/schemas/CountryCode' } }
+        - { name: expiringBefore, in: query, required: false, schema: { type: string, format: date } }
+        - { name: offset, in: query, required: false, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: limit, in: query, required: false, schema: { type: integer, default: 100 } }
+      responses:
+        '200': { description: Foreign licence records, content: { application/json: { schema: { $ref: '#/components/schemas/ForeignLicenceCollection' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /v1/foreign-licences/{foreignLicenceId}/exchanges:
     post:
       operationId: requestForeignLicenceExchange
-      summary: Request exchange of a foreign licence for a local one
+      summary: Exchange a valid foreign licence for a local one; issued on payment (DL-054)
       tags: [Foreign licences]
       x-itms-permission: licensing.licence.exchange
-      x-itms-scope: [own, region]
+      x-itms-scope: [region]
       parameters:
-        - in: path
-          name: foreignLicenceId
-          required: true
-          schema: { type: string, format: uuid }
+        - { name: foreignLicenceId, in: path, required: true, schema: { type: string, format: uuid } }
         - $ref: '#/components/parameters/IdempotencyKey'
-      responses: { '201': { description: Licence exchange requested }, '401': { description: Authentication required }, '403': { description: Permission denied } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [region, customerCategory]
+              properties:
+                region: { $ref: '#/components/schemas/Region' }
+                customerCategory: { $ref: '#/components/schemas/CustomerCategory' }
+                residencyExpiresOn: { type: [string, 'null'], format: date }
+                delivery: { oneOf: [ { $ref: '#/components/schemas/Delivery' }, { type: 'null' } ] }
+                address: { type: [string, 'null'], minLength: 5, maxLength: 300 }
+      responses:
+        '201': { description: Exchange awaiting payment, content: { application/json: { schema: { $ref: '#/components/schemas/LicenceRequest' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
   /v1/temporary-permits:
     post:
       operationId: requestTemporaryPermit
-      summary: Issue a temporary driving permit
+      summary: Request a temporary driving permit for a visitor or while the card is pending (DL-055)
       tags: [Temporary permits]
       x-itms-permission: licensing.permit.issue
-      x-itms-scope: [own, region]
+      x-itms-scope: [region]
       parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
-      responses: { '201': { description: Temporary permit requested }, '401': { description: Authentication required }, '403': { description: Permission denied } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [kind, trafficFileNumber, region]
+              properties:
+                kind: { type: string, enum: [VISITOR, CARD_PENDING] }
+                trafficFileNumber: { $ref: '#/components/schemas/Ref' }
+                region: { $ref: '#/components/schemas/Region' }
+                licenceId: { type: [string, 'null'], format: uuid }
+                foreignLicenceId: { type: [string, 'null'], format: uuid }
+      responses:
+        '201': { description: Permit request awaiting payment, content: { application/json: { schema: { $ref: '#/components/schemas/LicenceRequest' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
     get:
       operationId: listTemporaryPermits
-      summary: Temporary driving permits of a traffic file
+      summary: Temporary permits of a traffic file, or the master file by expiry (DL-063)
       tags: [Temporary permits]
       x-itms-permission: licensing.licence.read
-      x-itms-scope: [own, region]
-      responses: { '200': { description: Temporary permits }, '401': { description: Authentication required }, '403': { description: Permission denied } }
+      x-itms-scope: national
+      parameters:
+        - { name: trafficFileNumber, in: query, required: false, schema: { $ref: '#/components/schemas/Ref' } }
+        - { name: expiringBefore, in: query, required: false, schema: { type: string, format: date } }
+        - { name: offset, in: query, required: false, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: limit, in: query, required: false, schema: { type: integer, default: 100 } }
+      responses:
+        '200': { description: Temporary permits, content: { application/json: { schema: { $ref: '#/components/schemas/TemporaryPermitCollection' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /v1/temporary-permits/{permitId}/cancellation:
     post:
       operationId: cancelTemporaryPermit
-      summary: Cancel a temporary driving permit
+      summary: Cancel a temporary driving permit with a reason (DL-055)
       tags: [Temporary permits]
       x-itms-permission: licensing.permit.issue
-      x-itms-scope: [own, region]
+      x-itms-scope: [region]
       parameters:
-        - in: path
-          name: permitId
-          required: true
-          schema: { type: string, format: uuid }
+        - { name: permitId, in: path, required: true, schema: { type: string, format: uuid } }
         - $ref: '#/components/parameters/IdempotencyKey'
-      responses: { '200': { description: Temporary permit cancelled }, '401': { description: Authentication required }, '403': { description: Permission denied } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RejectRequest' }
+      responses:
+        '200': { description: Temporary permit cancelled, content: { application/json: { schema: { $ref: '#/components/schemas/TemporaryPermit' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /v1/licences/{licenceId}/international-permits:
     post:
       operationId: requestInternationalPermit
-      summary: Request an international driving permit for a licence
+      summary: Request an international driving permit against a valid licence (DL-056)
       tags: [International permits]
       x-itms-permission: licensing.idp.issue
-      x-itms-scope: [own, region]
+      x-itms-scope: [region]
       parameters:
-        - in: path
-          name: licenceId
-          required: true
-          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/LicenceId'
         - $ref: '#/components/parameters/IdempotencyKey'
-      responses: { '201': { description: International permit requested }, '401': { description: Authentication required }, '403': { description: Permission denied } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                printer: { oneOf: [ { $ref: '#/components/schemas/Code' }, { type: 'null' } ] }
+      responses:
+        '201': { description: Permit request awaiting payment, content: { application/json: { schema: { $ref: '#/components/schemas/LicenceRequest' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
     get:
       operationId: listInternationalPermits
-      summary: International driving permits of a licence
+      summary: International driving permits of a licence (DL-056)
       tags: [International permits]
       x-itms-permission: licensing.licence.read
-      x-itms-scope: [own, region]
+      x-itms-scope: [region]
       parameters:
-        - in: path
-          name: licenceId
-          required: true
-          schema: { type: string, format: uuid }
-      responses: { '200': { description: International permits }, '401': { description: Authentication required }, '403': { description: Permission denied } }
+        - $ref: '#/components/parameters/LicenceId'
+      responses:
+        '200': { description: International permits, content: { application/json: { schema: { $ref: '#/components/schemas/InternationalPermitCollection' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
   /v1/international-permits/{permitId}/printed:
     post:
       operationId: recordInternationalPermitPrint
-      summary: Record that an international permit was printed
+      summary: The centre or approved partner reports the permit printed (DL-056)
       tags: [International permits]
       x-itms-permission: licensing.idp.print
-      x-itms-scope: [region]
+      x-itms-scope: national
       parameters:
-        - in: path
-          name: permitId
-          required: true
-          schema: { type: string, format: uuid }
+        - { name: permitId, in: path, required: true, schema: { type: string, format: uuid } }
         - $ref: '#/components/parameters/IdempotencyKey'
-      responses: { '200': { description: Print recorded }, '401': { description: Authentication required }, '403': { description: Permission denied } }
-
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [printer]
+              properties:
+                printer: { $ref: '#/components/schemas/Code' }
+      responses:
+        '200': { description: Print recorded, content: { application/json: { schema: { $ref: '#/components/schemas/InternationalPermit' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
 components:
   securitySchemes:
     bearerAuth:
@@ -1364,6 +1546,11 @@ components:
       schema: { type: string, format: uuid }
     TransferId:
       name: transferId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    RuleId:
+      name: ruleId
       in: path
       required: true
       schema: { type: string, format: uuid }
@@ -1663,7 +1850,7 @@ components:
         reason: { type: string, minLength: 3, maxLength: 500 }
     RequestKind:
       type: string
-      enum: [ISSUE, RENEWAL, REPLACEMENT, CHANGE, NOC]
+      enum: [ISSUE, RENEWAL, REPLACEMENT, CHANGE, NOC, EXCHANGE, TEMP_PERMIT, IDP]
     LicenceRequest:
       type: object
       additionalProperties: false
@@ -1929,6 +2116,88 @@ components:
         validUntil: { type: string, format: date }
         valid: { type: boolean, description: Genuine and valid today }
         licenceStatus: { type: string }
+    CountryCode:
+      type: string
+      pattern: '^[A-Z]{2,3}$'
+    CountryRule:
+      type: object
+      required: [id, countryCode, mode, classMap, status, submittedBy, submittedAt]
+      properties:
+        id: { type: string, format: uuid }
+        countryCode: { type: string }
+        mode: { type: string, enum: [DIRECT_EXCHANGE, TEST_REQUIRED] }
+        classMap: { type: object, additionalProperties: { type: string } }
+        status: { type: string, enum: [PENDING, APPROVED, REJECTED, SUPERSEDED] }
+        submittedBy: { type: string }
+        submittedAt: { type: string, format: date-time }
+        decidedBy: { type: [string, 'null'] }
+        decidedAt: { type: [string, 'null'], format: date-time }
+    CountryRuleCollection:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/CountryRule' } }
+    ForeignLicence:
+      type: object
+      required: [id, trafficFileNumber, countryCode, foreignNumber, classes, expiresOn, language, translated, status,
+                 recordedAt]
+      properties:
+        id: { type: string, format: uuid }
+        trafficFileNumber: { type: string }
+        countryCode: { type: string }
+        foreignNumber: { type: string }
+        classes: { type: array, items: { type: string } }
+        issuedOn: { type: [string, 'null'], format: date }
+        expiresOn: { type: string, format: date }
+        language: { type: string }
+        translated: { type: boolean }
+        status: { type: string, enum: [RECORDED, EXCHANGED, TEST_REQUIRED] }
+        licenceId: { type: [string, 'null'], format: uuid }
+        recordedAt: { type: string, format: date-time }
+    ForeignLicenceCollection:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/ForeignLicence' } }
+    TemporaryPermit:
+      type: object
+      required: [id, permitNumber, kind, trafficFileNumber, region, classes, validFrom, validUntil, status, issuedAt]
+      properties:
+        id: { type: string, format: uuid }
+        permitNumber: { type: string }
+        kind: { type: string, enum: [VISITOR, CARD_PENDING] }
+        trafficFileNumber: { type: string }
+        region: { type: string }
+        licenceId: { type: [string, 'null'], format: uuid }
+        foreignLicenceId: { type: [string, 'null'], format: uuid }
+        classes: { type: array, items: { type: string } }
+        validFrom: { type: string, format: date }
+        validUntil: { type: string, format: date }
+        status: { type: string, enum: [ACTIVE, EXPIRED, CANCELLED] }
+        issuedAt: { type: string, format: date-time }
+    TemporaryPermitCollection:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/TemporaryPermit' } }
+    InternationalPermit:
+      type: object
+      required: [id, permitNumber, licenceId, issuedOn, validUntil, printer, status, issuedAt]
+      properties:
+        id: { type: string, format: uuid }
+        permitNumber: { type: string }
+        licenceId: { type: string, format: uuid }
+        issuedOn: { type: string, format: date }
+        validUntil: { type: string, format: date }
+        printer: { type: string }
+        status: { type: string, enum: [ISSUED, PRINTED, CANCELLED] }
+        printedAt: { type: [string, 'null'], format: date-time }
+        issuedAt: { type: string, format: date-time }
+    InternationalPermitCollection:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/InternationalPermit' } }
     Problem:
       type: object
       required: [status, code]

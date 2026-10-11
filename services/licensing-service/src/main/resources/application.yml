@@ -57,6 +57,9 @@ itms:
       "[REPLACEMENT]": LIC_REPLACEMENT
       "[CHANGE]": LIC_CHANGE
       "[NOC]": LIC_NOC
+      "[EXCHANGE]": LIC_EXCHANGE
+      "[TEMP_PERMIT]": LIC_TEMP_PERMIT
+      "[IDP]": LIC_IDP
     condition-codes: ${ITMS_LICENSING_CONDITION_CODES:CORRECTIVE_LENSES,HEARING_AID,ADAPTED_VEHICLE}
     # Renewal (DL-051; BRD default window 90 days). Eye test validity and the auto-renewal notice period are interim
     # answers (Q-077).

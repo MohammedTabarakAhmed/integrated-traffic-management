@@ -106,13 +106,18 @@ public class LicensingServiceConfiguration {
 
     /**
      * {@code itms.licensing.foreign.*}: accepted languages (DL-054), fixed permit validities (DL-055), international
-     * permit validity and approved printers (DL-056); interim answers in Q-079.
+     * permit validity and approved printers (DL-056); interim answers in Q-080.
      */
     @ConfigurationProperties("itms.licensing.foreign")
     public record ForeignProperties(List<String> acceptedLanguages, @DefaultValue("30") int visitorPermitDays,
                                     @DefaultValue("30") int cardPendingPermitDays,
                                     @DefaultValue("12") int idpValidityMonths, List<String> idpPrinters,
                                     @DefaultValue("false") boolean exchangeProbation) {
+
+        public ForeignProperties {
+            acceptedLanguages = acceptedLanguages == null ? List.of() : List.copyOf(acceptedLanguages);
+            idpPrinters = idpPrinters == null ? List.of() : List.copyOf(idpPrinters);
+        }
 
         ForeignService.ForeignRules rules() {
             return new ForeignService.ForeignRules(acceptedLanguages == null ? Set.of() : Set.copyOf(acceptedLanguages),

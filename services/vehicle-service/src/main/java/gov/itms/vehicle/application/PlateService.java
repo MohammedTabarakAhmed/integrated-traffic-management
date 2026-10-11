@@ -264,6 +264,10 @@ public class PlateService implements PaidHandler {
     }
 
     public record AuctionView(Plates.Auction auction, List<Plates.Lot> lots, Map<UUID, Long> highestBids) {
+        public AuctionView {
+            lots = lots == null ? null : java.util.Collections.unmodifiableList(new java.util.ArrayList<>(lots));
+            highestBids = highestBids == null ? null : java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(highestBids));
+        }
     }
 
     @Transactional
@@ -377,6 +381,9 @@ public class PlateService implements PaidHandler {
     }
 
     public record OrderView(Plates.Order order, List<Plates.OrderItem> items) {
+        public OrderView {
+            items = items == null ? null : java.util.Collections.unmodifiableList(new java.util.ArrayList<>(items));
+        }
     }
 
     @Transactional

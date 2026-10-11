@@ -11,7 +11,7 @@ paths:
       security: [{bearerAuth: []}]
       parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Type'}}}}
-      responses: {'200': {description: Type saved}, '400': {$ref: '#/components/responses/Problem'}, '401': {description: Authentication required}, '403': {description: Permission denied}}
+      responses: {'200': {description: Type saved, content: {application/json: {schema: {$ref: '#/components/schemas/TypeView'}}}}, '400': {$ref: '#/components/responses/Problem'}, '401': { $ref: '#/components/responses/Problem' }, '403': { $ref: '#/components/responses/Problem' }, '404': {$ref: '#/components/responses/Problem'}, '409': {$ref: '#/components/responses/Problem'}, '422': {$ref: '#/components/responses/Problem'}}
   /v1/permits:
     post:
       operationId: applyForPermit
@@ -22,7 +22,7 @@ paths:
       security: [{bearerAuth: []}]
       parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Application'}}}}
-      responses: {'201': {description: Application created}, '400': {$ref: '#/components/responses/Problem'}, '401': {description: Authentication required}, '403': {description: Permission denied}}
+      responses: {'201': {description: Application created, content: {application/json: {schema: {$ref: '#/components/schemas/PermitView'}}}}, '400': {$ref: '#/components/responses/Problem'}, '401': { $ref: '#/components/responses/Problem' }, '403': { $ref: '#/components/responses/Problem' }, '404': {$ref: '#/components/responses/Problem'}, '409': {$ref: '#/components/responses/Problem'}, '422': {$ref: '#/components/responses/Problem'}}
   /v1/permits/{id}/tests:
     post:
       operationId: bookPermitTest
@@ -33,7 +33,7 @@ paths:
       security: [{bearerAuth: []}]
       parameters: [{$ref: '#/components/parameters/PermitId'}, {$ref: '#/components/parameters/IdempotencyKey'}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/TestBooking'}}}}
-      responses: {'201': {description: Test booked}, '400': {$ref: '#/components/responses/Problem'}, '401': {description: Authentication required}, '403': {description: Permission denied}}
+      responses: {'201': {description: Test booked, content: {application/json: {schema: {$ref: '#/components/schemas/TestView'}}}}, '400': {$ref: '#/components/responses/Problem'}, '401': { $ref: '#/components/responses/Problem' }, '403': { $ref: '#/components/responses/Problem' }, '404': {$ref: '#/components/responses/Problem'}, '409': {$ref: '#/components/responses/Problem'}, '422': {$ref: '#/components/responses/Problem'}}
   /v1/permits/{id}/test-results:
     post:
       operationId: recordPermitTestResult
@@ -44,7 +44,7 @@ paths:
       security: [{bearerAuth: []}]
       parameters: [{$ref: '#/components/parameters/PermitId'}, {$ref: '#/components/parameters/IdempotencyKey'}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/TestResult'}}}}
-      responses: {'200': {description: Test result recorded}, '400': {$ref: '#/components/responses/Problem'}, '401': {description: Authentication required}, '403': {description: Permission denied}}
+      responses: {'200': {description: Test result recorded, content: {application/json: {schema: {$ref: '#/components/schemas/PermitView'}}}}, '400': {$ref: '#/components/responses/Problem'}, '401': { $ref: '#/components/responses/Problem' }, '403': { $ref: '#/components/responses/Problem' }, '404': {$ref: '#/components/responses/Problem'}, '409': {$ref: '#/components/responses/Problem'}, '422': {$ref: '#/components/responses/Problem'}}
   /v1/permits/{id}/transitions:
     post:
       operationId: transitionPermit
@@ -55,7 +55,7 @@ paths:
       security: [{bearerAuth: []}]
       parameters: [{$ref: '#/components/parameters/PermitId'}, {$ref: '#/components/parameters/IdempotencyKey'}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Transition'}}}}
-      responses: {'200': {description: Permit transition applied}, '400': {$ref: '#/components/responses/Problem'}, '401': {description: Authentication required}, '403': {description: Permission denied}}
+      responses: {'200': {description: Permit transition applied, content: {application/json: {schema: {$ref: '#/components/schemas/PermitView'}}}}, '400': {$ref: '#/components/responses/Problem'}, '401': { $ref: '#/components/responses/Problem' }, '403': { $ref: '#/components/responses/Problem' }, '404': {$ref: '#/components/responses/Problem'}, '409': {$ref: '#/components/responses/Problem'}, '422': {$ref: '#/components/responses/Problem'}}
 components:
   securitySchemes: {bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}}
   parameters:
@@ -64,6 +64,47 @@ components:
   responses:
     Problem: {description: Invalid request, content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
   schemas:
+    TypeView:
+      type: object
+      required: [code, category, minimumDrivingYears, minimumAge, cleanRecordDays, medicalFitRequired, testRequired, validityDays, renewalWindowDays, feeMinor, status]
+      properties:
+        code: {type: string}
+        category: {type: string}
+        licenceClass: {type: [string, 'null']}
+        minimumDrivingYears: {type: integer}
+        minimumAge: {type: integer}
+        cleanRecordDays: {type: integer}
+        medicalFitRequired: {type: boolean}
+        testRequired: {type: boolean}
+        validityDays: {type: integer}
+        renewalWindowDays: {type: integer}
+        feeMinor: {type: integer}
+        status: {type: string}
+    PermitView:
+      type: object
+      required: [id, number, typeCode, trafficFileNumber, status, appliedAt]
+      properties:
+        id: {type: string, format: uuid}
+        number: {type: string}
+        typeCode: {type: string}
+        trafficFileNumber: {type: string}
+        schoolId: {type: [string, 'null']}
+        vehiclePlate: {type: [string, 'null']}
+        status: {type: string, enum: [APPLIED, TESTED, APPROVED, ISSUED, SUSPENDED, CANCELLED, EXPIRED]}
+        appliedAt: {type: string, format: date-time}
+        validFrom: {type: [string, 'null'], format: date-time}
+        validTo: {type: [string, 'null'], format: date-time}
+    TestView:
+      type: object
+      required: [id, permitId, committee, scheduledAt, result]
+      properties:
+        id: {type: string, format: uuid}
+        permitId: {type: string, format: uuid}
+        committee: {type: string}
+        examiner: {type: [string, 'null']}
+        scheduledAt: {type: string, format: date-time}
+        result: {type: string}
+        reason: {type: [string, 'null']}
     Type:
       type: object
       additionalProperties: false

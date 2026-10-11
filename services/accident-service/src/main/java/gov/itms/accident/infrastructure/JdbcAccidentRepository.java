@@ -33,9 +33,9 @@ public class JdbcAccidentRepository implements Ports.AccidentRepository {
                         + "status,origin,recorded_by,recorded_at) values (:id,:number,:region,:occurred,:location,"
                         + ":road,:weather,:status,:origin,:actor,:at)")
                 .param("id", id).param("number", number).param("region", report.region())
-                .param("occurred", report.occurredAt()).param("location", report.location())
+                .param("occurred", ts(report.occurredAt())).param("location", report.location())
                 .param("road", report.roadCondition()).param("weather", report.weather()).param("status", status)
-                .param("origin", report.origin().name()).param("actor", actorId).param("at", at).update();
+                .param("origin", report.origin().name()).param("actor", actorId).param("at", ts(at)).update();
         int index = 0;
         for (AccidentService.PartyInput p : report.parties()) {
             jdbc.sql("insert into accident_party (accident_id,party_no,traffic_file_number,vehicle_plate,role,"
@@ -54,7 +54,7 @@ public class JdbcAccidentRepository implements Ports.AccidentRepository {
         if ("FAULT_DECIDED".equals(status)) {
             jdbc.sql("insert into accident_decision(accident_id,decision_type,reason,decided_by,decided_at) "
                             + "values (:id,'FAULT','All listed parties agreed to the fault shares',:actor,:at)")
-                    .param("id", id).param("actor", actorId).param("at", at).update();
+                    .param("id", id).param("actor", actorId).param("at", ts(at)).update();
         }
     }
 
@@ -72,7 +72,7 @@ public class JdbcAccidentRepository implements Ports.AccidentRepository {
                 .param("share", share).param("id", id).param("party", partyNo).update());
         jdbc.sql("insert into accident_decision(accident_id,decision_type,reason,decided_by,decided_at) "
                         + "values (:id,'FAULT',:reason,:actor,:at)")
-                .param("id", id).param("reason", reason).param("actor", actorId).param("at", decidedAt).update();
+                .param("id", id).param("reason", reason).param("actor", actorId).param("at", ts(decidedAt)).update();
     }
 
     @Override
@@ -87,7 +87,7 @@ public class JdbcAccidentRepository implements Ports.AccidentRepository {
                         + "select :id,:number,a.id,:plate,:region,:at,:status,:hash from accident_report a "
                         + "where a.report_number=:report")
                 .param("id", permit.id()).param("number", permit.number()).param("plate", permit.vehiclePlate())
-                .param("region", permit.region()).param("at", permit.issuedAt()).param("status", permit.status())
+                .param("region", permit.region()).param("at", ts(permit.issuedAt())).param("status", permit.status())
                 .param("hash", codeHash).param("report", permit.accidentReportNumber()).update();
         for (int i = 0; i < permit.damagedParts().size(); i++) {
             jdbc.sql("insert into repair_permit_part(permit_id,part_no,part_name) values (:id,:no,:part)")
@@ -97,7 +97,8 @@ public class JdbcAccidentRepository implements Ports.AccidentRepository {
 
     @Override
     public Optional<RepairPermit> repairPermit(String number) {
-        Optional<RepairPermit> found = jdbc.sql("select * from repair_permit where number=:number")
+        Optional<RepairPermit> found = jdbc.sql("select p.*, a.report_number as accident_report_number from repair_permit p "
+                        + "join accident_report a on a.id = p.accident_id where p.number=:number")
                 .param("number", number).query((rs, row) -> mapRepairPermit(rs)).optional();
         return found.map(p -> new RepairPermit(p.id(), p.number(), p.accidentReportNumber(), p.vehiclePlate(),
                 p.region(), jdbc.sql("select part_name from repair_permit_part where permit_id=:id order by part_no")
@@ -145,5 +146,9 @@ public class JdbcAccidentRepository implements Ports.AccidentRepository {
                 rs.getString("injury_degree"), rs.getString("transport_method"),
                 rs.getString("intoxication_status"), fault == null ? null : fault.intValue(), rs.getBoolean("agrees"),
                 rs.getBoolean("unknown_party"));
+    }
+
+    private static java.sql.Timestamp ts(java.time.Instant at) {
+        return at == null ? null : java.sql.Timestamp.from(at);
     }
 }

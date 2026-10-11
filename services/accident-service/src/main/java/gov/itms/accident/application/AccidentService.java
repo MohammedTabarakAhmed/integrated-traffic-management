@@ -23,7 +23,12 @@ public class AccidentService {
                              Integer faultPercent, boolean agrees, boolean unknownParty) { }
     public record Report(String region, Instant occurredAt, String location, String roadCondition,
                          String weather, Accident.Origin origin, List<PartyInput> parties,
-                         List<String> evidenceDocumentIds) { }
+                         List<String> evidenceDocumentIds) {
+        public Report {
+            parties = parties == null ? null : java.util.Collections.unmodifiableList(new java.util.ArrayList<>(parties));
+            evidenceDocumentIds = evidenceDocumentIds == null ? null : java.util.Collections.unmodifiableList(new java.util.ArrayList<>(evidenceDocumentIds));
+        }
+    }
 
     private final Ports.AccidentRepository repo;
     private final AuditRecorder audit;

@@ -54,6 +54,7 @@ class ViolationServiceTest {
     private final List<String> unpaidPlaced = new ArrayList<>();
     private final List<String> unpaidLifted = new ArrayList<>();
     private boolean holdsDown;
+    private final List<String> payablesHeld = new ArrayList<>();
     private final ViolationService service = new ViolationService(repo, new Ports.Payables() {
         @Override
         public UUID register(String number, String file, String region, String currency, long amount,
@@ -65,6 +66,16 @@ class ViolationServiceTest {
         @Override
         public void cancel(UUID payableId, String reason) {
             payablesCancelled.add(payableId);
+        }
+
+        @Override
+        public void hold(UUID payableId, String sourceRef, String reason) {
+            payablesHeld.add(payableId + " " + sourceRef);
+        }
+
+        @Override
+        public void liftHold(UUID payableId, String sourceRef, String reason) {
+            payablesHeld.remove(payableId + " " + sourceRef);
         }
     }, (file, from, until, sourceRef, reason) -> {
         holds.add(file + " " + from + ".." + until);
@@ -363,6 +374,36 @@ class ViolationServiceTest {
     }
 
     private static final class Repo implements Ports.ViolationRepository {
+        final Map<String, ViolationBooks.Book> books = new HashMap<>();
+        final Map<String, List<String>> bookReports = new HashMap<>();
+
+        @Override
+        public void insertPaperBook(ViolationBooks.Book book) {
+            books.put(book.serial(), book);
+        }
+
+        @Override
+        public Optional<ViolationBooks.Book> paperBook(String serial) {
+            return Optional.ofNullable(books.get(serial));
+        }
+
+        @Override
+        public void insertPaperBookEntry(String serial, String reportSerial, String violationNumber, Instant at) {
+            bookReports.computeIfAbsent(serial, k -> new ArrayList<>()).add(reportSerial);
+        }
+
+        @Override
+        public List<String> paperBookReports(String serial) {
+            return bookReports.getOrDefault(serial, List.of());
+        }
+
+        @Override
+        public void finishPaperBook(String serial, String status, String actor, Instant at) {
+            ViolationBooks.Book b = books.get(serial);
+            books.put(serial, new ViolationBooks.Book(b.serial(), b.region(), b.officerId(), status, b.issuedAt(), at,
+                    actor));
+        }
+
         final Map<String, List<CatalogueEntry>> catalogue = new HashMap<>();
         final Map<String, Violation> violations = new LinkedHashMap<>();
         final List<BlackPoints.Entry> points = new ArrayList<>();

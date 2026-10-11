@@ -28,10 +28,13 @@ paths:
                 commercialLicence: { type: string, maxLength: 100 }
                 region: { type: string, maxLength: 40, pattern: '^[A-Z0-9_-]{1,40}$' }
       responses:
-        '201': { description: Registered rental company }
-        '401': { description: Unauthorized }
-        '403': { description: Outside the caller's regional scope }
-        '409': { description: Company file or commercial licence already exists }
+        '201': { description: Registered rental company, content: {application/json: {schema: {$ref: '#/components/schemas/Company'}}} }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /v1/rental-companies/{companyFile}/branches:
     post:
       tags: [Rental]
@@ -55,10 +58,13 @@ paths:
                 name: {type: string, minLength: 1, maxLength: 120}
                 region: {type: string, maxLength: 40}
       responses:
-        '201': {description: Branch registered}
-        '400': {description: Branch region differs from the company region}
-        '401': {description: Unauthorized}
-        '403': {description: Outside the company's region}
+        '201': {description: Branch registered, content: {application/json: {schema: {$ref: '#/components/schemas/Branch'}}}}
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /v1/rental-companies/{companyFile}/suspensions:
     post:
       tags: [Rental]
@@ -75,10 +81,13 @@ paths:
           application/json:
             schema: {type: object, additionalProperties: false, required: [reason], properties: {reason: {type: string, minLength: 1, maxLength: 500}}}
       responses:
-        '200': {description: Company suspended}
-        '401': {description: Unauthorized}
-        '403': {description: Outside the company's region}
-        '409': {description: Company already suspended}
+        '200': {description: Company suspended, content: {application/json: {schema: {$ref: '#/components/schemas/Company'}}}}
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /v1/rental-companies/{companyFile}/reinstatements:
     post:
       tags: [Rental]
@@ -95,10 +104,13 @@ paths:
           application/json:
             schema: {type: object, additionalProperties: false, required: [reason], properties: {reason: {type: string, minLength: 1, maxLength: 500}}}
       responses:
-        '200': {description: Company reinstated}
-        '401': {description: Unauthorized}
-        '403': {description: Outside the company's region}
-        '409': {description: Company is already active}
+        '200': {description: Company reinstated, content: {application/json: {schema: {$ref: '#/components/schemas/Company'}}}}
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /v1/rental-contracts:
     post:
       tags: [Rental]
@@ -129,11 +141,13 @@ paths:
                 type: { type: string, enum: [DAILY, MONTHLY, LONG_TERM_LEASE, LEASE_TO_OWN] }
                 bondMinor: { type: integer, minimum: 0 }
       responses:
-        '201': { description: Contract recorded }
-        '401': { description: Unauthorized }
-        '403': { description: Outside the company's region }
-        '400': { description: Invalid renter identity or date range }
-        '409': { description: Company not active }
+        '201': { description: Contract recorded, content: {application/json: {schema: {$ref: '#/components/schemas/Contract'}}} }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /v1/rental-contracts/{id}:
     get:
       tags: [Rental]
@@ -147,10 +161,11 @@ paths:
           required: true
           schema: { type: string, format: uuid }
       responses:
-        '200': { description: Rental contract }
-        '401': { description: Unauthorized }
-        '403': { description: Outside the company's region }
-        '404': { description: Contract not found }
+        '200': { description: Rental contract, content: {application/json: {schema: {$ref: '#/components/schemas/Contract'}}} }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '400': { $ref: '#/components/responses/Problem' }
   /v1/rental-contracts/{id}/inspections:
     post:
       tags: [Rental]
@@ -178,12 +193,13 @@ paths:
                 evidenceIds: { type: array, maxItems: 100, items: { type: string, minLength: 1, maxLength: 64 } }
                 notes: { type: string, maxLength: 1000 }
       responses:
-        '201': { description: Inspection snapshot recorded }
-        '401': { description: Unauthorized }
-        '403': { description: Outside the company's region }
-        '404': { description: Contract not found }
-        '409': { description: Pickup inspection is required before return }
-        '422': { description: Invalid inspection or odometer reading }
+        '201': { description: Inspection snapshot recorded, content: {application/json: {schema: {$ref: '#/components/schemas/Inspection'}}} }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '400': { $ref: '#/components/responses/Problem' }
     get:
       tags: [Rental]
       summary: Read pickup and return inspections
@@ -193,11 +209,27 @@ paths:
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
-        '200': { description: Inspection snapshots for the contract }
-        '401': { description: Unauthorized }
-        '403': { description: Outside the company's region }
-        '404': { description: Contract not found }
+        '200': { description: Inspection snapshots for the contract, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Inspection'}}}} }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '400': { $ref: '#/components/responses/Problem' }
 components:
+  responses:
+    Problem:
+      description: Problem details (RFC 9457) in Arabic or English
+      content:
+        application/problem+json:
+          schema:
+            type: object
+            additionalProperties: true
+            required: [status, code]
+            properties:
+              type: { type: string }
+              title: { type: string }
+              status: { type: integer }
+              code: { type: string }
+              detail: { type: string }
   securitySchemes:
     bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
   parameters:
@@ -206,3 +238,58 @@ components:
       in: header
       required: true
       schema: { type: string, minLength: 16, maxLength: 128 }
+  schemas:
+    Company:
+      type: object
+      required: [id, trafficFileNumber, commercialLicence, region, status, createdAt]
+      properties:
+        id: {type: string, format: uuid}
+        trafficFileNumber: {type: string}
+        commercialLicence: {type: string}
+        region: {type: string}
+        status: {type: string, enum: [ACTIVE, SUSPENDED]}
+        createdAt: {type: string, format: date-time}
+    Branch:
+      type: object
+      required: [companyFile, code, name, region, active, createdAt]
+      properties:
+        companyFile: {type: string}
+        code: {type: string}
+        name: {type: string}
+        region: {type: string}
+        active: {type: boolean}
+        createdAt: {type: string, format: date-time}
+    Contract:
+      type: object
+      required: [id, companyFile, region, vehiclePlate, additionalDrivers, startsAt, endsAt, pickupBranch, returnBranch, type, bondMinor, status, createdAt]
+      properties:
+        id: {type: string, format: uuid}
+        companyFile: {type: string}
+        region: {type: string}
+        vehiclePlate: {type: string}
+        renterFile: {type: [string, 'null']}
+        visitorPassport: {type: [string, 'null']}
+        foreignLicence: {type: [string, 'null']}
+        additionalDrivers: {type: array, items: {type: string}}
+        startsAt: {type: string, format: date-time}
+        endsAt: {type: string, format: date-time}
+        pickupBranch: {type: string}
+        returnBranch: {type: string}
+        type: {type: string}
+        bondMinor: {type: integer}
+        status: {type: string}
+        createdAt: {type: string, format: date-time}
+    Inspection:
+      type: object
+      required: [id, contractId, type, inspectedAt, odometerKm, fuelPercent, damageNotes, evidenceIds, inspectedBy]
+      properties:
+        id: {type: string, format: uuid}
+        contractId: {type: string, format: uuid}
+        type: {type: string, enum: [PICKUP, RETURN]}
+        inspectedAt: {type: string, format: date-time}
+        odometerKm: {type: integer}
+        fuelPercent: {type: integer}
+        damageNotes: {type: array, items: {type: string}}
+        evidenceIds: {type: array, items: {type: string}}
+        notes: {type: [string, 'null']}
+        inspectedBy: {type: string}

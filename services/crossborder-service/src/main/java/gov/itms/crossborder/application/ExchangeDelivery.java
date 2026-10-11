@@ -89,7 +89,7 @@ public class ExchangeDelivery {
             exchange.delivered(m.id(), outcome, null);
         } catch (RuntimeException e) {
             // The attempt stays claimed; the delivery is retried after its back-off.
-            LOG.warn("Outcome of message {} not recorded: {}", m.id(), e.getClass().getSimpleName());
+            LOG.warn("Outcome of message {} not recorded: {}", m.id(), e.getClass().getName());
             return 0;
         }
         return outcome.accepted() ? 1 : 0;

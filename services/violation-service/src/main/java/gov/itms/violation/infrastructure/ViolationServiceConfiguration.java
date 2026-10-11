@@ -146,7 +146,8 @@ public class ViolationServiceConfiguration {
     @Bean
     ObjectionService objectionService(JdbcClient jdbc, ViolationService violations, AuditRecorder audit,
                                       DomainEventRecorder events, Clock clock, ViolationProperties properties) {
-        return new ObjectionService(jdbc, violations, audit, events, clock, properties.objectionWindow());
+        return new ObjectionService(new JdbcObjectionRepository(jdbc), new JdbcCrossborderLinks(jdbc), violations,
+                audit, events, clock, properties.objectionWindow());
     }
 
     private static UnpaidHold.Policy unpaidPolicy(boolean enabled, Duration after, int batchSize) {

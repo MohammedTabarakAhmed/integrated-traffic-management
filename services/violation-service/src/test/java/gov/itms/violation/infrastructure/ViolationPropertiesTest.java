@@ -17,12 +17,12 @@ class ViolationPropertiesTest {
     private static ViolationProperties props(int expiry, int threshold, List<Integer> months, List<Integer> warnings,
                                              String currency, String zone, Duration delay) {
         return new ViolationProperties(expiry, threshold, months, warnings, null, currency, zone, delay, null, null,
-                true, Duration.ofDays(60), Duration.ofHours(1), 100, null, null);
+                true, Duration.ofDays(60), Duration.ofHours(1), 100, null, null, Duration.ofDays(30));
     }
 
     private static ViolationProperties unpaid(Duration after, Duration interval, int batch) {
         return new ViolationProperties(12, 24, List.of(3, 6, 12), List.of(12, 18), null, "XTS", "UTC",
-                Duration.ofDays(30), null, null, true, after, interval, batch, null, null);
+                Duration.ofDays(30), null, null, true, after, interval, batch, null, null, Duration.ofDays(30));
     }
 
     @Test

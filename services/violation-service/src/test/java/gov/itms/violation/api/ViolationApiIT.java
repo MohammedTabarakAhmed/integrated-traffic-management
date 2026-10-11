@@ -11,6 +11,8 @@ import com.atlassian.oai.validator.model.Request;
 import com.atlassian.oai.validator.model.SimpleRequest;
 import com.atlassian.oai.validator.model.SimpleResponse;
 import com.atlassian.oai.validator.report.ValidationReport;
+import gov.itms.violation.application.CrossborderViolations;
+import gov.itms.violation.application.ObjectionService;
 import gov.itms.violation.application.ViolationService;
 import gov.itms.violation.infrastructure.PartnerStub;
 import java.nio.charset.StandardCharsets;
@@ -109,7 +111,7 @@ class ViolationApiIT {
 
     @DynamicPropertySource
     static void partners(DynamicPropertyRegistry registry) {
-        for (String client : List.of("payments", "holds")) {
+        for (String client : List.of("payments", "holds", "vehicles")) {
             registry.add("itms.clients." + client + ".base-url", PARTNERS::baseUrl);
             registry.add("itms.clients." + client + ".token-uri", () -> PARTNERS.baseUrl() + "/token");
             registry.add("itms.clients." + client + ".client-id", () -> PartnerStub.CLIENT_ID);
@@ -378,5 +380,220 @@ class ViolationApiIT {
         assertThat(body(retry).get("number").asString()).isEqualTo(body(first).get("number").asString());
         assertThat(db.sql("select count(*) from violation where catalogue_code = :c").param("c", parking)
                 .query(Long.class).single()).isEqualTo(1);
+    }
+
+    // ---- Increment 4: objections (VF-050..VF-052), paper books (VF-013); Increment 9: cross-border (XB-001..XB-005)
+
+    @Autowired
+    CrossborderViolations crossborder;
+    @Autowired
+    ObjectionService objectionService;
+
+    private static RequestPostProcessor customer() {
+        return user("c-objector", "CUSTOMER", "violation.objection.submit", "violation.read");
+    }
+
+    private static RequestPostProcessor reviewer() {
+        return user("u-review", "OBJECTION_REVIEWER", "violation.objection.review", "violation.read",
+                "violation.cancel");
+    }
+
+    private JsonNode expect(MvcResult r, int status) throws Exception {
+        String text = r.getResponse().getContentAsString(StandardCharsets.UTF_8);
+        assertThat(r.getResponse().getStatus()).as(text).isEqualTo(status);
+        return text.isEmpty() ? null : json.readTree(text);
+    }
+
+    private String objectionId(String number) throws Exception {
+        for (JsonNode o : expect(getAs("/v1/objections/queue?limit=500", reviewer()), 200).get("items")) {
+            if (o.get("violationNumber").asString().equals(number)) {
+                return o.get("id").asString();
+            }
+        }
+        return null;
+    }
+
+    @Test
+    @Tag("VF-050")
+    @Tag("VF-051")
+    @Tag("VF-052")
+    @DisplayName("VF-050..052: an objection pauses the fine; accepted cancels it, rejected resumes payment")
+    void objections() throws Exception {
+        String fine = catalogue(30_000, 4);
+        String file = "TF-OB-" + suffix().replace('_', '-');
+        String accepted = recorded(fine, file).get("number").asString();
+        String rejected = recorded(fine, file).get("number").asString();
+        Map<String, Object> objection = Map.of("reasonCode", "NOT_THE_DRIVER", "explanation",
+                "I was abroad that day", "evidenceIds", List.of("DOC-1"));
+        assertThat(postAs("/v1/violations/" + accepted + "/objections", objection, officer(), "it-" + UUID.randomUUID())
+                .getResponse().getStatus()).isEqualTo(403);
+        JsonNode submitted = expect(postAs("/v1/violations/" + accepted + "/objections", objection, customer(),
+                "it-" + UUID.randomUUID()), 201);
+        assertThat(submitted.get("status").asString()).isEqualTo("PENDING");
+        assertThat(PARTNERS.payableHolds).anyMatch(h -> h.startsWith("HOLD ") && h.endsWith("OBJECTION:" + accepted));
+        assertThat(code(postAs("/v1/violations/" + accepted + "/objections", objection, customer(),
+                "it-" + UUID.randomUUID()))).isEqualTo("OBJECTION_EXISTS");
+        expect(postAs("/v1/violations/" + rejected + "/objections", objection, customer(), "it-" + UUID.randomUUID()),
+                201);
+
+        String acceptedId = objectionId(accepted);
+        String rejectedId = objectionId(rejected);
+        assertThat(acceptedId).isNotNull();
+        assertThat(postAs("/v1/objections/" + acceptedId + "/decisions", Map.of("decision", "ACCEPT", "reason",
+                "evidence holds"), customer(), "it-" + UUID.randomUUID()).getResponse().getStatus()).isEqualTo(403);
+        int cancelled = PARTNERS.cancelledPayables.size();
+        JsonNode decided = expect(postAs("/v1/objections/" + acceptedId + "/decisions", Map.of("decision", "ACCEPT",
+                "reason", "evidence holds"), reviewer(), "it-" + UUID.randomUUID()), 200);
+        assertThat(decided.get("status").asString()).isEqualTo("ACCEPTED");
+        assertThat(body(getAs("/v1/violations/" + accepted, officer())).get("status").asString())
+                .isEqualTo("CANCELLED");
+        assertThat(PARTNERS.cancelledPayables).hasSize(cancelled + 1);
+        assertThat(code(postAs("/v1/objections/" + acceptedId + "/decisions", Map.of("decision", "REJECT",
+                "reason", "second thoughts"), reviewer(), "it-" + UUID.randomUUID()))).isEqualTo("OBJECTION_DECIDED");
+
+        expect(postAs("/v1/objections/" + rejectedId + "/decisions", Map.of("decision", "REJECT", "reason",
+                "photo shows the plate"), reviewer(), "it-" + UUID.randomUUID()), 200);
+        assertThat(PARTNERS.payableHolds).anyMatch(h -> h.startsWith("LIFT ") && h.endsWith("OBJECTION:" + rejected));
+        assertThat(body(getAs("/v1/violations/" + rejected, officer())).get("status").asString()).isEqualTo("OPEN");
+        assertThat(code(postAs("/v1/objections/" + UUID.randomUUID() + "/decisions", Map.of("decision", "REJECT",
+                "reason", "no such thing"), reviewer(), "it-" + UUID.randomUUID()))).isEqualTo("OBJECTION_NOT_FOUND");
+        assertThat(db.sql("select count(*) from event_outbox where event_type = 'itms.violation.objection-decided' "
+                + "and subject in (:a, :b)").param("a", accepted).param("b", rejected).query(Long.class).single())
+                .isEqualTo(2);
+
+        SHIFT.set(Duration.ofDays(31));
+        String late = recorded(fine, file).get("number").asString();
+        SHIFT.set(Duration.ofDays(62));
+        assertThat(code(postAs("/v1/violations/" + late + "/objections", objection, customer(),
+                "it-" + UUID.randomUUID()))).isEqualTo("OBJECTION_WINDOW_CLOSED");
+    }
+
+    @Test
+    @Tag("VF-013")
+    @DisplayName("VF-013: a paper book is issued to an officer, its reports entered and reconciled, or reported lost")
+    void paperBooks() throws Exception {
+        String fine = catalogue(10_000, 0);
+        RequestPostProcessor books = user("u-officer", "VIOLATION_OFFICER", "violation.book.issue",
+                "violation.book.record", "violation.book.reconcile", "violation.read", "violation.record");
+        String serial = "BK-" + suffix().replace('_', '-');
+        JsonNode book = expect(postAs("/v1/violation-books", Map.of("serial", serial, "region", "NORTH",
+                "officerId", "u-officer"), books, "it-" + UUID.randomUUID()), 201);
+        assertThat(book.get("status").asString()).isEqualTo("ISSUED");
+        String number = recorded(fine, null).get("number").asString();
+        expect(postAs("/v1/violation-books/" + serial + "/entries", Map.of("reportSerial", "P-0001",
+                "violationNumber", number), books, "it-" + UUID.randomUUID()), 200);
+        assertThat(code(postAs("/v1/violation-books/" + serial + "/reconciliation", Map.of("reportSerials",
+                List.of("P-0001", "P-0002")), books, "it-" + UUID.randomUUID())))
+                .isEqualTo("VIOLATION_BOOK_RECONCILIATION_INVALID");
+        JsonNode reconciled = expect(postAs("/v1/violation-books/" + serial + "/reconciliation",
+                Map.of("reportSerials", List.of("P-0001")), books, "it-" + UUID.randomUUID()), 200);
+        assertThat(reconciled.get("status").asString()).isEqualTo("RECONCILED");
+        assertThat(code(postAs("/v1/violation-books/" + serial + "/entries", Map.of("reportSerial", "P-0003",
+                "violationNumber", number), books, "it-" + UUID.randomUUID()))).isEqualTo("VIOLATION_BOOK_ENTRY_INVALID");
+
+        String lost = "BK-L" + suffix().replace('_', '-');
+        expect(postAs("/v1/violation-books", Map.of("serial", lost, "region", "NORTH", "officerId", "u-officer"),
+                books, "it-" + UUID.randomUUID()), 201);
+        assertThat(expect(postAs("/v1/violation-books/" + lost + "/losses", Map.of("reason", "stolen from the car"),
+                books, "it-" + UUID.randomUUID()), 200).get("status").asString()).isEqualTo("LOST");
+        assertThat(code(postAs("/v1/violation-books/NOPE-1/losses", Map.of("reason", "x"), books,
+                "it-" + UUID.randomUUID()))).isEqualTo("VIOLATION_BOOK_NOT_FOUND");
+        assertThat(postAs("/v1/violation-books", Map.of("serial", "BK-X1", "region", "NORTH", "officerId", "u"),
+                officer(), "it-" + UUID.randomUUID()).getResponse().getStatus()).isEqualTo(403);
+    }
+
+    @Test
+    @Tag("XB-001")
+    @DisplayName("XB-001: a violation by a vehicle registered in a partner state is recorded and announced for sending")
+    void outboundCrossborder() throws Exception {
+        String fine = catalogue(25_000, 3);
+        Map<String, Object> report = report(fine, null);
+        report.put("registrationState", "PS1");
+        JsonNode v = expect(postAs("/v1/violations", report, officer()), 201);
+        String number = v.get("number").asString();
+        assertThat(crossborder.link(number)).hasValueSatisfying(l -> {
+            assertThat(l.partner()).isEqualTo("PS1");
+            assertThat(l.direction()).isEqualTo(gov.itms.violation.application.Ports.CrossborderLinks.Direction.OUTBOUND);
+        });
+        assertThat(db.sql("select count(*) from event_outbox where event_type = 'itms.violation.crossborder-recorded' "
+                + "and subject = :n").param("n", number).query(Long.class).single()).isEqualTo(1);
+        report.put("registrationState", "bad state");
+        assertThat(code(postAs("/v1/violations", report, officer()))).isIn("REGISTRATION_STATE_INVALID",
+                "VALIDATION_FAILED");
+    }
+
+    @Test
+    @Tag("XB-002")
+    @Tag("XB-003")
+    @Tag("XB-005")
+    @DisplayName("XB-002/003/005: a partner violation is loaded without points, closed when paid there, and its "
+            + "objection is decided by the partner")
+    void inboundCrossborder() throws Exception {
+        String fine = catalogue(40_000, 6);
+        String plate = "P" + suffix().replace("_", "");
+        String owner = "TF-XB-" + suffix().replace('_', '-');
+        String vin = "1HGCM82633A" + String.format("%06d", System.nanoTime() % 1_000_000);
+        PARTNERS.vehicles.put(plate, new String[] {vin, owner, "NORTH"});
+        Instant at = clock.instant().minus(Duration.ofHours(1));
+
+        CrossborderViolations.Loaded unknown = crossborder.loadFromPartner(new CrossborderViolations.PartnerViolation(
+                "PS1", "EXT-U-" + suffix(), fine, at, "Border road", "NOPLATE", "XTS", 40_000));
+        assertThat(unknown.rejectionCode()).isEqualTo("VEHICLE_NOT_REGISTERED_HERE");
+        assertThat(crossborder.loadFromPartner(new CrossborderViolations.PartnerViolation("PS1", "EXT-C-" + suffix(),
+                fine, at, null, plate, "EUR", 40_000)).rejectionCode()).isEqualTo("CURRENCY_NOT_SUPPORTED");
+
+        String ext = "EXT-" + suffix();
+        CrossborderViolations.PartnerViolation pv = new CrossborderViolations.PartnerViolation("PS1", ext, fine, at,
+                "Border road", plate, "XTS", 35_000);
+        CrossborderViolations.Loaded loaded = crossborder.loadFromPartner(pv);
+        assertThat(loaded.loaded()).as("rejected: %s", loaded.rejectionCode()).isTrue();
+        assertThat(crossborder.loadFromPartner(pv).violationNumber()).as("repeat").isEqualTo(loaded.violationNumber());
+        String number = loaded.violationNumber();
+        JsonNode v = body(getAs("/v1/violations/" + number, officer()));
+        assertThat(v.get("blackPoints").asInt()).as("Q-079 (a): no points").isZero();
+        assertThat(v.get("fineMinor").asLong()).isEqualTo(35_000);
+        assertThat(v.get("responsibleFileNumber").asString()).isEqualTo(owner);
+        assertThat(PARTNERS.payables.stream().map(p -> p.get("itemRef").asString())).contains(number);
+
+        // XB-005: the local customer's objection goes to the issuing state, not the local queue
+        expect(postAs("/v1/violations/" + number + "/objections", Map.of("reasonCode", "NOT_THE_DRIVER",
+                "explanation", "sold the car"), customer(), "it-" + UUID.randomUUID()), 201);
+        assertThat(objectionId(number)).as("not in the local queue").isNull();
+        assertThat(db.sql("select count(*) from event_outbox where event_type = 'itms.violation.crossborder-objection'"
+                + " and subject = :n").param("n", number).query(Long.class).single()).isEqualTo(1);
+        assertThat(crossborder.objectionForwarded(number, "PS1")).isTrue();
+        assertThat(crossborder.objectionForwarded(number, "PS2")).isFalse();
+        assertThat(objectionService.decidedByPartner(number, "PS1", false, "photo is clear")).isTrue();
+        assertThat(crossborder.partnerDecided(number, "PS1", false, "photo is clear")).isTrue();
+        assertThat(PARTNERS.payableHolds).anyMatch(h -> h.startsWith("LIFT ") && h.endsWith("OBJECTION:" + number));
+
+        // XB-003: paid in the partner state closes it here
+        int cancelled = PARTNERS.cancelledPayables.size();
+        assertThat(crossborder.paidInPartnerState(number, "PS2", "PAY-1")).as("wrong partner").isFalse();
+        assertThat(crossborder.paidInPartnerState(number, "PS1", "PAY-1")).isTrue();
+        assertThat(crossborder.paidInPartnerState(number, "PS1", "PAY-1")).as("only once").isFalse();
+        assertThat(body(getAs("/v1/violations/" + number, officer())).get("status").asString()).isEqualTo("PAID");
+        assertThat(PARTNERS.cancelledPayables).hasSize(cancelled + 1);
+
+        // an accepted partner decision cancels another loaded violation
+        CrossborderViolations.Loaded second = crossborder.loadFromPartner(new CrossborderViolations.PartnerViolation(
+                "PS1", "EXT2-" + suffix(), fine, at, null, plate, "XTS", 1_000));
+        assertThat(crossborder.partnerDecided(second.violationNumber(), "PS1", true, "accepted")).isTrue();
+        assertThat(body(getAs("/v1/violations/" + second.violationNumber(), officer())).get("status").asString())
+                .isEqualTo("CANCELLED");
+    }
+
+    @Test
+    @Tag("XB-005")
+    @DisplayName("XB-005: an objection a partner forwards against a local violation joins the queue; a second is refused")
+    void partnerObjectionToLocalViolation() throws Exception {
+        String fine = catalogue(12_000, 0);
+        String number = recorded(fine, null).get("number").asString();
+        assertThat(objectionService.submitFromPartner(number, "PS1", "driver contests")).isTrue();
+        assertThat(objectionId(number)).isNotNull();
+        assertThat(objectionService.submitFromPartner(number, "PS1", "again")).isFalse();
+        assertThat(objectionService.submitFromPartner("VN-NOPE", "PS1", "x")).isFalse();
+        assertThat(db.sql("select count(*) from event_outbox where event_type = 'itms.violation.objection-decided' "
+                + "and subject = :n").param("n", number).query(Long.class).single()).as("refusal answered").isEqualTo(1);
     }
 }

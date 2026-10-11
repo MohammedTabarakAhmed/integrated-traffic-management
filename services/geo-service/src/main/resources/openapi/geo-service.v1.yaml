@@ -11,7 +11,7 @@ paths:
       security: [{bearerAuth: []}]
       parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Node'}}}}
-      responses: {'201': {description: Geographic node created}, '400': {$ref: '#/components/responses/Problem'}, '401': {description: Authentication required}, '403': {description: Permission denied}}
+      responses: {'201': {description: Geographic node created, content: {application/json: {schema: {$ref: '#/components/schemas/NodeView'}}}}, '400': {$ref: '#/components/responses/Problem'}, '401': { $ref: '#/components/responses/Problem' }, '403': { $ref: '#/components/responses/Problem' }, '404': {$ref: '#/components/responses/Problem'}, '409': {$ref: '#/components/responses/Problem'}, '422': {$ref: '#/components/responses/Problem'}}
     get:
       operationId: listGeographicChildren
       summary: List geographic nodes below a parent
@@ -22,7 +22,7 @@ paths:
       parameters:
         - {name: parentId, in: query, required: true, schema: {type: string, format: uuid}}
         - {name: type, in: query, required: false, schema: {type: string, maxLength: 24}}
-      responses: {'200': {description: Geographic children}, '401': {description: Authentication required}, '403': {description: Permission denied}}
+      responses: {'200': {description: Geographic children, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/NodeView'}}}}}}}, '401': { $ref: '#/components/responses/Problem' }, '403': { $ref: '#/components/responses/Problem' }, '400': {$ref: '#/components/responses/Problem'}, '404': {$ref: '#/components/responses/Problem'}}
   /v1/geographic-nodes/{id}:
     get:
       operationId: getGeographicNode
@@ -32,7 +32,7 @@ paths:
       x-itms-scope: national
       security: [{bearerAuth: []}]
       parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
-      responses: {'200': {description: Geographic node}, '401': {description: Authentication required}, '403': {description: Permission denied}, '404': {$ref: '#/components/responses/Problem'}}
+      responses: {'200': {description: Geographic node, content: {application/json: {schema: {$ref: '#/components/schemas/NodeView'}}}}, '401': { $ref: '#/components/responses/Problem' }, '403': { $ref: '#/components/responses/Problem' }, '404': {$ref: '#/components/responses/Problem'}, '400': {$ref: '#/components/responses/Problem'}}
 components:
   securitySchemes: {bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}}
   parameters:
@@ -61,6 +61,27 @@ components:
         laneCount: {type: integer, minimum: 1, maximum: 32}
         direction: {type: string, enum: [BIDIRECTIONAL, FORWARD, REVERSE]}
         owningAuthority: {type: string, maxLength: 80}
+    NodeView:
+      type: object
+      required: [id, type, code, nameEn, nameAr]
+      properties:
+        id: {type: string, format: uuid}
+        parentId: {type: [string, 'null'], format: uuid}
+        type: {type: string}
+        code: {type: string}
+        nameEn: {type: string}
+        nameAr: {type: string}
+        region: {type: [string, 'null']}
+        latitude: {type: [number, 'null']}
+        longitude: {type: [number, 'null']}
+        speedLimitKmh: {type: [number, 'null']}
+        bridgeLoadTonnes: {type: [number, 'null']}
+        restrictions: {type: [string, 'null']}
+        openingHours: {type: [string, 'null']}
+        roadType: {type: [string, 'null']}
+        laneCount: {type: [integer, 'null']}
+        direction: {type: [string, 'null']}
+        owningAuthority: {type: [string, 'null']}
     Problem:
       type: object
       additionalProperties: true

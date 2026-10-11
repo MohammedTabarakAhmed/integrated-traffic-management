@@ -323,7 +323,7 @@ class JdbcViolationRepository implements Ports.ViolationRepository {
 
     @Override public void insertPaperBook(gov.itms.violation.application.ViolationBooks.Book b) {
         jdbc.sql("insert into violation_paper_book(serial,region,officer_id,status,issued_at) values (:serial,:region,:officer,'ISSUED',:at)")
-                .param("serial",b.serial()).param("region",b.region()).param("officer",b.officerId()).param("at",b.issuedAt()).update();
+                .param("serial",b.serial()).param("region",b.region()).param("officer",b.officerId()).param("at",ts(b.issuedAt())).update();
     }
     @Override public Optional<gov.itms.violation.application.ViolationBooks.Book> paperBook(String serial) {
         return jdbc.sql("select * from violation_paper_book where serial=:serial").param("serial",serial)
@@ -331,7 +331,7 @@ class JdbcViolationRepository implements Ports.ViolationRepository {
     }
     @Override public void insertPaperBookEntry(String serial,String reportSerial,String violationNumber,Instant at) {
         jdbc.sql("insert into violation_paper_book_entry(book_serial,report_serial,violation_number,entered_at) values (:book,:report,:violation,:at)")
-                .param("book",serial).param("report",reportSerial).param("violation",violationNumber).param("at",at).update();
+                .param("book",serial).param("report",reportSerial).param("violation",violationNumber).param("at",ts(at)).update();
     }
     @Override public List<String> paperBookReports(String serial) {
         return jdbc.sql("select report_serial from violation_paper_book_entry where book_serial=:serial order by report_serial")
@@ -339,7 +339,7 @@ class JdbcViolationRepository implements Ports.ViolationRepository {
     }
     @Override public void finishPaperBook(String serial,String status,String actor,Instant at) {
         int changed=jdbc.sql("update violation_paper_book set status=:status,reconciled_at=case when :status='RECONCILED' then :at else reconciled_at end,reconciled_by=case when :status='RECONCILED' then :actor else reconciled_by end where serial=:serial and status='ISSUED'")
-                .param("status",status).param("at",at).param("actor",actor).param("serial",serial).update();
+                .param("status",status).param("at",ts(at)).param("actor",actor).param("serial",serial).update();
         if(changed!=1)throw gov.itms.violation.domain.DomainException.conflict("VIOLATION_BOOK_CLOSED","paper book is no longer issued",List.of("VF-013"));
     }
 

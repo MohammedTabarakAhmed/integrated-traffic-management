@@ -11,7 +11,7 @@ paths:
       security: [{bearerAuth: []}]
       parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Application'}}}}
-      responses: {'201': {description: Permit application created}, '400': {$ref: '#/components/responses/Problem'}, '401': {description: Authentication required}, '403': {description: Permission denied}}
+      responses: {'201': {description: Permit application created, content: {application/json: {schema: {$ref: '#/components/schemas/PermitView'}}}}, '400': {$ref: '#/components/responses/Problem'}, '401': { $ref: '#/components/responses/Problem' }, '403': { $ref: '#/components/responses/Problem' }, '404': {$ref: '#/components/responses/Problem'}, '409': {$ref: '#/components/responses/Problem'}, '422': {$ref: '#/components/responses/Problem'}}
   /v1/road-permits/{id}/approvals:
     post:
       operationId: approveRoadPermit
@@ -22,7 +22,7 @@ paths:
       security: [{bearerAuth: []}]
       parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}, {$ref: '#/components/parameters/IdempotencyKey'}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Approval'}}}}
-      responses: {'200': {description: Approval recorded}, '400': {$ref: '#/components/responses/Problem'}, '401': {description: Authentication required}, '403': {description: Permission denied}}
+      responses: {'200': {description: Approval recorded, content: {application/json: {schema: {$ref: '#/components/schemas/PermitView'}}}}, '400': {$ref: '#/components/responses/Problem'}, '401': { $ref: '#/components/responses/Problem' }, '403': { $ref: '#/components/responses/Problem' }, '404': {$ref: '#/components/responses/Problem'}, '409': {$ref: '#/components/responses/Problem'}, '422': {$ref: '#/components/responses/Problem'}}
   /v1/road-permits/{id}/transitions:
     post:
       operationId: transitionRoadPermit
@@ -33,7 +33,7 @@ paths:
       security: [{bearerAuth: []}]
       parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}, {$ref: '#/components/parameters/IdempotencyKey'}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Transition'}}}}
-      responses: {'200': {description: Permit transition applied}, '400': {$ref: '#/components/responses/Problem'}, '401': {description: Authentication required}, '403': {description: Permission denied}}
+      responses: {'200': {description: Permit transition applied, content: {application/json: {schema: {$ref: '#/components/schemas/PermitView'}}}}, '400': {$ref: '#/components/responses/Problem'}, '401': { $ref: '#/components/responses/Problem' }, '403': { $ref: '#/components/responses/Problem' }, '404': {$ref: '#/components/responses/Problem'}, '409': {$ref: '#/components/responses/Problem'}, '422': {$ref: '#/components/responses/Problem'}}
 components:
   securitySchemes: {bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}}
   parameters:
@@ -41,6 +41,26 @@ components:
   responses:
     Problem: {description: Invalid request, content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
   schemas:
+    PermitView:
+      type: object
+      required: [id, number, type, applicant, vehicles, routeSegments, region, status, startsAt, endsAt, vehicleLimit]
+      properties:
+        id: {type: string, format: uuid}
+        number: {type: string}
+        type: {type: string}
+        applicant: {type: string}
+        eligibilityReference: {type: [string, 'null']}
+        vehicles: {type: array, items: {type: string}}
+        routeSegments: {type: array, items: {type: string}}
+        region: {type: string}
+        status: {type: string, enum: [APPLIED, APPROVED, ISSUED, CANCELLED, EXPIRED]}
+        startsAt: {type: string, format: date-time}
+        endsAt: {type: string, format: date-time}
+        loadTonnes: {type: [number, 'null']}
+        widthMetres: {type: [number, 'null']}
+        heightMetres: {type: [number, 'null']}
+        lengthMetres: {type: [number, 'null']}
+        vehicleLimit: {type: integer}
     Application:
       type: object
       additionalProperties: false

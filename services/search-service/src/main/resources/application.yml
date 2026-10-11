@@ -1,0 +1,132 @@
+spring:
+  application:
+    name: search-service
+  config:
+    import: "optional:configtree:${ITMS_SECRETS_DIR:/run/secrets/}"
+  # search-service keeps no copy of anyone's data: its database holds only the platform's audit and event outboxes.
+  datasource:
+    url: ${SEARCH_DB_URL}
+    username: ${SEARCH_DB_USER:}
+    password: ${SEARCH_DB_PASSWORD:}
+  flyway:
+    locations: classpath:db/platform
+  kafka:
+    bootstrap-servers: ${ITMS_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+  messages:
+    basename: messages
+    fallback-to-system-locale: false
+  threads:
+    virtual:
+      enabled: true
+itms:
+  events:
+    enabled: ${ITMS_EVENTS_ENABLED:false}
+    audit-topic: ${ITMS_EVENTS_AUDIT_TOPIC:itms.audit.v1}
+    domain-topic: ${ITMS_EVENTS_DOMAIN_TOPIC:}
+    batch-size: ${ITMS_EVENTS_BATCH_SIZE:100}
+    send-timeout: ${ITMS_EVENTS_SEND_TIMEOUT:10s}
+    relay-interval: ${ITMS_EVENTS_RELAY_INTERVAL:1s}
+  security:
+    issuer: ${ITMS_OIDC_ISSUER}
+    jwk-set-uri: ${ITMS_OIDC_JWKS_URI}
+    audience: itms-api
+    authorisation-source: ${ITMS_AUTHORISATION_SOURCE:iam}
+    iam:
+      base-url: ${ITMS_IAM_URL:}
+      cache-ttl: ${ITMS_IAM_CACHE_TTL:60s}
+  # A search changes nothing, so it needs no Idempotency-Key (API_SPECIFICATION §2).
+  idempotency:
+    enabled: false
+  # Unified search (CC-100, CC-102, CC-103). Each source is an owning service's own lookup, asked with the caller's
+  # token; the pattern says which query shapes it is asked for. Fields are the answer's top-level or dotted fields.
+  search:
+    deadline: ${ITMS_SEARCH_DEADLINE:2s}
+    max-hits: ${ITMS_SEARCH_MAX_HITS:50}
+    disabled-sources: ${ITMS_SEARCH_DISABLED_SOURCES:}
+    sources:
+      - name: traffic-file
+        type: TRAFFIC_FILE
+        base-url: ${ITMS_TRAFFIC_FILES_URL:http://localhost:8085}
+        path: /v1/traffic-files/{q}
+        pattern: '^[A-Z0-9][A-Z0-9-]{2,19}$'
+        id-field: fileNumber
+        region-field: regionOpened
+        fields: [kind, category, type, status]
+      - name: traffic-file-identity
+        type: TRAFFIC_FILE
+        base-url: ${ITMS_TRAFFIC_FILES_URL:http://localhost:8085}
+        method: POST
+        path: /v1/traffic-files/searches
+        body: '{"document":{"type":"NATIONAL_ID","nationalIdNo":{q}}}'
+        pattern: '^[0-9][0-9-]{5,39}$'
+        items-field: items
+        id-field: fileNumber
+        region-field: regionOpened
+        fields: [kind, category, type, status]
+      - name: vehicle-vin
+        type: VEHICLE
+        base-url: ${ITMS_VEHICLES_URL:http://localhost:8095}
+        path: /v1/vehicles/{q}
+        pattern: '^[A-HJ-NPR-Z0-9]{17}$'
+        id-field: vin
+        region-field: region
+        fields: [plateNumber, status, ownerFileNumber, registrationExpiry]
+      - name: vehicle-plate
+        type: VEHICLE
+        base-url: ${ITMS_VEHICLES_URL:http://localhost:8095}
+        path: /v1/vehicles?plate={q}
+        pattern: '^[\p{L}0-9][\p{L}0-9 -]{0,19}$'
+        id-field: vin
+        reference-field: plateNumber
+        region-field: region
+        fields: [plateNumber, status, ownerFileNumber, registrationExpiry]
+      - name: violation
+        type: VIOLATION
+        base-url: ${ITMS_VIOLATIONS_URL:http://localhost:8096}
+        path: /v1/violations/{q}
+        pattern: '^V-[0-9]{4}-[0-9]{1,12}$'
+        id-field: number
+        region-field: region
+        fields: [status, responsibleFileNumber, occurredAt]
+      - name: accident
+        type: ACCIDENT
+        base-url: ${ITMS_ACCIDENTS_URL:http://localhost:8100}
+        path: /v1/accidents/{q}
+        pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+        id-field: id
+        reference-field: reportNumber
+        region-field: region
+        fields: [reportNumber, status, occurredAt]
+      - name: transaction
+        type: TRANSACTION
+        base-url: ${ITMS_TRANSACTIONS_URL:http://localhost:8083}
+        path: /v1/transactions/{q}
+        pattern: '^[A-Z][A-Z0-9_]{1,39}-[A-Z0-9_]{1,40}-[0-9]{4}-[0-9]{1,12}$'
+        id-field: reference
+        region-field: region
+        fields: [serviceCode, status, applicantFileNumber]
+      - name: licence
+        type: LICENCE
+        base-url: ${ITMS_LICENSING_URL:http://localhost:8098}
+        path: /v1/licences?licenceNumber={q}
+        pattern: '^[A-Z0-9][A-Z0-9-]{3,29}$'
+        items-field: items
+        id-field: id
+        reference-field: licenceNumber
+        region-field: region
+        fields: [licenceNumber, status, expiresOn, trafficFileNumber]
+management:
+  server:
+    port: ${ITMS_MANAGEMENT_PORT:8090}
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+server:
+  error:
+    include-stacktrace: never
+    include-message: never

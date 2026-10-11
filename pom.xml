@@ -47,6 +47,7 @@
     <module>services/road-permit-service</module>
     <module>services/marine-service</module>
     <module>services/crossborder-service</module>
+    <module>services/search-service</module>
   </modules>
 
   <properties>

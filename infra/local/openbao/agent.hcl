@@ -275,3 +275,14 @@ template {
   destination = "/run/db-credentials/crossborder-service/password"
   perms       = "0444"
 }
+
+template {
+  contents    = "{{ with secret \"database/creds/search-service\" }}{{ .Data.username }}{{ end }}"
+  destination = "/run/db-credentials/search-service/username"
+  perms       = "0444"
+}
+template {
+  contents    = "{{ with secret \"database/creds/search-service\" }}{{ .Data.password }}{{ end }}"
+  destination = "/run/db-credentials/search-service/password"
+  perms       = "0444"
+}

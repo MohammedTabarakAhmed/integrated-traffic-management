@@ -102,6 +102,10 @@ upstreams:
     type: roundrobin
     nodes:
       "crossborder-service:8080": 1
+  - id: search-service
+    type: roundrobin
+    nodes:
+      "search-service:8080": 1
 
 plugin_configs:
   - id: protected-api
@@ -407,4 +411,10 @@ routes:
       - /v1/config-proposals
       - /v1/config-proposals/*
       - /v1/settlement-statements/*
+  - id: search-service
+    name: search-service
+    upstream_id: search-service
+    plugin_config_id: protected-api
+    uris:
+      - /v1/searches
 #END

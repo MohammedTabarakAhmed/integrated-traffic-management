@@ -42,6 +42,7 @@ configure geo-service geo-postgres geo "$GEO_DB_USER" "$GEO_DB_PASSWORD"
 configure road-permit-service road-permit-postgres roadpermit "$ROAD_PERMIT_DB_USER" "$ROAD_PERMIT_DB_PASSWORD"
 configure marine-service marine-postgres marine "$MARINE_DB_USER" "$MARINE_DB_PASSWORD"
 configure crossborder-service crossborder-postgres crossborder "$XB_DB_USER" "$XB_DB_PASSWORD"
+configure search-service search-postgres search "$SEARCH_DB_USER" "$SEARCH_DB_PASSWORD"
 
 # The agent may only read database logins.
 printf 'path "database/creds/*" {\n  capabilities = ["read"]\n}\n' | bao policy write itms-db-agent - >/dev/null

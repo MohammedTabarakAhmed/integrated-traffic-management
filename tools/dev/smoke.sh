@@ -896,6 +896,7 @@ printf '%s' "$acc" | "$PY" -c "import json,sys; a=json.load(sys.stdin); assert a
 echo "   accident $(printf '%s' "$acc" | json_field "['reportNumber']"): FAULT_DECIDED 70/30 without an officer decision"
 
 echo "41. Rental and UAT-2 (TR-030, TR-032, VF-014): a radar violation during a rental contract goes to the renter; renter and company notified"
+S_MAKER=$(token dev.maker "$DEV_MAKER_PASSWORD"); S_CHECKER=$(token dev.checker "$DEV_CHECKER_PASSWORD") # 5-minute tokens
 RENT=http://localhost:8101
 company="TF-SMKRC-$SMK"; renter="TF-SMKRENTER-$SMK"; rplate="R $((SMK % 100000))"
 expect "$(post_to "$RENT" "$S_MAKER" /v1/rental-companies "{\"trafficFileNumber\":\"$company\",\"commercialLicence\":\"CL-$SMK\",\"region\":\"DXB\"}")" 201
@@ -918,6 +919,7 @@ wait_until 120 both_notified || { echo "FAIL: UAT-2 notices renter='$(inbox_of "
 echo "   UAT-2: $uat2_number during contract $rental_contract -> $renter (not $company); renter and company notified"
 
 echo "42. Training permits (TR-002, TR-003, TR-006): type, application, committee test, approval and issue"
+S_MAKER=$(token dev.maker "$DEV_MAKER_PASSWORD"); S_CHECKER=$(token dev.checker "$DEV_CHECKER_PASSWORD") # 5-minute tokens
 PERMIT=http://localhost:8102
 ptype="PT_$((SMK % 1000000))"
 expect "$(post_to "$PERMIT" "$S_CHECKER" /v1/permit-types "{\"code\":\"$ptype\",\"category\":\"INSTRUCTOR\",\"licenceClass\":\"LIGHT\",\"minimumDrivingYears\":3,\"minimumAge\":21,\"cleanRecordDays\":365,\"medicalFitRequired\":true,\"testRequired\":true,\"validityDays\":365,\"renewalWindowDays\":30,\"feeMinor\":5000}")" 200
@@ -932,6 +934,7 @@ res=$(post_to "$PERMIT" "$S_CHECKER" "$pbase/transitions" '{"action":"issue"}');
 echo "   permit $(body_of "$res" | json_field "['number']") ISSUED after a passed committee test"
 
 echo "43. Geography (CC-111, RE-002): region -> city -> area -> street -> road segment, children listed"
+S_MAKER=$(token dev.maker "$DEV_MAKER_PASSWORD"); S_CHECKER=$(token dev.checker "$DEV_CHECKER_PASSWORD") # 5-minute tokens
 GEO=http://localhost:8103
 node() { # parent type code [extra-json] -> id
   local parent=${1:+,\"parentId\":\"$1\"}
@@ -946,6 +949,7 @@ g_seg=$(node "$g_street" ROAD_SEGMENT "SG$g" ',"roadType":"ARTERIAL","laneCount"
 echo "   hierarchy SR$g > SC$g > SA$g > SS$g > SG$g"
 
 echo "44. Road permits (RE-020, RE-022): every required authority approves before issue"
+S_MAKER=$(token dev.maker "$DEV_MAKER_PASSWORD"); S_CHECKER=$(token dev.checker "$DEV_CHECKER_PASSWORD") # 5-minute tokens
 ROADP=http://localhost:8104
 res=$(post_to "$ROADP" "$S_MAKER" /v1/road-permits "{\"type\":\"OVERSIZE\",\"applicant\":\"TF-SMKHAUL-$SMK\",\"vehicles\":[\"S 44\"],\"routeSegments\":[\"SG$g\"],\"region\":\"DXB\",\"startsAt\":\"$(days_ahead 1)\",\"endsAt\":\"$(days_ahead 3)\",\"vehicleLimit\":2,\"requiredAuthorities\":[\"ROADS\",\"POLICE\"],\"widthMetres\":3.4,\"loadTonnes\":48.0}" PORTAL)
 expect "$res" 201
@@ -958,6 +962,7 @@ res=$(post_to "$ROADP" "$S_CHECKER" "$rbase/transitions" '{"action":"issue"}'); 
 echo "   road permit issued after ROADS and POLICE approved"
 
 echo "45. Marine craft (RE-030, RE-031): register, renew only after a passed inspection, transfer ownership"
+S_MAKER=$(token dev.maker "$DEV_MAKER_PASSWORD"); S_CHECKER=$(token dev.checker "$DEV_CHECKER_PASSWORD") # 5-minute tokens
 MAR=http://localhost:8105
 hull="HULL-$SMK"
 expect "$(post_to "$MAR" "$S_MAKER" /v1/marine-craft "{\"hullId\":\"$hull\",\"type\":\"MOTOR_BOAT\",\"lengthMetres\":8.5,\"engines\":2,\"capacity\":6,\"homePort\":\"DXB_PORT\",\"owner\":\"TF-SMKM1-$SMK\"}")" 201
@@ -969,6 +974,7 @@ res=$(post_to "$MAR" "$S_MAKER" "/v1/marine-craft/$hull/ownership-transfers" "{\
 echo "   $hull renewed after a passed inspection and transferred"
 
 echo "46. Cross-border and UAT-5 (XB-002, XB-003, XB-004, XB-007; CONF-002 a): a partner violation paid here closes, the notice reaches the real-time partner within 15 minutes, the settlement keeps the commission"
+S_MAKER=$(token dev.maker "$DEV_MAKER_PASSWORD"); S_CHECKER=$(token dev.checker "$DEV_CHECKER_PASSWORD") # 5-minute tokens
 XB=http://localhost:8106
 partner="PS$((SMK % 100000))"
 approve_proposal() { # result of a proposal -> approved by the checker
@@ -999,6 +1005,7 @@ printf '%s' "$settlement" | "$PY" -c "import json,sys; s=json.load(sys.stdin)['i
 echo "   UAT-5: $xb_number (partner $partner) paid here -> PAID; notice acknowledged after ${notice_secs}s (<= 900); settlement 30000 collected, 3000 commission kept"
 
 echo "47. Instalment plans (VF-071, VF-073): two open fines move into a 3-month plan; the first instalment paid at the counter reaches the plan"
+S_MAKER=$(token dev.maker "$DEV_MAKER_PASSWORD"); S_CHECKER=$(token dev.checker "$DEV_CHECKER_PASSWORD") # 5-minute tokens
 catalogue "SMKI_$SMK" 300000 0
 plan_file="TF-SMKI-$SMK"
 first_fine=$(record "SMKI_$SMK" "$plan_file" "")
@@ -1017,5 +1024,19 @@ wait_until 60 first_paid || { echo "FAIL: instalment 1 of $plan not marked paid"
 [[ "$(get_from "$VIO" "$S_MAKER" "/v1/violations/$first_fine" | json_field "['status']")" == OPEN ]] \
   || { echo "FAIL: VF-073 the violation should stay open while the plan runs"; exit 1; }
 echo "   $plan: $first_fine + $second_fine (600000) in 3 instalments; instalment 1 paid at the counter -> plan updated; violations stay OPEN"
+
+echo "48. Unified search (CC-100, CC-102): one query through the gateway reaches the owning services with the caller's token"
+S_MAKER=$(token dev.maker "$DEV_MAKER_PASSWORD"); S_CHECKER=$(token dev.checker "$DEV_CHECKER_PASSWORD") # 5-minute tokens
+GW=http://localhost:9080
+res=$(post_to "$GW" "$S_MAKER" /v1/searches "{\"query\":\"$vin\"}")
+expect "$res" 200
+printf '%s' "$(body_of "$res")" | "$PY" -c "import json,sys; r=json.load(sys.stdin); hits=[h for h in r['items'] if h['type']=='VEHICLE' and h['id']==sys.argv[1]]; src={s['name']: s['status'] for s in r['sources']}; assert hits and hits[0]['fields'].get('status')=='REGISTERED' and src.get('vehicle-vin')=='OK' and 'licence' not in src, r" "$vin"   || { echo "FAIL: search for $vin: $(body_of "$res")"; exit 1; }
+res=$(post_to "$GW" "$S_MAKER" /v1/searches "{\"query\":\"$first_fine\",\"types\":[\"VIOLATION\"]}")
+expect "$res" 200
+[[ "$(body_of "$res" | json_field "['items'][0]['reference']")" == "$first_fine" ]]   || { echo "FAIL: search for $first_fine: $(body_of "$res")"; exit 1; }
+expect "$(post_to "$GW" "$S_MAKER" /v1/searches '{"query":"a%b"}')" 422 QUERY_INVALID
+searches=$(db_sql search-postgres search "$SEARCH_DB_USER" "select count(*) from audit_outbox where action = 'SEARCH_PERFORMED'")
+(( searches >= 2 )) || { echo "FAIL: CC-102 searches not audited ($searches)"; exit 1; }
+echo "   $vin -> VEHICLE (vehicle-vin OK); $first_fine -> VIOLATION; malformed query 422; $searches searches audited"
 
 echo "SMOKE OK"

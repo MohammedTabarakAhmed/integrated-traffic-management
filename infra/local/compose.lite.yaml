@@ -107,3 +107,5 @@ services:
     environment: *lite-service-jvm
   crossborder-service:
     environment: *lite-service-jvm
+  search-service:
+    environment: *lite-service-jvm

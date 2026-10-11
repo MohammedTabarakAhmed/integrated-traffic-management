@@ -1,0 +1,119 @@
+openapi: 3.1.0
+info:
+  title: ITMS Search Service
+  version: 1.0.0
+  description: |
+    Unified staff search (CC-100, CC-102, CC-103; Increment 10).
+
+    One search bar across traffic files (people and companies), licences, vehicles and plates, violations, accidents
+    and transactions. The query goes, in parallel, to each configured source whose identifier shape it has (file
+    number, national identity number, VIN, plate, licence number, violation number, accident id, transaction
+    reference). Each source is the owning service's own lookup, asked with the caller's own token and channel: the
+    owning service applies the caller's permissions and data scope (CC-001, CC-102) and audits the read, so this
+    service holds no copy of anyone's data (one database per service). A source that refuses the caller is reported
+    `FORBIDDEN`, one that does not answer within the deadline (`itms.search.deadline`, default 2 s, CC-103)
+    `UNAVAILABLE`; neither is hidden. Every search is recorded in the central audit trail with its query, the record
+    types, the number of hits and each source's status (CC-102).
+
+    Not yet in this version: partial, transliterated and phonetic name search (CC-101) needs a name index in the
+    owning traffic-file-service; searching is exact on identifiers.
+
+    The channel is the `X-Channel` header (set by the gateway or BFF). A search changes nothing, so it needs no
+    `Idempotency-Key`. Request input (SEC-022) is hardened once in itms-platform: unknown fields and malformed values
+    are refused with 400 `VALIDATION_FAILED`.
+servers:
+  - url: /
+security:
+  - bearerAuth: []
+tags:
+  - name: Search
+paths:
+  /v1/searches:
+    post:
+      tags: [Search]
+      operationId: search
+      summary: Search across the records of CC-100 with one query; each owning service applies the caller's scope
+      description: |
+        422 `QUERY_INVALID` when the query is not 2 to 100 letters, digits, spaces or `. _ : / -`; 422
+        `CHANNEL_REQUIRED` without `X-Channel`. `types` limits the record types asked; none means all.
+      x-itms-permission: search.execute
+      x-itms-scope: national
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SearchRequest' }
+      responses:
+        '200':
+          description: The hits and how each source answered
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SearchResult' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  responses:
+    Problem:
+      description: The request was refused
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    EntityType:
+      type: string
+      enum: [TRAFFIC_FILE, LICENCE, VEHICLE, VIOLATION, ACCIDENT, TRANSACTION]
+    SearchRequest:
+      type: object
+      additionalProperties: false
+      required: [query]
+      properties:
+        query: { type: string, minLength: 1, maxLength: 200 }
+        types:
+          oneOf:
+            - { type: array, maxItems: 6, uniqueItems: true, items: { $ref: '#/components/schemas/EntityType' } }
+            - { type: 'null' }
+    Hit:
+      type: object
+      additionalProperties: false
+      required: [type, id, reference, fields]
+      properties:
+        type: { $ref: '#/components/schemas/EntityType' }
+        id: { type: string }
+        reference: { type: string }
+        region: { oneOf: [ { type: string }, { type: 'null' } ] }
+        fields:
+          type: object
+          description: A few fields of the record as its owning service showed them to this caller
+          additionalProperties: { type: string }
+    Source:
+      type: object
+      additionalProperties: false
+      required: [name, type, status]
+      properties:
+        name: { type: string }
+        type: { $ref: '#/components/schemas/EntityType' }
+        status: { type: string, enum: [OK, FORBIDDEN, UNAVAILABLE] }
+    SearchResult:
+      type: object
+      additionalProperties: false
+      required: [searchId, items, sources]
+      properties:
+        searchId: { type: string, format: uuid }
+        items: { type: array, items: { $ref: '#/components/schemas/Hit' } }
+        sources: { type: array, items: { $ref: '#/components/schemas/Source' } }
+    Problem:
+      type: object
+      additionalProperties: true
+      required: [type, title, status]
+      properties:
+        type: { type: string, format: uri-reference }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        code: { type: string }
+        requirementRefs: { type: array, items: { type: string } }
+        correlationId: { type: string }

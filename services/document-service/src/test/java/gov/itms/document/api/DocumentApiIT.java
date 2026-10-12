@@ -12,6 +12,7 @@ import com.atlassian.oai.validator.model.SimpleRequest;
 import com.atlassian.oai.validator.model.SimpleResponse;
 import com.atlassian.oai.validator.report.ValidationReport;
 import gov.itms.document.infrastructure.ClamdStub;
+import gov.itms.document.infrastructure.SealVerifier;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Arrays;
@@ -57,6 +58,7 @@ import tools.jackson.databind.ObjectMapper;
         "itms.security.jwk-set-uri=https://idp.test/realms/itms/protocol/openid-connect/certs",
         "itms.security.authorisation-source=token-claims",
         "itms.documents.store.bucket=itms-documents",
+        "itms.documents.seal.allow-ephemeral=true",
         "itms.documents.store.access-key=" + DocumentApiIT.MINIO_USER,
         "itms.documents.store.secret-key=" + DocumentApiIT.MINIO_PASSWORD,
         "itms.documents.scanner.host=127.0.0.1",
@@ -378,11 +380,14 @@ class DocumentApiIT {
         String verification = c.get("verificationCode").asString();
         assertThat(number).matches("CRT-\\d{4}-\\d{8}-\\d");
 
-        MvcResult html = mvc.perform(get("/v1/documents/" + c.get("documentId").asString() + "/content")
+        MvcResult pdf = mvc.perform(get("/v1/documents/" + c.get("documentId").asString() + "/content")
                 .with(officer()).header("X-Channel", "BACKOFFICE")).andReturn();
-        assertThat(html.getResponse().getStatus()).isEqualTo(200);
-        String page = html.getResponse().getContentAsString(StandardCharsets.UTF_8);
-        assertThat(page).contains("<svg", "We certify that Mohammed Ahmed owns A 1", number,
+        assertThat(pdf.getResponse().getStatus()).isEqualTo(200);
+        assertThat(pdf.getResponse().getContentType()).startsWith("application/pdf");
+        SealVerifier.Checked sealed = SealVerifier.check(pdf.getResponse().getContentAsByteArray());
+        assertThat(sealed.valid()).as("Q-067: the PDF carries a valid electronic seal").isTrue();
+        assertThat(sealed.subFilter()).isEqualTo("ETSI.CAdES.detached");
+        assertThat(sealed.text()).contains("We certify that Mohammed Ahmed owns A 1", number,
                 number + "?code=" + verification);
 
         MvcResult publicCheck = call(get("/v1/certificate-verifications/" + number + "?code=" + verification),

@@ -23,7 +23,7 @@ import tools.jackson.databind.ObjectMapper;
 
 /** Wires documents and certificates to PostgreSQL, the object store, clamd and the HTML renderer. */
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties(DocumentProperties.class)
+@EnableConfigurationProperties({DocumentProperties.class, SealProperties.class})
 public class DocumentServiceConfiguration {
 
     @Bean
@@ -54,9 +54,12 @@ public class DocumentServiceConfiguration {
 
     @Bean
     CertificateService certificateService(JdbcDocumentRepository repo, Ports.ContentStore store,
-                                          DocumentProperties properties, AuditRecorder audit,
+                                          DocumentProperties properties, SealProperties seal, AuditRecorder audit,
                                           DomainEventRecorder events, Clock clock) {
-        return new CertificateService(repo, store, new HtmlCertificateRenderer(), audit, events,
+        // Q-067, ADR-064 decision 6: production certificates are sealed PDFs; HTML is a development preview only.
+        Ports.CertificateRenderer renderer = "HTML".equals(seal.format()) ? new HtmlCertificateRenderer()
+                : new PdfCertificateRenderer(CertificateSeal.load(seal));
+        return new CertificateService(repo, store, renderer, audit, events,
                 new CertificateService.Settings(properties.certificates().numberPrefix(),
                         properties.certificates().verificationBaseUrl()), clock);
     }

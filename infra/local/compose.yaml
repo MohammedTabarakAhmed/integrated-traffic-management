@@ -822,6 +822,9 @@ services:
       ITMS_TRAFFIC_FILES_URL: http://traffic-file-service:8080
       ITMS_OIDC_TOKEN_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/token
       ITMS_SERVICE_CLIENT_ID: itms-document-service
+      # LOCAL DEVELOPMENT ONLY: certificates are sealed with a fresh self-signed key named "not valid for official
+      # use"; real environments set ITMS_DOCUMENTS_SEAL_KEYSTORE(_TYPE) to the HSM or key file (Q-067, ADR-066).
+      ITMS_DOCUMENTS_SEAL_ALLOW_EPHEMERAL: "true"
       # Short-lived login from OpenBao (ADR-039), files under /run/secrets/spring/datasource; owner role on connect.
       SPRING_DATASOURCE_HIKARI_CONNECTIONINITSQL: SET ROLE itms_owner
       ITMS_OIDC_ISSUER: http://localhost:8180/realms/itms

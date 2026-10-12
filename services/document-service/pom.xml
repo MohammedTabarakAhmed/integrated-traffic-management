@@ -47,6 +47,28 @@
       <groupId>com.google.zxing</groupId>
       <artifactId>core</artifactId>
     </dependency>
+    <!-- Sealed PDF certificates (CC-082, Q-067, ADR-066): PDFBox renders and signs, ICU4J shapes Arabic,
+         BouncyCastle builds the CMS seal (ECDSA P-256 / SHA-256). -->
+    <dependency>
+      <groupId>org.apache.pdfbox</groupId>
+      <artifactId>pdfbox</artifactId>
+      <version>3.0.8</version>
+    </dependency>
+    <dependency>
+      <groupId>com.ibm.icu</groupId>
+      <artifactId>icu4j</artifactId>
+      <version>78.3</version>
+    </dependency>
+    <dependency>
+      <groupId>org.bouncycastle</groupId>
+      <artifactId>bcpkix-jdk18on</artifactId>
+      <version>1.86</version>
+    </dependency>
+    <dependency>
+      <groupId>org.bouncycastle</groupId>
+      <artifactId>bcprov-jdk18on</artifactId>
+      <version>1.86</version>
+    </dependency>
     <dependency>
       <groupId>org.postgresql</groupId>
       <artifactId>postgresql</artifactId>

@@ -69,6 +69,16 @@ itms:
       events:
         - { event-type: itms.vehicle.certificate-issued, template-code: 'VL_CERT_{kind}', subject-type: VEHICLE, subject-field: vin, holder-file-field: ownerFileNumber, reference-field: number }
         - { event-type: itms.licence.noc-issued, template-code: LICENCE_NOC, subject-type: LICENCE, subject-field: licenceNumber, holder-file-field: trafficFileNumber, reference-field: certificateNumber }
+    # Rendering and electronic seal (CC-082, Q-067, ADR-066): PDF sealed with ECDSA P-256 / SHA-256 from an HSM
+    # (keystore-type PKCS11, keystore = SunPKCS11 configuration) or a PKCS#12 file; the PIN or password is the secret
+    # file itms.documents.seal.password. HTML is an unsealed development preview only. allow-ephemeral (development)
+    # seals with a fresh self-signed key whose name says it is not valid for official use.
+    seal:
+      format: ${ITMS_DOCUMENTS_SEAL_FORMAT:PDF}
+      keystore-type: ${ITMS_DOCUMENTS_SEAL_KEYSTORE_TYPE:PKCS12}
+      keystore: ${ITMS_DOCUMENTS_SEAL_KEYSTORE:}
+      alias: ${ITMS_DOCUMENTS_SEAL_ALIAS:itms-seal}
+      allow-ephemeral: ${ITMS_DOCUMENTS_SEAL_ALLOW_EPHEMERAL:false}
     # The certificate hand-off needs the broker; off by default like the outbox relay.
     consumer:
       enabled: ${ITMS_DOCUMENTS_CONSUMER_ENABLED:false}

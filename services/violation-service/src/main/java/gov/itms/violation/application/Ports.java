@@ -245,6 +245,14 @@ public final class Ports {
         java.util.Optional<Cover> covering(String plate, java.time.Instant at);
     }
 
+    /**
+     * The signed-in customer's traffic file (ADR-067 d), from traffic-file-service by the national id in their token.
+     * Empty when they have no file; errors are UnavailableException.
+     */
+    public interface OwnFile {
+        java.util.Optional<String> fileNumber();
+    }
+
     public static class UnavailableException extends RuntimeException {
         private final String code;
 

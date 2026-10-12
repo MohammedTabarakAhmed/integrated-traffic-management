@@ -302,6 +302,27 @@ final class Adapters {
         }
     }
 
+    /** The customer's file through traffic-file-service with the customer's own token (ADR-067 d). */
+    static class RemoteOwnFile implements Ports.OwnFile {
+
+        private final gov.itms.platform.client.OwnTrafficFile files;
+
+        RemoteOwnFile(gov.itms.platform.client.OwnTrafficFile files) {
+            this.files = files;
+        }
+
+        @Override
+        public java.util.Optional<String> fileNumber() {
+            try {
+                return files.fileNumber();
+            } catch (ServiceCallException e) {
+                LOG.warn("Own traffic file lookup failed: {}", e.getMessage());
+                throw new Ports.UnavailableException("TRAFFIC_FILES_UNAVAILABLE", "your traffic file cannot be found now",
+                        e);
+            }
+        }
+    }
+
     /** {@code GET /v1/vehicles?plate=} at vehicle-service with this service's own account (XB-002). */
     static class RemoteVehicles implements Ports.Vehicles {
 

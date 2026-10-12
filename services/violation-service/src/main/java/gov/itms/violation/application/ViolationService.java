@@ -447,10 +447,15 @@ public class ViolationService {
     @Transactional
     public Standing standing(String fileNumber, Caller caller) {
         require(caller.grants().holds(READ));
+        audit.record("BLACK_POINTS_VIEWED", "BlackPointAccount", fileNumber, null, null, null);
+        return standingOf(fileNumber);
+    }
+
+    /** A file's black points standing, without permission check or audit: the caller does both. */
+    Standing standingOf(String fileNumber) {
         LocalDate today = today();
         List<BlackPoints.Entry> entries = repo.points(fileNumber);
         List<BlackPoints.Suspension> suspensions = repo.suspensions(fileNumber);
-        audit.record("BLACK_POINTS_VIEWED", "BlackPointAccount", fileNumber, null, null, null);
         return new Standing(fileNumber, BlackPoints.active(entries, today), settings.points().suspensionThreshold(),
                 suspensions.stream().filter(s -> s.activeOn(today)).findFirst().orElse(null), entries, suspensions);
     }

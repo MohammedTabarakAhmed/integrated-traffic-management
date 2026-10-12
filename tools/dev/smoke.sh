@@ -1278,4 +1278,15 @@ status=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $(toke
 [[ "$status" == 403 ]] || { echo "FAIL: a staff token reached /v1/me/traffic-file ($status)"; exit 1; }
 echo "   own file $(printf '%s' "$own" | json_field "['fileNumber']") for the signed-in national id; staff 403"
 
+echo "55. Customer own violations (ADR-067 d): violation-service finds the customer's file with their own token at traffic-file-service and lists only that file's violations and points"
+own_file=$(printf '%s' "$own" | json_field "['fileNumber']")
+curl -sf -H "Authorization: Bearer $CUSTOMER" -H "X-Channel: PORTAL" "$GW/v1/me/violations" | "$PY" -c "
+import json,sys
+items=json.load(sys.stdin)['items']
+bad=[v['number'] for v in items if v['responsibleFileNumber']!='$own_file']
+sys.exit('FAIL: /v1/me/violations shows other files: '+','.join(bad) if bad else None)" || exit 1
+points_file=$(curl -sf -H "Authorization: Bearer $CUSTOMER" -H "X-Channel: PORTAL" "$GW/v1/me/black-point-account" | json_field "['fileNumber']")
+[[ "$points_file" == "$own_file" ]] || { echo "FAIL: /v1/me/black-point-account is for $points_file"; exit 1; }
+echo "   violations and black points of $own_file only"
+
 echo "SMOKE OK"

@@ -366,6 +366,58 @@ paths:
         '422': { $ref: '#/components/responses/Problem' }
         '503': { $ref: '#/components/responses/Problem' }
 
+  /v1/me/violations:
+    get:
+      tags: [Violations]
+      operationId: listOwnViolations
+      summary: The signed-in customer's own violations, newest first (ADR-067 d, CH-002; audited)
+      description: >-
+        For customer tokens only (subject_type=CUSTOMER with a national_id claim); staff tokens get 403. The file is
+        the one traffic-file-service finds for the national id in the token (the token is relayed), never a parameter.
+        404 `OWN_FILE_NOT_FOUND` without a traffic file; 503 `TRAFFIC_FILES_UNAVAILABLE`.
+      x-itms-permission: customer.violation.read
+      x-itms-scope: [own]
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [OPEN, PAID, CANCELLED] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+      responses:
+        '200':
+          description: Violations
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Violation' } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/me/black-point-account:
+    get:
+      tags: [Black points]
+      operationId: getOwnBlackPointAccount
+      summary: The signed-in customer's active points, entries and suspensions (ADR-067 d, CH-002; audited)
+      description: >-
+        For customer tokens only; the file comes from the token as for `GET /v1/me/violations`.
+      x-itms-permission: customer.violation.read
+      x-itms-scope: [own]
+      responses:
+        '200':
+          description: Standing
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BlackPointAccount' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
   /v1/black-point-accounts/{fileNumber}:
     get:
       tags: [Black points]
@@ -380,30 +432,7 @@ paths:
           description: Standing
           content:
             application/json:
-              schema:
-                type: object
-                additionalProperties: false
-                required: [fileNumber, activePoints, threshold, entries, suspensions]
-                properties:
-                  fileNumber: { type: string }
-                  activePoints: { type: integer }
-                  threshold: { type: integer }
-                  activeSuspension: { oneOf: [ { $ref: '#/components/schemas/Suspension' }, { type: 'null' } ] }
-                  entries:
-                    type: array
-                    items:
-                      type: object
-                      additionalProperties: false
-                      required: [id, fileNumber, violationId, points, occurredOn, expiresOn, status]
-                      properties:
-                        id: { type: string, format: uuid }
-                        fileNumber: { type: string }
-                        violationId: { type: string, format: uuid }
-                        points: { type: integer }
-                        occurredOn: { type: string, format: date }
-                        expiresOn: { type: string, format: date }
-                        status: { type: string, enum: [ACTIVE, CONSUMED, CANCELLED] }
-                  suspensions: { type: array, items: { $ref: '#/components/schemas/Suspension' } }
+              schema: { $ref: '#/components/schemas/BlackPointAccount' }
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Problem' }
@@ -541,6 +570,30 @@ components:
               items: { type: array, items: { $ref: '#/components/schemas/CatalogueEntry' } }
 
   schemas:
+    BlackPointAccount:
+      type: object
+      additionalProperties: false
+      required: [fileNumber, activePoints, threshold, entries, suspensions]
+      properties:
+        fileNumber: { type: string }
+        activePoints: { type: integer }
+        threshold: { type: integer }
+        activeSuspension: { oneOf: [ { $ref: '#/components/schemas/Suspension' }, { type: 'null' } ] }
+        entries:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, fileNumber, violationId, points, occurredOn, expiresOn, status]
+            properties:
+              id: { type: string, format: uuid }
+              fileNumber: { type: string }
+              violationId: { type: string, format: uuid }
+              points: { type: integer }
+              occurredOn: { type: string, format: date }
+              expiresOn: { type: string, format: date }
+              status: { type: string, enum: [ACTIVE, CONSUMED, CANCELLED] }
+        suspensions: { type: array, items: { $ref: '#/components/schemas/Suspension' } }
     Code:
       type: string
       pattern: '^[A-Z0-9][A-Z0-9_]{0,39}$'

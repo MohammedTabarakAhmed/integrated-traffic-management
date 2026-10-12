@@ -109,6 +109,10 @@ itms:
       client-id: ${ITMS_SERVICE_CLIENT_ID:itms-violation-service}
       client-secret: ${ITMS_SERVICE_CLIENT_SECRET:}
       timeout: ${ITMS_VEHICLES_TIMEOUT:3s}
+    # The customer's own file (ADR-067 d): called with the customer's token, so no client account is needed.
+    traffic-files:
+      base-url: ${ITMS_TRAFFIC_FILES_URL:http://localhost:8085}
+      timeout: ${ITMS_TRAFFIC_FILES_TIMEOUT:3s}
     rentals:
       base-url: ${ITMS_RENTALS_URL:http://localhost:8101}
       token-uri: ${ITMS_OIDC_TOKEN_URI:http://localhost:8180/realms/itms/protocol/openid-connect/token}

@@ -12,6 +12,7 @@
     <Or>
       <And><Class name="gov.itms.platform.audit.JdbcAuditRecorder"/><Field name="json"/></And>
       <And><Class name="gov.itms.platform.client.ServiceTokenProvider"/><Field name="tokenClient"/></And>
+      <And><Class name="gov.itms.platform.client.OwnTrafficFile"/><Field name="client"/></And>
       <And><Class name="gov.itms.platform.events.JdbcDomainEventRecorder"/><Field name="json"/></And>
       <And><Class name="gov.itms.platform.events.KafkaEventPublisher"/><Field name="kafka"/></And>
       <And><Class name="gov.itms.platform.events.OutboxRelay"/><Field name="~json|meters|tx"/></And>
@@ -74,6 +75,7 @@
       <And><Class name="gov.itms.violation.application.CrossborderViolations"/><Field name="~violations|repo|links"/></And>
       <And><Class name="gov.itms.violation.application.ObjectionService"/><Field name="~objections|links|violations"/></And>
       <And><Class name="gov.itms.violation.application.ViolationBooks"/><Field name="repo"/></And>
+      <And><Class name="gov.itms.violation.application.CustomerViolations"/><Field name="~repo|violations"/></And>
       <And><Class name="gov.itms.violation.infrastructure.ViolationServiceConfiguration$UnpaidHoldJob"/><Field name="violations"/></And>
       <And><Class name="gov.itms.violation.infrastructure.ViolationServiceConfiguration$ConfirmationJob"/><Field name="violations"/></And>
       <And><Class name="gov.itms.reporting.application.ReportingService"/><Field name="warehouse"/></And>

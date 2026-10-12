@@ -156,6 +156,7 @@ class ViolationApiIT {
             registry.add("itms.clients." + client + ".client-id", () -> PartnerStub.CLIENT_ID);
             registry.add("itms.clients." + client + ".client-secret", () -> PartnerStub.CLIENT_SECRET);
         }
+        registry.add("itms.clients.traffic-files.base-url", PARTNERS::baseUrl);
     }
 
     @Autowired
@@ -300,6 +301,47 @@ class ViolationApiIT {
         MvcResult r = postAs("/v1/violations", report(code, driverFile), officer());
         assertThat(r.getResponse().getStatus()).as(r.getResponse().getContentAsString()).isEqualTo(201);
         return body(r);
+    }
+
+    private static RequestPostProcessor ownCustomer(String token, String... permissions) {
+        return jwt().jwt(j -> j.tokenValue(token).subject("u-" + token).claim("preferred_username", token)
+                .claim("subject_type", "CUSTOMER").claim("national_id", "784" + Math.abs(token.hashCode()))
+                .claim("roles", List.of("CUSTOMER")).claim("permissions", Arrays.asList(permissions)));
+    }
+
+    @Test
+    @Tag("CH-002")
+    @Tag("CC-001")
+    @DisplayName("ADR-067 d: a customer lists only their own violations and black points; the file comes from "
+            + "traffic-file-service with the customer's own token; audited; staff 403, no file 404")
+    void ownViolations() throws Exception {
+        String code = catalogue(30_000, 4);
+        String file = "TF-OWN-" + suffix().replace('_', '-');
+        String other = "TF-OTHER-" + suffix().replace('_', '-');
+        String number = recorded(code, file).get("number").asString();
+        recorded(code, other);
+        String token = "cust-" + suffix();
+        PARTNERS.ownFiles.put(token, file);
+
+        MvcResult listed = getAs("/v1/me/violations", ownCustomer(token, "customer.violation.read"));
+        assertThat(listed.getResponse().getStatus()).as(listed.getResponse().getContentAsString()).isEqualTo(200);
+        assertThat(body(listed).get("items")).singleElement()
+                .satisfies(v -> assertThat(v.get("number").asString()).isEqualTo(number));
+        assertThat(PARTNERS.ownFileTokens).contains(token);
+        JsonNode standing = body(getAs("/v1/me/black-point-account", ownCustomer(token, "customer.violation.read")));
+        assertThat(standing.get("fileNumber").asString()).isEqualTo(file);
+        assertThat(db.sql("select count(*) from audit_outbox where entity_id = :f and new_value::text like '%OWNER%' "
+                + "and action in ('VIOLATIONS_LISTED', 'BLACK_POINTS_VIEWED')").param("f", file)
+                .query(Long.class).single()).isEqualTo(2L);
+
+        assertThat(getAs("/v1/me/violations", ownCustomer(token)).getResponse().getStatus())
+                .as("customer without the permission").isEqualTo(403);
+        assertThat(getAs("/v1/me/violations", user("u-staff-own", "READER", "violation.read",
+                "customer.violation.read")).getResponse().getStatus()).as("staff token").isEqualTo(403);
+        MvcResult none = getAs("/v1/me/black-point-account", ownCustomer("cust-nofile" + suffix(),
+                "customer.violation.read"));
+        assertThat(none.getResponse().getStatus()).isEqualTo(404);
+        assertThat(code(none)).isEqualTo("OWN_FILE_NOT_FOUND");
     }
 
     @Test

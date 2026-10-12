@@ -33,6 +33,9 @@ public final class PartnerStub implements AutoCloseable {
     /** rental-service stand-in (TR-032): plate -> {contractId, companyFile, renterFile or null}, covering any time. */
     public final java.util.Map<String, String[]> rentals = new java.util.concurrent.ConcurrentHashMap<>();
     public final List<String> rentalQueries = new CopyOnWriteArrayList<>();
+    /** Customer token → traffic file number for {@code GET /v1/me/traffic-file} (ADR-067 d). */
+    public final java.util.Map<String, String> ownFiles = new java.util.concurrent.ConcurrentHashMap<>();
+    public final List<String> ownFileTokens = new CopyOnWriteArrayList<>();
     public final List<JsonNode> holds = new CopyOnWriteArrayList<>();
     public final List<String> holdKeys = new CopyOnWriteArrayList<>();
     public volatile boolean holdsDown;
@@ -49,6 +52,18 @@ public final class PartnerStub implements AutoCloseable {
         }
         server.createContext("/token", ex -> respond(ex, 200,
                 "{\"access_token\":\"it-token\",\"token_type\":\"Bearer\",\"expires_in\":300}"));
+        server.createContext("/v1/me/traffic-file", ex -> {
+            // traffic-file-service with the relayed customer token (ADR-067 d): the file of that token, or 404.
+            String auth = String.valueOf(ex.getRequestHeaders().getFirst("Authorization"));
+            String token = auth.startsWith("Bearer ") ? auth.substring(7) : "";
+            ownFileTokens.add(token);
+            String file = ownFiles.get(token);
+            if (file == null) {
+                respond(ex, 404, "{\"code\":\"OWN_FILE_NOT_FOUND\"}");
+                return;
+            }
+            respond(ex, 200, "{\"fileNumber\":\"" + file + "\"}");
+        });
         server.createContext("/v1/payables", this::payables);
         server.createContext("/v1/vehicles", ex -> {
             String query = java.net.URLDecoder.decode(String.valueOf(ex.getRequestURI().getRawQuery()),

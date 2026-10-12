@@ -353,6 +353,8 @@ routes:
     upstream_id: violation-service
     plugin_config_id: protected-api
     uris:
+      - /v1/me/violations
+      - /v1/me/black-point-account
       - /v1/violations
       - /v1/violations/*
       - /v1/violation-catalogue

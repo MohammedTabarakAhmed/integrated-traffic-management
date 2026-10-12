@@ -1,11 +1,13 @@
 package gov.itms.violation.infrastructure;
 
 import gov.itms.platform.audit.AuditRecorder;
+import gov.itms.platform.client.OwnTrafficFile;
 import gov.itms.platform.client.ServiceClientProperties;
 import gov.itms.platform.client.ServiceClients;
 import gov.itms.platform.events.DomainEventRecorder;
 import gov.itms.violation.application.ViolationService;
 import gov.itms.violation.application.CrossborderViolations;
+import gov.itms.violation.application.CustomerViolations;
 import gov.itms.violation.application.InstalmentService;
 import gov.itms.violation.application.ObjectionService;
 import gov.itms.violation.application.ViolationBooks;
@@ -93,6 +95,20 @@ public class ViolationServiceConfiguration {
             }
             new BlackPoints.Policy(pointsExpiryMonths, suspensionThreshold, suspensionMonths, warningThresholds);
         }
+    }
+
+    /** The signed-in customer's own violations (ADR-067 d); the file is looked up with the customer's token. */
+    @Bean
+    CustomerViolations customerViolations(JdbcClient jdbc, ObjectMapper json, ViolationService violations,
+                                          AuditRecorder audit, Environment environment,
+                                          ObjectProvider<ObservationRegistry> observations) {
+        String baseUrl = environment.getRequiredProperty("itms.clients.traffic-files.base-url");
+        Duration timeout = environment.getProperty("itms.clients.traffic-files.timeout", Duration.class,
+                Duration.ofSeconds(3));
+        return new CustomerViolations(new JdbcViolationRepository(jdbc, json),
+                new Adapters.RemoteOwnFile(OwnTrafficFile.create(baseUrl, timeout,
+                        observations.getIfAvailable(() -> ObservationRegistry.NOOP))),
+                violations, audit);
     }
 
     @Bean

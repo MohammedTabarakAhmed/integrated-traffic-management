@@ -1138,6 +1138,8 @@ services:
       ITMS_VEHICLES_URL: http://vehicle-service:8080
       # A violation without an identified driver goes to the renter of the covering contract (TR-032, UAT-2).
       ITMS_RENTALS_URL: http://rental-service:8080
+      # A customer's own violations (ADR-067 d): their file is looked up with their own token.
+      ITMS_TRAFFIC_FILES_URL: http://traffic-file-service:8080
       ITMS_OIDC_TOKEN_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/token
       ITMS_SERVICE_CLIENT_ID: itms-violation-service
       ITMS_VIOLATIONS_CONSUMER_ENABLED: "true"

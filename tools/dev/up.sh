@@ -96,6 +96,8 @@ wanted = {
     "DEV_DOCUMENT_SERVICE_SECRET": lambda: secrets.token_urlsafe(32),
     "DEV_LICENSING_SERVICE_SECRET": lambda: secrets.token_urlsafe(32),
     "DEV_EXAMINATION_SERVICE_SECRET": lambda: secrets.token_urlsafe(32),
+    "DEV_CUSTOMER_PASSWORD": lambda: secrets.token_urlsafe(16),
+    "DEV_NATIONAL_ID_BROKER_SECRET": lambda: secrets.token_urlsafe(32),
     "LIC_DB_USER": lambda: "licensing",
     "LIC_DB_PASSWORD": lambda: secrets.token_urlsafe(24),
     "EXAM_DB_USER": lambda: "examination",
@@ -192,6 +194,54 @@ KC=(env MSYS_NO_PATHCONV=1 docker compose "${COMPOSE_FILES[@]}" --env-file "$ENV
 "${KC[@]}" update clients/7d0c1a3e-5b2f-4c1d-9e8a-100000000010 -r itms -s "secret=$DEV_DOCUMENT_SERVICE_SECRET"
 "${KC[@]}" update clients/7d0c1a3e-5b2f-4c1d-9e8a-100000000011 -r itms -s "secret=$DEV_LICENSING_SERVICE_SECRET"
 "${KC[@]}" update clients/7d0c1a3e-5b2f-4c1d-9e8a-100000000012 -r itms -s "secret=$DEV_EXAMINATION_SERVICE_SECRET"
+
+echo "== Customer sign-in through the mock national digital ID (ADR-067; LOCAL DEVELOPMENT ONLY)"
+# The mock persons are those of the identity-register mock; one password for both, from $ENV_FILE.
+"${KC[@]}" set-password -r national-id-mock --username 784199012345671 --new-password "$DEV_CUSTOMER_PASSWORD"
+"${KC[@]}" set-password -r national-id-mock --username 784198812345672 --new-password "$DEV_CUSTOMER_PASSWORD"
+"${KC[@]}" update clients/8e1d2b4f-6c3a-4d2e-9f0b-200000000001 -r national-id-mock -s "secret=$DEV_NATIONAL_ID_BROKER_SECRET"
+kc_flow_id() { # alias -> id of the top-level flow, empty if missing
+  "${KC[@]}" get authentication/flows -r itms --fields id,alias --format csv --noquotes | tr -d '\r' \
+    | awk -F, -v a="$1" '$2 == a {print $1}'
+}
+kc_flow() { # alias provider requirement [config-alias config-json]: a top-level flow with one execution
+  [[ -z "$(kc_flow_id "$1")" ]] || return 0
+  "${KC[@]}" create authentication/flows -r itms -s alias="$1" -s providerId=basic-flow -s topLevel=true \
+    -s builtIn=false -s "description=ADR-067" >/dev/null
+  "${KC[@]}" create "authentication/flows/$1/executions/execution" -r itms -s provider="$2" >/dev/null
+  local id
+  id=$("${KC[@]}" get "authentication/flows/$1/executions" -r itms --fields id,providerId --format csv --noquotes \
+    | tr -d '\r' | awk -F, -v p="$2" '$2 == p {print $1}')
+  "${KC[@]}" update "authentication/flows/$1/executions" -r itms -b "{\"id\":\"$id\",\"requirement\":\"$3\"}"
+  [[ -z "${4:-}" ]] || "${KC[@]}" create "authentication/executions/$id/config" -r itms \
+    -b "{\"alias\":\"$4\",\"config\":$5}" >/dev/null
+}
+# First sign-in creates the customer's account (username = national id); never links to an existing account.
+kc_flow customer-first-login idp-create-user-if-unique REQUIRED
+# itms-portal has no password form: every sign-in goes to the national digital ID.
+kc_flow customer-browser identity-provider-redirector REQUIRED national-id-only '{"defaultProvider":"national-id"}'
+if ! "${KC[@]}" get identity-provider/instances/national-id -r itms >/dev/null 2>&1; then
+  "${KC[@]}" create identity-provider/instances -r itms -f - >/dev/null <<IDP
+{"alias": "national-id", "displayName": "National digital ID (mock)", "providerId": "oidc", "enabled": true,
+ "trustEmail": false, "storeToken": false, "linkOnly": false, "hideOnLogin": true,
+ "firstBrokerLoginFlowAlias": "customer-first-login",
+ "config": {"issuer": "http://localhost:8180/realms/national-id-mock",
+  "authorizationUrl": "http://localhost:8180/realms/national-id-mock/protocol/openid-connect/auth",
+  "tokenUrl": "http://localhost:8080/realms/national-id-mock/protocol/openid-connect/token",
+  "jwksUrl": "http://localhost:8080/realms/national-id-mock/protocol/openid-connect/certs",
+  "logoutUrl": "http://localhost:8180/realms/national-id-mock/protocol/openid-connect/logout",
+  "useJwksUrl": "true", "validateSignature": "true", "disableUserInfo": "true", "backchannelSupported": "false",
+  "clientId": "itms-broker", "clientSecret": "$DEV_NATIONAL_ID_BROKER_SECRET", "clientAuthMethod": "client_secret_post",
+  "defaultScope": "openid", "pkceEnabled": "true", "pkceMethod": "S256", "syncMode": "FORCE"}}
+IDP
+  "${KC[@]}" create identity-provider/instances/national-id/mappers -r itms -b '{"name": "username is the national id",
+    "identityProviderAlias": "national-id", "identityProviderMapper": "oidc-username-idp-mapper",
+    "config": {"template": "${CLAIM.national_id}", "target": "LOCAL", "syncMode": "FORCE"}}' >/dev/null
+else
+  "${KC[@]}" update identity-provider/instances/national-id -r itms -s "config.clientSecret=$DEV_NATIONAL_ID_BROKER_SECRET"
+fi
+"${KC[@]}" update clients/7d0c1a3e-5b2f-4c1d-9e8a-100000000020 -r itms \
+  -s "authenticationFlowBindingOverrides.browser=$(kc_flow_id customer-browser)"
 
 echo "== Granting development roles through iam-service (dev.iam-admin is the bootstrap administrator)"
 IAM=http://localhost:8082
@@ -383,7 +433,9 @@ ITMS local stack is up:
   Keycloak                http://localhost:8180   (realm: itms; users dev.iam-admin / dev.maker / dev.checker;
                                                    passwords in $ENV_FILE; clients itms-directory-feed and
                                                    itms-transaction-service use DEV_DIRECTORY_FEED_SECRET and
-                                                   DEV_TRANSACTION_SERVICE_SECRET)
+                                                   DEV_TRANSACTION_SERVICE_SECRET; customers sign in to
+                                                   client itms-portal through realm national-id-mock as
+                                                   784199012345671 / 784198812345672, DEV_CUSTOMER_PASSWORD)
   Grafana                 http://localhost:3000   (user admin; password GRAFANA_ADMIN_PASSWORD in $ENV_FILE;
                                                    metrics, logs and traces of every service)
   Prometheus              http://localhost:9090

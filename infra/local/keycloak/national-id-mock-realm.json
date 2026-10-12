@@ -1,0 +1,66 @@
+{
+  "realm": "national-id-mock",
+  "displayName": "Mock national digital ID (LOCAL DEVELOPMENT ONLY, ADR-067)",
+  "enabled": true,
+  "sslRequired": "external",
+  "bruteForceProtected": true,
+  "failureFactor": 5,
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 900,
+  "registrationAllowed": false,
+  "resetPasswordAllowed": false,
+  "clients": [
+    {
+      "id": "8e1d2b4f-6c3a-4d2e-9f0b-200000000001",
+      "clientId": "itms-broker",
+      "name": "ITMS identity broker (realm itms, identity provider national-id); secret set by tools/dev/up.sh",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": ["http://localhost:8180/realms/itms/broker/national-id/endpoint"],
+      "webOrigins": [],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "protocolMappers": [
+        {
+          "name": "national id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "config": {
+            "user.attribute": "username",
+            "claim.name": "national_id",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "id": "8e1d2b4f-6c3a-4d2e-9f0b-000000000001",
+      "username": "784199012345671",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Mock",
+      "lastName": "Citizen",
+      "email": "784199012345671@national-id.invalid"
+    },
+    {
+      "id": "8e1d2b4f-6c3a-4d2e-9f0b-000000000002",
+      "username": "784198812345672",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Mock",
+      "lastName": "Resident",
+      "email": "784198812345672@national-id.invalid"
+    }
+  ]
+}

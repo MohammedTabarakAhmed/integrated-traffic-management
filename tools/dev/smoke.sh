@@ -1166,4 +1166,68 @@ lic_sql() { db_sql licensing-postgres licensing "$LIC_DB_USER" "$1"; }
   || { echo "FAIL: DL-036 licensing-service has no transfer for $lf_number"; exit 1; }
 echo "   $lf_number ($holder): theory 30/30, road 95 by the committee head; PASSED and received by licensing-service"
 
+echo "53. Customer sign-in (ADR-067; Q-050, CH-001): a customer signs in to itms-portal only through the mock national digital ID; the token says who, never what they may do"
+# Browser sign-in with PKCE through both realms, as a portal would; prints the itms access token.
+customer_token() {
+  "$PY" - "$1" "$2" <<'PYEOF'
+import base64, hashlib, html, http.cookiejar, json, re, secrets, sys, urllib.parse, urllib.request
+KC, CB = "http://localhost:8180", "http://localhost:5173/callback"
+verifier = secrets.token_urlsafe(48)
+challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+class Callback(Exception):
+    pass
+class StopAtCallback(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if newurl.startswith(CB):
+            raise Callback(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+class LocalCookies(http.cookiejar.DefaultCookiePolicy):
+    def return_ok_secure(self, cookie, request):  # Keycloak marks cookies Secure; the local stack is plain HTTP
+        return True
+browser = urllib.request.build_opener(
+    urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar(LocalCookies())), StopAtCallback())
+query = urllib.parse.urlencode({"client_id": "itms-portal", "response_type": "code", "scope": "openid",
+                                "redirect_uri": CB, "state": secrets.token_hex(8), "code_challenge": challenge,
+                                "code_challenge_method": "S256"})
+page = browser.open(f"{KC}/realms/itms/protocol/openid-connect/auth?{query}").read().decode()
+form = re.search(r'<form[^>]*id="kc-form-login"[^>]*>', page)
+action = form and re.search(r'action="([^"]+)"', form.group(0))
+if not action or "/realms/national-id-mock/" not in html.unescape(action.group(1)):
+    sys.exit("FAIL: itms-portal did not go straight to the national digital ID login")
+try:
+    page = browser.open(html.unescape(action.group(1)),
+                        urllib.parse.urlencode({"username": sys.argv[1], "password": sys.argv[2]}).encode()).read().decode()
+    title = re.search(r"<title>(.*?)</title>", page, re.S)
+    sys.exit("FAIL: sign-in stopped on a page: " + (title.group(1).strip() if title else page[:200]))
+except Callback as done:
+    callback = str(done)
+code = urllib.parse.parse_qs(urllib.parse.urlparse(callback).query)["code"][0]
+token = json.load(urllib.request.urlopen(f"{KC}/realms/itms/protocol/openid-connect/token", urllib.parse.urlencode(
+    {"grant_type": "authorization_code", "client_id": "itms-portal", "code": code, "redirect_uri": CB,
+     "code_verifier": verifier}).encode()))
+print(token["access_token"])
+PYEOF
+}
+claims_of() { printf '%s' "$1" | "$PY" -c "import base64,json,sys; p=sys.stdin.read().split('.')[1]; print(json.dumps(json.loads(base64.urlsafe_b64decode(p+'='*(-len(p)%4)))))"; }
+CUSTOMER=$(customer_token 784199012345671 "$DEV_CUSTOMER_PASSWORD")
+claims=$(claims_of "$CUSTOMER")
+printf '%s' "$claims" | "$PY" -c "
+import json,sys
+c=json.load(sys.stdin); aud=c['aud'] if isinstance(c['aud'],list) else [c['aud']]
+bad=[k for k,ok in {'subject_type':c.get('subject_type')=='CUSTOMER','national_id':c.get('national_id')=='784199012345671',
+  'preferred_username':c.get('preferred_username')=='784199012345671','azp':c.get('azp')=='itms-portal','aud':'itms-api' in aud,
+  'no permissions':'permissions' not in c and 'roles' not in c}.items() if not ok]
+sys.exit('FAIL: customer token claims '+','.join(bad)+': '+json.dumps(c)) if bad else None" || exit 1
+again=$(claims_of "$(customer_token 784199012345671 "$DEV_CUSTOMER_PASSWORD")" | json_field "['sub']")
+[[ "$again" == "$(printf '%s' "$claims" | json_field "['sub']")" ]] || { echo "FAIL: a second sign-in made another account"; exit 1; }
+status=$(curl -s -o /dev/null -w '%{http_code}' "$TOKEN_URL" -d grant_type=password -d client_id=itms-portal \
+  --data-urlencode "username=784199012345671" --data-urlencode "password=$DEV_CUSTOMER_PASSWORD")
+[[ "$status" == 400 || "$status" == 401 ]] || { echo "FAIL: itms-portal accepted a password grant ($status)"; exit 1; }
+status=$(curl -s -o /dev/null -w '%{http_code}' "$TOKEN_URL" -d grant_type=password -d client_id=itms-dev-cli \
+  --data-urlencode "username=784199012345671" --data-urlencode "password=$DEV_CUSTOMER_PASSWORD")
+[[ "$status" == 400 || "$status" == 401 ]] || { echo "FAIL: the customer signed in to itms with a password ($status)"; exit 1; }
+status=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $CUSTOMER" "$IAM/v1/roles")
+[[ "$status" == 403 ]] || { echo "FAIL: a customer token reached a staff endpoint ($status)"; exit 1; }
+echo "   784199012345671 signed in through the national digital ID: subject_type CUSTOMER, no grants in the token, staff endpoint 403"
+
 echo "SMOKE OK"

@@ -183,7 +183,7 @@ class ForeignController {
 
     // ---- temporary permits (DL-055)
 
-    @PostMapping("/v1/temporary-permits")
+    @PostMapping("/v1/temporary-driving-permits")
     @PreAuthorize("hasAuthority('licensing.permit.issue')")
     ResponseEntity<RequestDto> permit(@Valid @RequestBody PermitRequest body) {
         return created(foreign.requestPermit(body.kind(), body.trafficFileNumber(), body.region(), body.licenceId(),
@@ -191,7 +191,7 @@ class ForeignController {
     }
 
     /** A person's temporary permits, or the master file by expiry (DL-063). */
-    @GetMapping("/v1/temporary-permits")
+    @GetMapping("/v1/temporary-driving-permits")
     @PreAuthorize("hasAuthority('licensing.licence.read')")
     Collection<PermitDto> permits(@RequestParam(required = false) String trafficFileNumber,
                                   @RequestParam(required = false) LocalDate expiringBefore,
@@ -204,7 +204,7 @@ class ForeignController {
         return new Collection<>(found.stream().map(p -> PermitDto.of(p, today)).toList());
     }
 
-    @PostMapping("/v1/temporary-permits/{permitId}/cancellation")
+    @PostMapping("/v1/temporary-driving-permits/{permitId}/cancellation")
     @PreAuthorize("hasAuthority('licensing.permit.issue')")
     PermitDto cancelPermit(@PathVariable UUID permitId, @Valid @RequestBody ReasonBody body) {
         return PermitDto.of(foreign.cancelPermit(permitId, body.reason(), callers.current()), today());

@@ -111,3 +111,7 @@ services:
     environment: *lite-service-jvm
   reporting-service:
     environment: *lite-service-jvm
+  licensing-service:
+    environment: *lite-service-jvm
+  examination-service:
+    environment: *lite-service-jvm

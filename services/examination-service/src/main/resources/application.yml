@@ -59,8 +59,8 @@ itms:
     paths: [/v1/driving-schools, /v1/driving-schools/*/branches, /v1/driving-schools/*/vehicles,
             /v1/driving-schools/*/instructors, /v1/driving-schools/*/complaints, /v1/test-types/*/questions,
             /v1/learning-files, /v1/learning-files/*/transitions, /v1/learning-files/*/training-sessions,
-            /v1/learning-files/*/bookings, /v1/committees, /v1/committees/*/slots, /v1/bookings/*/theory-answers,
-            /v1/bookings/*/practical-results, /v1/result-exceptions/*/decisions]
+            /v1/learning-files/*/bookings, /v1/committees, /v1/committees/*/slots, /v1/exam-bookings/*/theory-answers,
+            /v1/exam-bookings/*/practical-results, /v1/result-exceptions/*/decisions]
     retention: 24h
     lock-timeout: 30s
     cleanup-interval: 15m

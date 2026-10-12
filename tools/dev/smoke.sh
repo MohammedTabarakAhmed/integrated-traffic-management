@@ -1118,4 +1118,52 @@ named_searches=$(db_sql traffic-file-postgres trafficfile "$TF_DB_USER" "select 
 (( named_searches >= 2 )) || { echo "FAIL: CC-102 name searches not audited ($named_searches)"; exit 1; }
 echo "   $named (Arabic name only): 'Salem $la_tag' -> PHONETIC, '$ar_tag' -> PARTIAL through the gateway; $named_searches searches audited"
 
+echo "52. Examinations to licensing (DL-030, DL-033, DL-034, DL-035, DL-036, DL-041): a learner passes theory and road tests and the file reaches licensing-service"
+S_MAKER=$(token dev.maker "$DEV_MAKER_PASSWORD"); S_CHECKER=$(token dev.checker "$DEV_CHECKER_PASSWORD") # 5-minute tokens
+put_to() { curl -s -w '\n%{http_code}' -X PUT -H "Authorization: Bearer $2" -H 'Content-Type: application/json' -H 'X-Channel: BACKOFFICE' "$1$3" --data-binary @- <<<"$4"; }
+expect "$(put_to "$GW" "$S_MAKER" /v1/test-types/THEORY_LIGHT '{"kind":"THEORY","nameNl":"نظري","nameEn":"Theory","maxScore":30,"passMark":20,"retestWaitDays":0,"questionCount":3,"active":true}')" 200
+expect "$(put_to "$GW" "$S_MAKER" /v1/test-types/ROAD_LIGHT '{"kind":"ROAD","nameNl":"طريق","nameEn":"Road","maxScore":100,"passMark":80,"retestWaitDays":7,"questionCount":0,"sheet":[{"code":"MIRROR","textNl":"مرآة","textEn":"Mirror","penalty":5,"critical":false}],"active":true}')" 200
+for i in 1 2 3; do
+  expect "$(post_to "$GW" "$S_MAKER" /v1/test-types/THEORY_LIGHT/questions "{\"language\":\"en\",\"category\":\"SIGNS\",\"weight\":$i,\"text\":\"Smoke question $i\",\"options\":[\"right\",\"wrong\"],\"correctOption\":0}")" 201
+done
+exam_from=$(date -u -d '-5 days' +%F 2>/dev/null || "$PY" -c "import datetime; print(datetime.date.today()-datetime.timedelta(days=5))")
+exam_to=$("$PY" -c "import datetime; print(datetime.date.today()+datetime.timedelta(days=30))")
+CHECKER_ID=7d0c1a3e-5b2f-4c1d-9e8a-000000000003
+res=$(post_to "$GW" "$S_MAKER" /v1/committees "{\"code\":\"COM_$SMK\",\"location\":\"DXB-SMK-$SMK\",\"region\":\"DXB\",\"validFrom\":\"$exam_from\",\"validTo\":\"$exam_to\",\"members\":[{\"userId\":\"$CHECKER_ID\",\"role\":\"HEAD\"}]}")
+expect "$res" 201
+committee=$(body_of "$res" | json_field "['id']")
+dubai_at() { "$PY" -c "import datetime,sys; z=datetime.timezone(datetime.timedelta(hours=4)); d=datetime.datetime.now(z).date()+datetime.timedelta(days=int(sys.argv[1])); print(datetime.datetime.combine(d, datetime.time(int(sys.argv[2])), z).astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))" "$1" "$2"; }
+slot_of() { post_to "$GW" "$S_CHECKER" "/v1/committees/$committee/slots" "{\"classCode\":\"LIGHT\",\"testTypeCode\":\"$1\",\"startsAt\":\"$2\",\"capacity\":5}" | body_of_pipe | json_field "['id']"; }
+theory_slot=$(slot_of THEORY_LIGHT "$(dubai_at 1 9)")
+road_slot=$(slot_of ROAD_LIGHT "$(dubai_at 2 9)")
+res=$(post_to "$GW" "$S_MAKER" /v1/learning-files "{\"trafficFileNumber\":\"$holder\",\"classCode\":\"LIGHT\",\"gearbox\":\"MANUAL\",\"region\":\"DXB\"}")
+expect "$res" 201
+lf=$(body_of "$res" | json_field "['id']"); lf_number=$(body_of "$res" | json_field "['number']")
+expect "$(post_to "$GW" "$S_MAKER" "/v1/learning-files/$lf/transitions" '{"action":"start-training"}')" 200
+expect "$(post_to "$GW" "$S_MAKER" "/v1/learning-files/$lf/transitions" '{"action":"ready-for-test"}')" 200
+res=$(post_to "$GW" "$S_MAKER" "/v1/learning-files/$lf/bookings" "{\"slotId\":\"$theory_slot\"}")
+expect "$res" 201
+tb=$(body_of "$res" | json_field "['id']")
+answers=$(get_from "$GW" "$S_MAKER" "/v1/exam-bookings/$tb/paper?language=en" | "$PY" -c "import json,sys; print(json.dumps({q['id']: 0 for q in json.load(sys.stdin)['items']}))")
+res=$(post_to "$GW" "$S_MAKER" "/v1/exam-bookings/$tb/theory-answers" "{\"language\":\"en\",\"answers\":$answers}")
+expect "$res" 200
+[[ "$(body_of "$res" | json_field "['passed']")" == True ]] || { echo "FAIL: DL-033 theory not passed: $(body_of "$res")"; exit 1; }
+res=$(post_to "$GW" "$S_MAKER" "/v1/learning-files/$lf/bookings" "{\"slotId\":\"$road_slot\"}")
+expect "$res" 201
+rb=$(body_of "$res" | json_field "['id']")
+[[ "$(body_of "$res" | json_field "['examinerId']")" == "$CHECKER_ID" ]] || { echo "FAIL: DL-035 examiner $(body_of "$res")"; exit 1; }
+# Recorded within working hours (DL-037): 10:00 Dubai today if that has passed, else yesterday.
+rec=$("$PY" -c "import datetime; z=datetime.timezone(datetime.timedelta(hours=4)); n=datetime.datetime.now(z); d=n.date() if n.hour>=10 else n.date()-datetime.timedelta(days=1); t=datetime.datetime.combine(d, datetime.time(10), z); print(t.astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), (t-datetime.timedelta(minutes=20)).astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))")
+read -r rec_at route_from <<<"$rec"
+res=$(post_to "$GW" "$S_CHECKER" "/v1/exam-bookings/$rb/practical-results" "{\"clientResultId\":\"smoke-$SMK-road\",\"faults\":[\"MIRROR\"],\"route\":[{\"lat\":25.20,\"lon\":55.27,\"at\":\"$route_from\"},{\"lat\":25.21,\"lon\":55.29,\"at\":\"$rec_at\"}],\"recordedAt\":\"$rec_at\"}")
+expect "$res" 200
+[[ "$(body_of "$res" | json_field "['passed']")" == True ]] || { echo "FAIL: DL-034 road test $(body_of "$res")"; exit 1; }
+[[ "$(get_from "$GW" "$S_MAKER" "/v1/learning-files/$lf" | json_field "['status']")" == PASSED ]] || { echo "FAIL: DL-030 file not PASSED"; exit 1; }
+sent() { [[ "$(get_from "$GW" "$S_MAKER" "/v1/learning-files/$lf/licensing-transfer" | json_field "['status']" 2>/dev/null)" == SENT ]]; }
+wait_until 120 sent || { echo "FAIL: DL-036 $lf_number not handed to licensing: $(get_from "$GW" "$S_MAKER" "/v1/learning-files/$lf/licensing-transfer")"; exit 1; }
+lic_sql() { db_sql licensing-postgres licensing "$LIC_DB_USER" "$1"; }
+[[ "$(lic_sql "select count(*) from examination_transfer where examination_file_ref = '$lf_number'")" == 1 ]] \
+  || { echo "FAIL: DL-036 licensing-service has no transfer for $lf_number"; exit 1; }
+echo "   $lf_number ($holder): theory 30/30, road 95 by the committee head; PASSED and received by licensing-service"
+
 echo "SMOKE OK"

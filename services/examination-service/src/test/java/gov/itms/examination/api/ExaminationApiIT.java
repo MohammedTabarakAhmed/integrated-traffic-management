@@ -188,12 +188,12 @@ class ExaminationApiIT {
     private JsonNode passTheory(String file, String theorySlot) throws Exception {
         String booking = api.expect(api.post("/v1/learning-files/" + file + "/bookings", Map.of("slotId", theorySlot),
                 OFFICER), 201).get("id").asString();
-        JsonNode paper = api.expect(api.get("/v1/bookings/" + booking + "/paper?language=en", OFFICER), 200);
+        JsonNode paper = api.expect(api.get("/v1/exam-bookings/" + booking + "/paper?language=en", OFFICER), 200);
         assertThat(paper.get("items")).hasSize(3);
         assertThat(paper.get("items").get(0).has("correctOption")).as("the answer is not on the paper").isFalse();
         Map<String, Integer> answers = new HashMap<>();
         paper.get("items").forEach(q -> answers.put(q.get("id").asString(), 0));
-        return api.expect(api.post("/v1/bookings/" + booking + "/theory-answers", Map.of("language", "en",
+        return api.expect(api.post("/v1/exam-bookings/" + booking + "/theory-answers", Map.of("language", "en",
                 "answers", answers), OFFICER), 200);
     }
 
@@ -254,9 +254,9 @@ class ExaminationApiIT {
         Instant morning = at(-1, 10);
         Map<String, Object> failed = Map.of("clientResultId", "tablet-A-1", "faults", List.of("RED_LIGHT"),
                 "route", route(morning), "recordedAt", morning.toString());
-        assertThat(api.post("/v1/bookings/" + roadBooking + "/practical-results", failed, examiner("u-someone"))
+        assertThat(api.post("/v1/exam-bookings/" + roadBooking + "/practical-results", failed, examiner("u-someone"))
                 .getResponse().getStatus()).as("only the assigned examiner").isEqualTo(403);
-        JsonNode fail = api.expect(api.post("/v1/bookings/" + roadBooking + "/practical-results", failed,
+        JsonNode fail = api.expect(api.post("/v1/exam-bookings/" + roadBooking + "/practical-results", failed,
                 examiner(examinerId)), 200);
         assertThat(fail.get("passed").asBoolean()).isFalse();
         JsonNode afterFail = api.expect(api.get("/v1/learning-files/" + file, OFFICER), 200);
@@ -272,12 +272,12 @@ class ExaminationApiIT {
                 .isNotEqualTo("u-instructor-A");
         Map<String, Object> pass = Map.of("clientResultId", "tablet-A-2", "faults", List.of("MIRROR"),
                 "route", route(morning.plusSeconds(3600)), "recordedAt", morning.plusSeconds(3600).toString());
-        JsonNode passed = api.expect(api.post("/v1/bookings/" + retake.get("id").asString() + "/practical-results",
+        JsonNode passed = api.expect(api.post("/v1/exam-bookings/" + retake.get("id").asString() + "/practical-results",
                 pass, examiner(second)), 200);
         assertThat(passed.get("passed").asBoolean()).isTrue();
         assertThat(passed.get("score").asInt()).isEqualTo(95);
         assertThat(passed.get("exceptions")).isEmpty();
-        JsonNode resync = api.expect(api.post("/v1/bookings/" + retake.get("id").asString() + "/practical-results",
+        JsonNode resync = api.expect(api.post("/v1/exam-bookings/" + retake.get("id").asString() + "/practical-results",
                 pass, examiner(second), "resync-key-1"), 200);
         assertThat(resync.get("id").asString()).as("DL-034: an offline re-upload returns the stored result")
                 .isEqualTo(passed.get("id").asString());
@@ -343,7 +343,7 @@ class ExaminationApiIT {
                 OFFICER), 201);
         String examinerId = booking.get("examinerId").asString();
         Instant night = at(-1, 23);
-        JsonNode result = api.expect(api.post("/v1/bookings/" + booking.get("id").asString() + "/practical-results",
+        JsonNode result = api.expect(api.post("/v1/exam-bookings/" + booking.get("id").asString() + "/practical-results",
                 Map.of("clientResultId", "tablet-B-1", "faults", List.of(), "route", route(night.minusSeconds(1200)),
                         "recordedAt", night.toString()), examiner(examinerId)), 200);
         assertThat(result.get("exceptions").toString()).contains("OUTSIDE_WORKING_HOURS");

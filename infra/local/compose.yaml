@@ -404,6 +404,34 @@ services:
       timeout: 3s
       retries: 20
 
+  licensing-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: licensing
+      POSTGRES_USER: ${LIC_DB_USER:?run tools/dev/up.sh}
+      POSTGRES_PASSWORD_FILE: /run/secrets/lic_db_password
+    secrets: [lic_db_password]
+    volumes: [licensing-db:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d licensing"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  examination-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: examination
+      POSTGRES_USER: ${EXAM_DB_USER:?run tools/dev/up.sh}
+      POSTGRES_PASSWORD_FILE: /run/secrets/exam_db_password
+    secrets: [exam_db_password]
+    volumes: [examination-db:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d examination"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   keycloak:
     image: quay.io/keycloak/keycloak:26.8.0
     command: ["start-dev", "--import-realm"]
@@ -1438,14 +1466,13 @@ services:
       ITMS_OIDC_JWKS_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/certs
       ITMS_AUTHORISATION_SOURCE: iam
       ITMS_IAM_URL: http://iam-service:8080
-      # Unified search asks the owning services with the caller's own token (CC-102); licensing-service is not in
-      # the local stack yet, so its source is off.
+      # Unified search asks the owning services with the caller's own token (CC-102).
       ITMS_TRAFFIC_FILES_URL: http://traffic-file-service:8080
       ITMS_VEHICLES_URL: http://vehicle-service:8080
       ITMS_VIOLATIONS_URL: http://violation-service:8080
       ITMS_ACCIDENTS_URL: http://accident-service:8080
       ITMS_TRANSACTIONS_URL: http://transaction-service:8080
-      ITMS_SEARCH_DISABLED_SOURCES: licence
+      ITMS_LICENSING_URL: http://licensing-service:8080
     volumes:
       - type: volume
         source: db-credentials
@@ -1491,6 +1518,92 @@ services:
     depends_on:
       bao-agent: {condition: service_healthy}
       reporting-postgres: {condition: service_healthy}
+      kafka: {condition: service_healthy}
+      keycloak: {condition: service_healthy}
+      iam-service: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8090/actuator/health/readiness | grep -q UP"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  # ---- Increment 3: driving licences and examinations (DL-020..DL-065, DL-030..DL-045)
+  licensing-service:
+    build: ../../services/licensing-service
+    mem_limit: ${ITMS_SERVICE_MEM_LIMIT:-512m}
+    environment:
+      <<: [*itms-observability, *itms-events]
+      LIC_DB_URL: jdbc:postgresql://licensing-postgres:5432/licensing
+      SPRING_DATASOURCE_HIKARI_CONNECTIONINITSQL: SET ROLE itms_owner
+      ITMS_OIDC_ISSUER: http://localhost:8180/realms/itms
+      ITMS_OIDC_JWKS_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/certs
+      ITMS_AUTHORISATION_SOURCE: iam
+      ITMS_IAM_URL: http://iam-service:8080
+      # Fees, payables, holds and the holder's traffic file with this service's own account (ADR-034); payment
+      # confirmations from the broker complete licence transactions.
+      ITMS_FEES_URL: http://fees-service:8080
+      ITMS_PAYMENTS_URL: http://payment-service:8080
+      ITMS_HOLDS_URL: http://hold-eligibility-service:8080
+      ITMS_TRAFFIC_FILES_URL: http://traffic-file-service:8080
+      ITMS_OIDC_TOKEN_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/token
+      ITMS_SERVICE_CLIENT_ID: itms-licensing-service
+      ITMS_LICENSING_CONSUMER_ENABLED: "true"
+    secrets:
+      - source: licensing_service_client_secret
+        target: itms.clients.fees.client-secret
+      - source: licensing_service_client_secret
+        target: itms.clients.payments.client-secret
+      - source: licensing_service_client_secret
+        target: itms.clients.holds.client-secret
+      - source: licensing_service_client_secret
+        target: itms.clients.traffic-files.client-secret
+    volumes:
+      - type: volume
+        source: db-credentials
+        target: /run/secrets/spring/datasource
+        read_only: true
+        volume: {subpath: licensing-service}
+    ports: ["127.0.0.1:8098:8080"]
+    depends_on:
+      bao-agent: {condition: service_healthy}
+      licensing-postgres: {condition: service_healthy}
+      kafka: {condition: service_healthy}
+      keycloak: {condition: service_healthy}
+      iam-service: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8090/actuator/health/readiness | grep -q UP"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  examination-service:
+    build: ../../services/examination-service
+    mem_limit: ${ITMS_SERVICE_MEM_LIMIT:-512m}
+    environment:
+      <<: [*itms-observability, *itms-events]
+      EXAM_DB_URL: jdbc:postgresql://examination-postgres:5432/examination
+      SPRING_DATASOURCE_HIKARI_CONNECTIONINITSQL: SET ROLE itms_owner
+      ITMS_OIDC_ISSUER: http://localhost:8180/realms/itms
+      ITMS_OIDC_JWKS_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/certs
+      ITMS_AUTHORISATION_SOURCE: iam
+      ITMS_IAM_URL: http://iam-service:8080
+      # Passed learning files go to licensing-service with this service's own account (DL-036, ADR-034).
+      ITMS_LICENSING_URL: http://licensing-service:8080
+      ITMS_OIDC_TOKEN_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/token
+      ITMS_SERVICE_CLIENT_ID: itms-examination-service
+    secrets:
+      - source: examination_service_client_secret
+        target: itms.clients.licensing.client-secret
+    volumes:
+      - type: volume
+        source: db-credentials
+        target: /run/secrets/spring/datasource
+        read_only: true
+        volume: {subpath: examination-service}
+    ports: ["127.0.0.1:8099:8080"]
+    depends_on:
+      bao-agent: {condition: service_healthy}
+      examination-postgres: {condition: service_healthy}
       kafka: {condition: service_healthy}
       keycloak: {condition: service_healthy}
       iam-service: {condition: service_healthy}
@@ -1671,7 +1784,7 @@ services:
       openbao:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "for s in iam-service reference-data-service transaction-service hold-eligibility-service traffic-file-service fees-service rules-service workflow-service notification-service document-service appointment-service audit-service payment-service vehicle-service violation-service device-service accident-service rental-service permit-service geo-service road-permit-service marine-service crossborder-service search-service reporting-service; do test -s /run/db-credentials/$$s/username && test -s /run/db-credentials/$$s/password || exit 1; done"]
+      test: ["CMD-SHELL", "for s in iam-service reference-data-service transaction-service hold-eligibility-service traffic-file-service fees-service rules-service workflow-service notification-service document-service appointment-service audit-service payment-service vehicle-service violation-service device-service accident-service rental-service permit-service geo-service road-permit-service marine-service crossborder-service search-service reporting-service licensing-service examination-service; do test -s /run/db-credentials/$$s/username && test -s /run/db-credentials/$$s/password || exit 1; done"]
       interval: 2s
       timeout: 3s
       retries: 30
@@ -1812,6 +1925,14 @@ secrets:
     environment: SEARCH_DB_PASSWORD
   reporting_db_password:
     environment: REPORTING_DB_PASSWORD
+  lic_db_password:
+    environment: LIC_DB_PASSWORD
+  exam_db_password:
+    environment: EXAM_DB_PASSWORD
+  licensing_service_client_secret:
+    environment: DEV_LICENSING_SERVICE_SECRET
+  examination_service_client_secret:
+    environment: DEV_EXAMINATION_SERVICE_SECRET
   reporting_pseudonym_key: # RPT-022 pseudonymisation key
     environment: REPORTING_PSEUDONYM_KEY
 
@@ -1847,5 +1968,7 @@ volumes:
   crossborder-db:
   search-db:
   reporting-db:
+  licensing-db:
+  examination-db:
   db-credentials:
   kafka-data:

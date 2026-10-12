@@ -1383,7 +1383,7 @@ paths:
         '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
         '503': { $ref: '#/components/responses/Problem' }
-  /v1/temporary-permits:
+  /v1/temporary-driving-permits:
     post:
       operationId: requestTemporaryPermit
       summary: Request a temporary driving permit for a visitor or while the card is pending (DL-055)
@@ -1431,7 +1431,7 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
-  /v1/temporary-permits/{permitId}/cancellation:
+  /v1/temporary-driving-permits/{permitId}/cancellation:
     post:
       operationId: cancelTemporaryPermit
       summary: Cancel a temporary driving permit with a reason (DL-055)

@@ -863,16 +863,16 @@ class LicensingApiIT {
                 .isEqualTo("TRANSLATION_REQUIRED");
 
         // DL-055 visitor permit on the foreign licence, before it is exchanged
-        JsonNode visitor = expect(postAs("/v1/temporary-permits", Map.of("kind", "VISITOR", "trafficFileNumber", file,
+        JsonNode visitor = expect(postAs("/v1/temporary-driving-permits", Map.of("kind", "VISITOR", "trafficFileNumber", file,
                 "region", "IT_TX", "foreignLicenceId", untranslated), counter()), 201);
-        assertThat(code(postAs("/v1/temporary-permits", Map.of("kind", "VISITOR", "trafficFileNumber", file,
+        assertThat(code(postAs("/v1/temporary-driving-permits", Map.of("kind", "VISITOR", "trafficFileNumber", file,
                 "region", "IT_TX", "foreignLicenceId", untranslated), counter()))).isEqualTo("REQUEST_OPEN");
         paid(visitor);
-        JsonNode permit = body(getAs("/v1/temporary-permits?trafficFileNumber=" + file, counter())).get("items").get(0);
+        JsonNode permit = body(getAs("/v1/temporary-driving-permits?trafficFileNumber=" + file, counter())).get("items").get(0);
         assertThat(permit.get("validUntil").asString()).isEqualTo(TODAY.plusDays(29).toString());
-        assertThat(code(postAs("/v1/temporary-permits", Map.of("kind", "VISITOR", "trafficFileNumber", file,
+        assertThat(code(postAs("/v1/temporary-driving-permits", Map.of("kind", "VISITOR", "trafficFileNumber", file,
                 "region", "IT_TX", "foreignLicenceId", untranslated), counter()))).isEqualTo("PERMIT_EXISTS");
-        assertThat(expect(postAs("/v1/temporary-permits/" + permit.get("id").asString() + "/cancellation",
+        assertThat(expect(postAs("/v1/temporary-driving-permits/" + permit.get("id").asString() + "/cancellation",
                 Map.of("reason", "left the country"), counter()), 200).get("status").asString()).isEqualTo("CANCELLED");
 
         foreign.put("foreignNumber", "F2-" + file);
@@ -904,7 +904,7 @@ class LicensingApiIT {
                 .isEqualTo("COUNTRY_RULE_MISSING");
 
         // DL-055 card-pending permit and DL-056 international permit on the exchanged licence
-        JsonNode pending = expect(postAs("/v1/temporary-permits", Map.of("kind", "CARD_PENDING", "trafficFileNumber",
+        JsonNode pending = expect(postAs("/v1/temporary-driving-permits", Map.of("kind", "CARD_PENDING", "trafficFileNumber",
                 file, "region", "IT_TX", "licenceId", licenceId), counter()), 201);
         paid(pending);
         String idps = "/v1/licences/" + licenceId + "/international-permits";

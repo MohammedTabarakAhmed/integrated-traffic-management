@@ -110,6 +110,14 @@ upstreams:
     type: roundrobin
     nodes:
       "reporting-service:8080": 1
+  - id: licensing-service
+    type: roundrobin
+    nodes:
+      "licensing-service:8080": 1
+  - id: examination-service
+    type: roundrobin
+    nodes:
+      "examination-service:8080": 1
 
 plugin_configs:
   - id: protected-api
@@ -428,4 +436,62 @@ routes:
     uris:
       - /v1/reports
       - /v1/report-runs
+  - id: licensing-service
+    name: licensing-service
+    upstream_id: licensing-service
+    plugin_config_id: protected-api
+    uris:
+      - /v1/examination-transfers
+      - /v1/examination-transfers/*
+      - /v1/exchange-country-rules
+      - /v1/exchange-country-rules/*
+      - /v1/eye-tests
+      - /v1/eye-tests/*
+      - /v1/foreign-licences
+      - /v1/foreign-licences/*
+      - /v1/international-permits
+      - /v1/international-permits/*
+      - /v1/licence-classes
+      - /v1/licence-classes/*
+      - /v1/licence-class-versions
+      - /v1/licence-class-versions/*
+      - /v1/licence-condition-codes
+      - /v1/licence-condition-codes/*
+      - /v1/licence-issues
+      - /v1/licence-issues/*
+      - /v1/licence-number-ranges
+      - /v1/licence-number-ranges/*
+      - /v1/licence-number-reports
+      - /v1/licence-number-reports/*
+      - /v1/licence-requests
+      - /v1/licence-requests/*
+      - /v1/licences
+      - /v1/licences/*
+      - /v1/licence-status
+      - /v1/licence-status/*
+      - /v1/no-objection-certificates
+      - /v1/no-objection-certificates/*
+      - /v1/temporary-driving-permits
+      - /v1/temporary-driving-permits/*
+  - id: examination-service
+    name: examination-service
+    upstream_id: examination-service
+    plugin_config_id: protected-api
+    uris:
+      - /v1/test-types
+      - /v1/test-types/*
+      - /v1/training-certificate-types
+      - /v1/training-certificate-types/*
+      - /v1/driving-schools
+      - /v1/driving-schools/*
+      - /v1/learning-files
+      - /v1/learning-files/*
+      - /v1/committees
+      - /v1/committees/*
+      - /v1/calendar-usage
+      - /v1/calendar-usage/*
+      - /v1/exam-bookings
+      - /v1/exam-bookings/*
+      - /v1/result-exceptions
+      - /v1/result-exceptions/*
 #END

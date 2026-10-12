@@ -162,6 +162,56 @@
       ]
     },
     {
+      "id": "7d0c1a3e-5b2f-4c1d-9e8a-100000000011",
+      "clientId": "itms-licensing-service",
+      "name": "licensing-service's own account for fees, payables, holds and traffic files (DL-050, ADR-034). LOCAL DEVELOPMENT ONLY: the secret is set by tools/dev/up.sh",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "fullScopeAllowed": false,
+      "protocolMappers": [
+        {
+          "name": "itms-api audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "itms-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "id": "7d0c1a3e-5b2f-4c1d-9e8a-100000000012",
+      "clientId": "itms-examination-service",
+      "name": "examination-service's own account: hands passed learning files to licensing (DL-036, ADR-034). LOCAL DEVELOPMENT ONLY: the secret is set by tools/dev/up.sh",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "fullScopeAllowed": false,
+      "protocolMappers": [
+        {
+          "name": "itms-api audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "itms-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
       "id": "7d0c1a3e-5b2f-4c1d-9e8a-100000000005",
       "clientId": "itms-device-service",
       "name": "device-service's own account for recording quality-approved device captures (VF-010, VF-011, ADR-034). LOCAL DEVELOPMENT ONLY: the secret is set by tools/dev/up.sh",
@@ -244,6 +294,18 @@
       "username": "service-account-itms-document-service",
       "enabled": true,
       "serviceAccountClientId": "itms-document-service"
+    },
+    {
+      "id": "7d0c1a3e-5b2f-4c1d-9e8a-000000000021",
+      "username": "service-account-itms-licensing-service",
+      "enabled": true,
+      "serviceAccountClientId": "itms-licensing-service"
+    },
+    {
+      "id": "7d0c1a3e-5b2f-4c1d-9e8a-000000000022",
+      "username": "service-account-itms-examination-service",
+      "enabled": true,
+      "serviceAccountClientId": "itms-examination-service"
     },
     {
       "id": "7d0c1a3e-5b2f-4c1d-9e8a-000000000014",

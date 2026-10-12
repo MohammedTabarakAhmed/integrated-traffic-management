@@ -299,14 +299,14 @@ class ExaminationController {
     @PreAuthorize("hasAuthority('exam.booking.manage')")
     ResponseEntity<Exams.Booking> book(@PathVariable UUID id, @Valid @RequestBody BookingBody b) {
         Exams.Booking booking = service.book(id, b.slotId(), access());
-        return ResponseEntity.created(URI.create("/v1/bookings/" + booking.id())).body(booking);
+        return ResponseEntity.created(URI.create("/v1/exam-bookings/" + booking.id())).body(booking);
     }
 
     /** A paper question without its answer. */
     record PaperQuestion(UUID id, String category, String text, List<String> options) {
     }
 
-    @GetMapping("/v1/bookings/{id}/paper")
+    @GetMapping("/v1/exam-bookings/{id}/paper")
     @PreAuthorize("hasAuthority('exam.test.conduct')")
     Items<PaperQuestion> paper(@PathVariable UUID id, @RequestParam @Pattern(regexp = "^[a-z]{2}$") String language) {
         return new Items<>(service.paper(id, language, access()).stream()
@@ -317,7 +317,7 @@ class ExaminationController {
                       @NotNull @Size(max = 200) Map<UUID, @Min(0) @Max(5) Integer> answers) {
     }
 
-    @PostMapping("/v1/bookings/{id}/theory-answers")
+    @PostMapping("/v1/exam-bookings/{id}/theory-answers")
     @PreAuthorize("hasAuthority('exam.test.conduct')")
     Ports.Result theory(@PathVariable UUID id, @Valid @RequestBody TheoryBody b) {
         return service.submitTheory(id, b.language(), b.answers(), access());
@@ -332,7 +332,7 @@ class ExaminationController {
                          UUID videoDocumentId) {
     }
 
-    @PostMapping("/v1/bookings/{id}/practical-results")
+    @PostMapping("/v1/exam-bookings/{id}/practical-results")
     @PreAuthorize("hasAuthority('exam.result.record')")
     Ports.Result practical(@PathVariable UUID id, @Valid @RequestBody PracticalBody b) {
         List<Exams.RoutePoint> route = b.route() == null ? List.of() : b.route().stream()

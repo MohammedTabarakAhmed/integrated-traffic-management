@@ -297,3 +297,23 @@ template {
   destination = "/run/db-credentials/reporting-service/password"
   perms       = "0444"
 }
+template {
+  contents    = "{{ with secret \"database/creds/licensing-service\" }}{{ .Data.username }}{{ end }}"
+  destination = "/run/db-credentials/licensing-service/username"
+  perms       = "0444"
+}
+template {
+  contents    = "{{ with secret \"database/creds/licensing-service\" }}{{ .Data.password }}{{ end }}"
+  destination = "/run/db-credentials/licensing-service/password"
+  perms       = "0444"
+}
+template {
+  contents    = "{{ with secret \"database/creds/examination-service\" }}{{ .Data.username }}{{ end }}"
+  destination = "/run/db-credentials/examination-service/username"
+  perms       = "0444"
+}
+template {
+  contents    = "{{ with secret \"database/creds/examination-service\" }}{{ .Data.password }}{{ end }}"
+  destination = "/run/db-credentials/examination-service/password"
+  perms       = "0444"
+}

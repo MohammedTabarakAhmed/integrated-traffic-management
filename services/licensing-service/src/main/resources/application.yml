@@ -135,8 +135,8 @@ itms:
       - /v1/exchange-country-rules/*/rejections
       - /v1/foreign-licences
       - /v1/foreign-licences/*/exchanges
-      - /v1/temporary-permits
-      - /v1/temporary-permits/*/cancellation
+      - /v1/temporary-driving-permits
+      - /v1/temporary-driving-permits/*/cancellation
       - /v1/licences/*/international-permits
       - /v1/international-permits/*/printed
     retention: ${ITMS_IDEMPOTENCY_RETENTION:24h}

@@ -345,6 +345,20 @@ class DocumentApiIT {
 
     @Test
     @Tag("CC-082")
+    @DisplayName("a template without its own validity (module certificates, V3) issues certificates without an end date")
+    void templateWithoutValidity() throws Exception {
+        MvcResult issued = postAs("/v1/certificates", Map.of("templateCode", "VL_CERT_OWNERSHIP",
+                "holderNameNl", "محمد أحمد", "holderNameEn", "Mohammed Ahmed", "subjectType", "VEHICLE",
+                "subjectId", "WDB00000000000001", "data", Map.of("vin", "WDB00000000000001",
+                        "ownerFileNumber", "10000000017", "sourceCertificateNumber", "VC-2026-000000001"),
+                "reference", "VC-2026-000000001"), issuer());
+        assertThat(issued.getResponse().getStatus()).as(issued.getResponse().getContentAsString()).isEqualTo(201);
+        assertThat(body(issued).path("validUntil").isMissingNode() || body(issued).get("validUntil").isNull())
+                .as("no end date").isTrue();
+    }
+
+    @Test
+    @Tag("CC-082")
     @Tag("CC-083")
     @DisplayName("certificates: issue with QR, public verification without a token, wrong code 404, revoke")
     void certificates() throws Exception {

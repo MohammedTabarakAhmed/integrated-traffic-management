@@ -251,10 +251,11 @@ class JdbcDocumentRepository implements Ports.DocumentRepository {
     }
 
     private static Certificate.Template mapTemplate(ResultSet rs, int row) throws SQLException {
-        int validity = rs.getInt("validity_days");
+        int days = rs.getInt("validity_days");
+        Integer validity = rs.wasNull() ? null : days; // wasNull refers to the last column read
         return new Certificate.Template(rs.getString("code"), rs.getInt("version_no"), rs.getString("title_nl"),
                 rs.getString("title_en"), rs.getString("body_nl"), rs.getString("body_en"),
-                rs.wasNull() ? null : validity,
+                validity,
                 new Actor(rs.getString("published_by"), rs.getString("published_by_username")),
                 rs.getTimestamp("published_at").toInstant());
     }

@@ -569,6 +569,78 @@ class ViolationApiIT {
 
     @Test
     @Tag("VF-050")
+    @Tag("XB-005")
+    @Tag("CC-001")
+    @DisplayName("VF-050 (ADR-067 d): a customer objects online to their own violation within the window; the fine "
+            + "pauses; another file's violation is 404; a second objection 409; staff 403")
+    void ownObjection() throws Exception {
+        String fine = catalogue(30_000, 4);
+        String file = "TF-OWNOB-" + suffix().replace('_', '-');
+        String mine = recorded(fine, file).get("number").asString();
+        String others = recorded(fine, "TF-OTHOB-" + suffix().replace('_', '-')).get("number").asString();
+        String token = "cust-ob-" + suffix();
+        PARTNERS.ownFiles.put(token, file);
+        RequestPostProcessor me = ownCustomer(token, "customer.violation.object");
+        Map<String, Object> objection = Map.of("reasonCode", "NOT_THE_DRIVER", "explanation",
+                "I was abroad that day", "evidenceIds", List.of("DOC-1"));
+
+        JsonNode submitted = expect(postAs("/v1/me/violations/" + mine + "/objections", objection, me,
+                "it-" + UUID.randomUUID()), 201);
+        assertThat(submitted.get("status").asString()).isEqualTo("PENDING");
+        assertThat(submitted.get("submittedBy").asString()).isEqualTo("u-" + token);
+        assertThat(PARTNERS.payableHolds).anyMatch(h -> h.startsWith("HOLD ") && h.endsWith("OBJECTION:" + mine));
+        assertThat(code(postAs("/v1/me/violations/" + mine + "/objections", objection, me,
+                "it-" + UUID.randomUUID()))).isEqualTo("OBJECTION_EXISTS");
+        MvcResult notMine = postAs("/v1/me/violations/" + others + "/objections", objection, me,
+                "it-" + UUID.randomUUID());
+        assertThat(notMine.getResponse().getStatus()).isEqualTo(404);
+        assertThat(code(notMine)).isEqualTo("VIOLATION_NOT_FOUND");
+        assertThat(postAs("/v1/me/violations/" + others + "/objections", objection, user("u-staff-ob", "OFFICER",
+                "violation.objection.submit", "customer.violation.object"), "it-" + UUID.randomUUID())
+                .getResponse().getStatus()).as("staff token").isEqualTo(403);
+        assertThat(postAs("/v1/me/violations/" + others + "/objections", objection,
+                ownCustomer(token, "customer.violation.read"), "it-" + UUID.randomUUID()).getResponse().getStatus())
+                .as("customer without the permission").isEqualTo(403);
+    }
+
+    @Test
+    @Tag("VF-071")
+    @Tag("CC-001")
+    @DisplayName("VF-071 (ADR-067 d): a customer asks online for an own instalment plan for their own violations; "
+            + "the plan rules apply; another file's violation is 404; they list their own plans")
+    void ownInstalmentRequest() throws Exception {
+        String fine = catalogue(300_000, 0);
+        String file = "TF-OWNIP-" + suffix().replace('_', '-');
+        String first = recorded(fine, file).get("number").asString();
+        String second = recorded(fine, file).get("number").asString();
+        String others = recorded(fine, "TF-OTHIP-" + suffix().replace('_', '-')).get("number").asString();
+        String token = "cust-ip-" + suffix();
+        PARTNERS.ownFiles.put(token, file);
+        RequestPostProcessor me = ownCustomer(token, "customer.instalment.request", "customer.violation.read");
+
+        assertThat(code(postAs("/v1/me/instalment-plans", Map.of("violationNumbers", List.of(first), "months", 3),
+                me, "it-" + UUID.randomUUID()))).isEqualTo("INSTALMENT_TOTAL_TOO_LOW");
+        MvcResult notMine = postAs("/v1/me/instalment-plans", Map.of("violationNumbers", List.of(first, others),
+                "months", 3), me, "it-" + UUID.randomUUID());
+        assertThat(notMine.getResponse().getStatus()).isEqualTo(404);
+        assertThat(code(notMine)).isEqualTo("VIOLATION_NOT_FOUND");
+
+        JsonNode plan = expect(postAs("/v1/me/instalment-plans", Map.of("violationNumbers", List.of(first, second),
+                "months", 3), me, "it-" + UUID.randomUUID()), 201);
+        assertThat(plan.get("fileNumber").asString()).isEqualTo(file);
+        assertThat(plan.get("region").asString()).isEqualTo("NORTH");
+        assertThat(plan.get("createdBy").asString()).isEqualTo("u-" + token);
+        assertThat(plan.get("instalments")).hasSize(3);
+        assertThat(body(getAs("/v1/me/instalment-plans", me)).get("items")).singleElement()
+                .satisfies(p -> assertThat(p.get("number").asString()).isEqualTo(plan.get("number").asString()));
+
+        assertThat(postAs("/v1/me/instalment-plans", Map.of("violationNumbers", List.of(others), "months", 3),
+                user("u-staff-ip", "INSTALMENT_OFFICER", "violation.instalment.create", "customer.instalment.request"),
+                "it-" + UUID.randomUUID()).getResponse().getStatus()).as("staff token").isEqualTo(403);
+    }
+
+    @Test
+    @Tag("VF-050")
     @Tag("VF-051")
     @Tag("VF-052")
     @DisplayName("VF-050..052: an objection pauses the fine; accepted cancels it, rejected resumes payment")

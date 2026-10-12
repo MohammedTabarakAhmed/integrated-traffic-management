@@ -30,6 +30,8 @@ import org.springframework.transaction.annotation.Transactional;
 public class InstalmentService {
 
     public static final String CREATE = "violation.instalment.create";
+    /** A customer asking online for an own plan for their own violations (iam V60); CUSTOMER role only. */
+    public static final String CUSTOMER_CREATE = "customer.instalment.request";
     public static final String PLAN_PREFIX = "IP-";
 
     private static final Logger LOG = LoggerFactory.getLogger(InstalmentService.class);
@@ -73,6 +75,23 @@ public class InstalmentService {
                                  Caller caller) {
         ViolationService.channelOf(caller);
         require(caller.grants().allowsInRegion(CREATE, region));
+        return open(fileNumber, region, violationNumbers, months, caller, false);
+    }
+
+    /**
+     * VF-071 online (ADR-067 d): the signed-in customer asks for an own plan for their own open violations;
+     * {@code fileNumber} is their traffic file, found from their token. Another file's violation answers 404. The plan
+     * is kept in the region of the earliest of its violations (interim, Q-086).
+     */
+    @Transactional
+    public InstalmentPlan createOwn(String fileNumber, List<String> violationNumbers, int months, Caller caller) {
+        ViolationService.channelOf(caller);
+        require(caller.grants().holds(CUSTOMER_CREATE));
+        return open(fileNumber, null, violationNumbers, months, caller, true);
+    }
+
+    private InstalmentPlan open(String fileNumber, String chosenRegion, List<String> violationNumbers, int months,
+                                Caller caller, boolean own) {
         if (violationNumbers == null || violationNumbers.isEmpty() || violationNumbers.size() > MAX_VIOLATIONS
                 || violationNumbers.stream().distinct().count() != violationNumbers.size()) {
             throw DomainException.validation("INSTALMENT_PLAN_INVALID",
@@ -81,8 +100,11 @@ public class InstalmentService {
         // Locked in a fixed order, so two plans opened at once for overlapping violations cannot deadlock.
         List<Violation> locked = new ArrayList<>();
         for (String number : violationNumbers.stream().sorted().toList()) {
-            locked.add(eligible(number, fileNumber, caller));
+            locked.add(eligible(number, fileNumber, caller, own));
         }
+        String region = chosenRegion != null ? chosenRegion : locked.stream()
+                .min(java.util.Comparator.comparing(Violation::recordedAt).thenComparing(Violation::number))
+                .map(v -> v.report().region()).orElseThrow();
         Map<Violation, Long> due = new LinkedHashMap<>();
         for (Violation v : locked) {
             due.put(v, repo.reducedFine(v.id()).orElse(v.fineMinor()));
@@ -146,6 +168,17 @@ public class InstalmentService {
         audit.record("INSTALMENT_PLANS_LISTED", "TrafficFile", fileNumber, null, null, null);
         return plans.byFile(fileNumber, limit).stream()
                 .filter(p -> caller.grants().allowsInRegion(ViolationService.READ, p.region())).toList();
+    }
+
+    /** The signed-in customer's own plans (ADR-067 d); {@code fileNumber} comes from their token. Audited. */
+    @Transactional
+    public List<InstalmentPlan> ownPlans(String fileNumber, int limit, Caller caller) {
+        require(caller.grants().holds(CustomerViolations.CUSTOMER_READ));
+        if (limit < 1 || limit > 100) {
+            throw DomainException.validation("FIELD_INVALID", "limit must be 1..100", List.of("VF-071"), "limit");
+        }
+        audit.record("INSTALMENT_PLANS_LISTED", "TrafficFile", fileNumber, null, Map.of("viewer", "OWNER"), null);
+        return plans.byFile(fileNumber, limit);
     }
 
     // ---- payments (itms.payment.confirmed / receipt-cancelled with item reference <plan>-<nn>)
@@ -248,11 +281,18 @@ public class InstalmentService {
 
     // ---- helpers
 
-    private Violation eligible(String number, String fileNumber, Caller caller) {
-        Violation v = repo.findForUpdate(number).orElseThrow(() -> new DomainException(
-                DomainException.Kind.NOT_FOUND, "VIOLATION_NOT_FOUND", "violation " + number + " not found",
-                List.of("VF-071")));
-        require(caller.grants().allowsInRegion(CREATE, v.report().region()));
+    private Violation eligible(String number, String fileNumber, Caller caller, boolean own) {
+        DomainException notFound = new DomainException(DomainException.Kind.NOT_FOUND, "VIOLATION_NOT_FOUND",
+                "violation " + number + " not found", List.of("VF-071"));
+        Violation v = repo.findForUpdate(number).orElseThrow(() -> notFound);
+        if (own) {
+            // a customer's own violations only; any other answers as not found, so numbers cannot be probed
+            if (!v.report().responsibleFileNumber().equals(fileNumber)) {
+                throw notFound;
+            }
+        } else {
+            require(caller.grants().allowsInRegion(CREATE, v.report().region()));
+        }
         if (!v.report().responsibleFileNumber().equals(fileNumber)) {
             throw DomainException.validation("VIOLATION_NOT_OF_FILE",
                     "violation " + number + " is not charged to file " + fileNumber, List.of("VF-071"), number);

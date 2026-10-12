@@ -20,14 +20,36 @@ public class CustomerViolations {
     private final Ports.ViolationRepository repo;
     private final Ports.OwnFile ownFile;
     private final ViolationService violations;
+    private final ObjectionService objections;
+    private final InstalmentService instalments;
     private final AuditRecorder audit;
 
     public CustomerViolations(Ports.ViolationRepository repo, Ports.OwnFile ownFile, ViolationService violations,
-                              AuditRecorder audit) {
+                              ObjectionService objections, InstalmentService instalments, AuditRecorder audit) {
         this.repo = repo;
         this.ownFile = ownFile;
         this.violations = violations;
+        this.objections = objections;
+        this.instalments = instalments;
         this.audit = audit;
+    }
+
+    /** An own instalment plan for some of the customer's own open violations (VF-071). */
+    public gov.itms.violation.domain.InstalmentPlan requestPlan(List<String> violationNumbers, int months,
+                                                                Caller caller) {
+        return instalments.createOwn(fileNumber(), violationNumbers, months, caller);
+    }
+
+    /** The customer's own instalment plans, newest first. */
+    public List<gov.itms.violation.domain.InstalmentPlan> plans(int limit, Caller caller) {
+        require(caller);
+        return instalments.ownPlans(fileNumber(), limit, caller);
+    }
+
+    /** An objection to one of the customer's own violations, submitted online (VF-050, XB-005). */
+    public gov.itms.violation.domain.Objection object(String number, String reasonCode, String explanation,
+                                                       List<String> evidenceIds, Caller caller) {
+        return objections.submitOwn(number, fileNumber(), reasonCode, explanation, evidenceIds, caller);
     }
 
     /** The customer's violations, newest first. */

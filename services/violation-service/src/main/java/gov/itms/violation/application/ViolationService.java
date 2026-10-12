@@ -359,8 +359,28 @@ public class ViolationService {
     public void pauseForObjection(String number, Caller caller) {
         Violation v = repo.findForUpdate(number).orElseThrow(() -> notFound(number));
         require(caller.grants().allowsInRegion(ObjectionService.SUBMIT, v.report().region()));
+        pause(v);
+    }
+
+    /**
+     * A violation the signed-in customer objects to (ADR-067 d, VF-050): it must be their own, that is their traffic
+     * file is the responsible one; any other answers as not found, so numbers cannot be probed. Audited.
+     */
+    Violation ownForObjection(String number, String fileNumber) {
+        Violation v = repo.findByNumber(number).filter(x -> fileNumber.equals(x.report().responsibleFileNumber()))
+                .orElseThrow(() -> notFound(number));
+        audit.record("VIOLATION_OBJECTION_VIEWED", ENTITY, number, null, Map.of("viewer", "OWNER"), null);
+        return v;
+    }
+
+    /** Pauses the payable of the customer's own violation under objection; ownership was checked before. */
+    void pauseOwnForObjection(String number) {
+        pause(repo.findForUpdate(number).orElseThrow(() -> notFound(number)));
+    }
+
+    private void pause(Violation v) {
         if (v.payableId() != null) {
-            payables.hold(v.payableId(), "OBJECTION:" + number, "objection is awaiting review");
+            payables.hold(v.payableId(), "OBJECTION:" + v.number(), "objection is awaiting review");
         }
     }
 

@@ -100,6 +100,7 @@ public class ViolationServiceConfiguration {
     /** The signed-in customer's own violations (ADR-067 d); the file is looked up with the customer's token. */
     @Bean
     CustomerViolations customerViolations(JdbcClient jdbc, ObjectMapper json, ViolationService violations,
+                                          ObjectionService objections, InstalmentService instalments,
                                           AuditRecorder audit, Environment environment,
                                           ObjectProvider<ObservationRegistry> observations) {
         String baseUrl = environment.getRequiredProperty("itms.clients.traffic-files.base-url");
@@ -108,7 +109,7 @@ public class ViolationServiceConfiguration {
         return new CustomerViolations(new JdbcViolationRepository(jdbc, json),
                 new Adapters.RemoteOwnFile(OwnTrafficFile.create(baseUrl, timeout,
                         observations.getIfAvailable(() -> ObservationRegistry.NOOP))),
-                violations, audit);
+                violations, objections, instalments, audit);
     }
 
     @Bean

@@ -22,6 +22,8 @@ public class ObjectionService {
 
     public static final String SUBMIT = "violation.objection.submit";
     public static final String REVIEW = "violation.objection.review";
+    /** A customer objecting to their own violation online (iam V60); held only through the CUSTOMER role. */
+    public static final String CUSTOMER_SUBMIT = "customer.violation.object";
 
     private static final int QUEUE_BATCH = 500;
     private static final int QUEUE_SCAN_LIMIT = 20_000;
@@ -57,6 +59,29 @@ public class ObjectionService {
                     "cannot submit an objection", List.of("VF-050"));
         }
         Violation violation = violations.getForObjection(number, caller);
+        return file(violation, number, reasonCode, explanation, evidenceIds, caller,
+                () -> violations.pauseForObjection(number, caller));
+    }
+
+    /**
+     * The signed-in customer objects to their own violation online (VF-050, ADR-067 d); {@code fileNumber} is their
+     * traffic file, found from their token. The same window, state and instalment rules apply as at a centre, and an
+     * objection to a partner-state violation is sent to that state (XB-005).
+     */
+    @Transactional
+    public Objection submitOwn(String number, String fileNumber, String reasonCode, String explanation,
+                               List<String> evidenceIds, Caller caller) {
+        if (!caller.grants().holds(CUSTOMER_SUBMIT)) {
+            throw new DomainException(DomainException.Kind.OUT_OF_SCOPE, "OBJECTION_SUBMIT_FORBIDDEN",
+                    "cannot submit an objection", List.of("VF-050"));
+        }
+        Violation violation = violations.ownForObjection(number, fileNumber);
+        return file(violation, number, reasonCode, explanation, evidenceIds, caller,
+                () -> violations.pauseOwnForObjection(number));
+    }
+
+    private Objection file(Violation violation, String number, String reasonCode, String explanation,
+                           List<String> evidenceIds, Caller caller, Runnable pause) {
         Instant now = clock.instant();
         if (violations.inInstalmentPlan(violation)) {
             // Q-083 (e): the customer accepted the fine by choosing to pay it in instalments.
@@ -78,7 +103,7 @@ public class ObjectionService {
             throw DomainException.conflict("OBJECTION_EXISTS", "an objection has already been submitted",
                     List.of("VF-050"));
         }
-        violations.pauseForObjection(number, caller);
+        pause.run();
         audit.record("VIOLATION_OBJECTION_SUBMITTED", "Violation", number, null,
                 Map.of("objectionId", objection.id().toString(), "reasonCode", reasonCode,
                         "evidenceCount", evidence.size()), null);

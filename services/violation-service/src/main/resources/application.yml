@@ -130,6 +130,7 @@ itms:
     enabled: true
     paths:
       - /v1/instalment-plans
+      - /v1/me/instalment-plans
       - /v1/violation-books
       - /v1/violation-books/*/entries
       - /v1/violation-books/*/reconciliation
@@ -138,6 +139,7 @@ itms:
       - /v1/violations/*/cancellations
       - /v1/violation-catalogue
       - /v1/violations/*/objections
+      - /v1/me/violations/*/objections
       - /v1/objections/*/decisions
     retention: ${ITMS_IDEMPOTENCY_RETENTION:24h}
     lock-timeout: ${ITMS_IDEMPOTENCY_LOCK_TIMEOUT:30s}

@@ -1372,7 +1372,8 @@ class IamApiIT {
             assertThat(g.get("roleCode").asString()).isEqualTo("CUSTOMER");
             assertThat(g.get("permissions")).extracting(p -> p.asString()).containsExactlyInAnyOrder(
                     "customer.trafficfile.read", "customer.violation.read", "customer.transaction.read",
-                    "customer.payment.make");
+                    "customer.payment.make", "customer.violation.object", "customer.instalment.request",
+                    "customer.notification.read", "customer.notification.preferences");
             assertThat(g.get("scopes").get("regions")).isEmpty();
             assertThat(g.get("scopes").get("centres")).isEmpty();
             assertThat(g.get("scopes").get("modules")).isEmpty();

@@ -32,6 +32,64 @@ tags:
   - name: Black points
 
 paths:
+  /v1/me/instalment-plans:
+    post:
+      tags: [Violations]
+      operationId: requestOwnInstalmentPlan
+      summary: The signed-in customer asks online for an own instalment plan for their own violations (VF-071, ADR-067 d)
+      description: |
+        For customer tokens only. The rules of `POST /v1/instalment-plans` apply (open, payable, not under objection,
+        not cross-border, in no other plan, configured minimum total and month range). The violations must be the
+        customer's own (their traffic file, from the token); any other number answers 404 `VIOLATION_NOT_FOUND`. The
+        plan is kept in the region of the earliest of its violations (interim, Q-086). 503 `TRAFFIC_FILES_UNAVAILABLE`.
+      x-itms-permission: customer.instalment.request
+      x-itms-scope: [own]
+      parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [violationNumbers, months]
+              properties:
+                violationNumbers: { type: array, minItems: 1, maxItems: 50, items: { type: string, maxLength: 30 } }
+                months: { type: integer, minimum: 1, maximum: 60 }
+      responses:
+        '201': { description: Plan opened, content: { application/json: { schema: { $ref: '#/components/schemas/InstalmentPlan' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [Violations]
+      operationId: listOwnInstalmentPlans
+      summary: The signed-in customer's own instalment plans, newest first (VF-071, ADR-067 d; audited)
+      x-itms-permission: customer.violation.read
+      x-itms-scope: [own]
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200':
+          description: Plans
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/InstalmentPlan' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
   /v1/instalment-plans:
     post:
       tags: [Violations]
@@ -468,6 +526,44 @@ paths:
         '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
         '400': { $ref: '#/components/responses/Problem' }
+
+  /v1/me/violations/{number}/objections:
+    post:
+      tags: [Violations]
+      operationId: submitOwnViolationObjection
+      summary: The signed-in customer objects online to their own violation (VF-050, XB-005, ADR-067 d)
+      description: |
+        For customer tokens only. The violation must be the customer's own (their traffic file, from the token, is the
+        responsible one); any other number answers 404 `VIOLATION_NOT_FOUND`. The rules of a centre objection apply:
+        422 `OBJECTION_WINDOW_CLOSED` after the configured window (default 30 days), 409 `VIOLATION_NOT_OPEN`,
+        `VIOLATION_IN_INSTALMENT_PLAN` or `OBJECTION_EXISTS`. The fine is paused while the objection waits (VF-052);
+        an objection to a partner-state violation is sent to that state (XB-005). 503 `TRAFFIC_FILES_UNAVAILABLE`.
+      x-itms-permission: customer.violation.object
+      x-itms-scope: [own]
+      parameters:
+        - $ref: '#/components/parameters/Number'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reasonCode, explanation]
+              properties:
+                reasonCode: { $ref: '#/components/schemas/Code' }
+                explanation: { type: string, minLength: 1, maxLength: 2000 }
+                evidenceIds: { type: array, maxItems: 20, items: { type: string, maxLength: 64 } }
+      responses:
+        '201': { description: Objection submitted, content: { application/json: { schema: { $ref: '#/components/schemas/Objection' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
 
   /v1/objections/queue:
     get:

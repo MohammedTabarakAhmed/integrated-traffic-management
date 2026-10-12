@@ -43,6 +43,14 @@ class DomainExceptionAdvice {
     }
 
     /** Two changes to the same record crossed; the second must re-read (DAT-002). */
+    /** traffic-file-service did not answer, so the customer's own file is unknown (ADR-067 d): nothing was done. */
+    @ExceptionHandler(gov.itms.notification.application.CustomerNotifications.TrafficFilesUnavailableException.class)
+    ProblemDetail trafficFilesUnavailable(RuntimeException e) {
+        String detail = messages.getMessage("problem.TRAFFIC_FILES_UNAVAILABLE", null,
+                "Your traffic file cannot be found right now. Try again shortly.", LocaleContextHolder.getLocale());
+        return Problems.of(HttpStatus.SERVICE_UNAVAILABLE, "TRAFFIC_FILES_UNAVAILABLE", detail, List.of("CC-073"));
+    }
+
     @ExceptionHandler(OptimisticLockingFailureException.class)
     ProblemDetail concurrent(OptimisticLockingFailureException e) {
         String detail = messages.getMessage("problem.VERSION_MISMATCH", new Object[] {"?"},

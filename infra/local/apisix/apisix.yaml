@@ -272,6 +272,9 @@ routes:
       - /v1/notifications/*
       - /v1/inbox
       - /v1/inbox/*
+      - /v1/me/inbox
+      - /v1/me/inbox/*
+      - /v1/me/notification-preferences
       - /v1/recipients/*
       - /v1/event-subscriptions
       - /v1/expiry-watches

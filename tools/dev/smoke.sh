@@ -1309,4 +1309,39 @@ code=$(printf '%s' "$res" | tail -n1); body=$(printf '%s' "$res" | sed '$d')
 [[ "$code" == 201 || ( "$code" == 422 && "$body" == *NOTHING_TO_PAY* ) ]] || { echo "FAIL: POST /v1/me/baskets ($code) $body"; exit 1; }
 echo "   own items of $own_file only; basket of every open item: HTTP $code"
 
+echo "58. Customer appointments online (CC-091): through the gateway the customer books their own appointment, changes it within the limit (2), is refused a third change, and cancels"
+CUSTOMER=$(customer_token 784199012345671 "$DEV_CUSTOMER_PASSWORD")
+cust_sub=$(claims_of "$CUSTOMER" | json_field "['sub']")
+cust_slots=$(curl -sf -H "Authorization: Bearer $CUSTOMER" -H "X-Channel: PORTAL" \
+  "$GW/v1/slots?centreCode=$centre&serviceCode=SMK_TEST&from=$tomorrow&to=$tomorrow")
+utc() { "$PY" -c "import datetime,sys; print(datetime.datetime.fromisoformat(sys.argv[1].replace('Z','+00:00')).astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))" "$1"; }
+cslot() { utc "$(printf '%s' "$cust_slots" | json_field "['items'][$1]['start']")"; }
+cust_post() {
+  curl -s -w '\n%{http_code}' -H "Authorization: Bearer $CUSTOMER" -H "X-Channel: PORTAL" -H "Content-Type: application/json" \
+    -H "Idempotency-Key: smoke-cust-$(date +%s%N)" -d "$2" "$GW$1"
+}
+res=$(cust_post /v1/bookings "{\"serviceCode\":\"SMK_TEST\",\"centreCode\":\"$centre\",\"start\":\"$(cslot 0)\",\"customerId\":\"$cust_sub\"}")
+expect "$res" 201
+cust_booking=$(body_of "$res" | json_field "['id']")
+expect "$(cust_post "/v1/bookings/$cust_booking/changes" "{\"start\":\"$(cslot 1)\"}")" 200
+expect "$(cust_post "/v1/bookings/$cust_booking/changes" "{\"start\":\"$(cslot 2)\"}")" 200
+expect "$(cust_post "/v1/bookings/$cust_booking/changes" "{\"start\":\"$(cslot 3)\"}")" 409 CHANGE_LIMIT_REACHED
+res=$(cust_post "/v1/bookings/$cust_booking/cancellations" '{"reason":"smoke customer cancellation"}')
+[[ "$(body_of "$res" | json_field "['status']")" == CANCELLED ]] || { echo "FAIL: customer cancellation $(body_of "$res")"; exit 1; }
+echo "   booking $cust_booking by the signed-in customer: changed twice, third change refused, cancelled"
+
+echo "59. Customer preferences and messages (CC-073, SEC-002): changing contact points needs a one-time-password sign-in; the customer then reads their own inbox"
+prefs='{"language":"EN","email":"smoke.customer@example.org","preferences":{"VEHICLE":["INBOX","EMAIL"]}}'
+res=$(cust_post /v1/me/notification-preferences "$prefs")
+expect "$res" 401 STEP_UP_REQUIRED
+CUSTOMER=$(customer_token 784199012345671 "$DEV_CUSTOMER_PASSWORD" otp)
+res=$(cust_post /v1/me/notification-preferences "$prefs")
+expect "$res" 200
+[[ "$(body_of "$res" | json_field "['id']")" == "$own_file" ]] || { echo "FAIL: preferences saved for $(body_of "$res")"; exit 1; }
+curl -sf -H "Authorization: Bearer $CUSTOMER" -H "X-Channel: PORTAL" "$GW/v1/me/inbox" | "$PY" -c "
+import json,sys
+bad=[n['id'] for n in json.load(sys.stdin)['items'] if n['recipientId']!='$own_file']
+sys.exit('FAIL: /v1/me/inbox shows other recipients: '+','.join(bad) if bad else None)" || exit 1
+echo "   national-id sign-in refused (step-up), otp sign-in saved the preferences of $own_file; inbox of $own_file only"
+
 echo "SMOKE OK"

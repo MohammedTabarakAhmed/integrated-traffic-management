@@ -1,10 +1,17 @@
 package gov.itms.notification.infrastructure;
 
 import gov.itms.notification.application.ChannelGateway;
+import gov.itms.notification.application.CustomerNotifications;
 import gov.itms.notification.application.NotificationService;
 import gov.itms.notification.domain.DeliveryChannel;
 import gov.itms.notification.domain.Subscriptions;
 import gov.itms.platform.audit.AuditRecorder;
+import gov.itms.platform.client.OwnTrafficFile;
+import gov.itms.platform.client.ServiceCallException;
+import io.micrometer.observation.ObservationRegistry;
+import java.time.Duration;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.core.env.Environment;
 import gov.itms.platform.events.ProcessedEvents;
 import java.net.http.HttpClient;
 import java.time.Clock;
@@ -43,6 +50,27 @@ public class NotificationServiceConfiguration {
                     builder.clone().baseUrl(url.toString()).requestFactory(factory).build());
         });
         return new HttpChannelGateway(clients);
+    }
+
+    /** The signed-in customer's own messages and preferences (ADR-067 d); the file is found with their own token. */
+    @Bean
+    CustomerNotifications customerNotifications(JdbcClient jdbc, ObjectMapper json, AuditRecorder audit, Clock clock,
+                                                Environment environment,
+                                                ObjectProvider<ObservationRegistry> observations) {
+        OwnTrafficFile files = OwnTrafficFile.create(
+                environment.getRequiredProperty("itms.clients.traffic-files.base-url"),
+                environment.getRequiredProperty("itms.clients.traffic-files.timeout", Duration.class),
+                observations.getIfAvailable(() -> ObservationRegistry.NOOP));
+        CustomerNotifications.OwnFile own = () -> {
+            try {
+                return files.fileNumber();
+            } catch (ServiceCallException e) {
+                LoggerFactory.getLogger(CustomerNotifications.class).warn("Own traffic file lookup failed: {}",
+                        e.getMessage());
+                throw new CustomerNotifications.TrafficFilesUnavailableException(e);
+            }
+        };
+        return new CustomerNotifications(new JdbcNotificationRepository(jdbc, json), own, audit, clock);
     }
 
     @Bean

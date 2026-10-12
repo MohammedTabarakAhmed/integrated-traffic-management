@@ -78,6 +78,7 @@ class NotificationApiIT {
         registry.add("itms.notifications.gateways.SMS", () -> GATEWAY.baseUrl() + "/sms");
         registry.add("itms.notifications.gateways.EMAIL", () -> GATEWAY.baseUrl() + "/email");
         registry.add("itms.notifications.gateways.PUSH", () -> GATEWAY.baseUrl() + "/push");
+        registry.add("itms.clients.traffic-files.base-url", GATEWAY::baseUrl);
     }
 
     @Autowired
@@ -165,7 +166,8 @@ class NotificationApiIT {
     }
 
     private MvcResult postAs(String path, Object body, RequestPostProcessor who) throws Exception {
-        boolean idempotent = path.equals("/v1/notification-templates") || path.equals("/v1/notifications");
+        boolean idempotent = path.equals("/v1/notification-templates") || path.equals("/v1/notifications")
+                || path.equals("/v1/me/notification-preferences");
         return call(post(path), Request.Method.POST, path, body, who, idempotent ? "it-" + UUID.randomUUID() : null);
     }
 
@@ -381,9 +383,62 @@ class NotificationApiIT {
                 sender()))).isEqualTo("TEMPLATE_DATA_MISSING");
     }
 
+    private static RequestPostProcessor signedInCustomer(String token, String acr, String... permissions) {
+        return jwt().jwt(j -> j.tokenValue(token).subject("u-" + token).claim("preferred_username", token)
+                .claim("subject_type", "CUSTOMER").claim("national_id", "784199012345671").claim("acr", acr)
+                .claim("roles", List.of("CUSTOMER")).claim("permissions", Arrays.asList(permissions)));
+    }
+
+    @Test
+    @Tag("CC-073")
+    @Tag("SEC-002")
+    @Tag("CH-002")
+    @DisplayName("ADR-067 d: a customer reads the messages of their own traffic file and sets its preferences; the "
+            + "change needs a one-time-password sign-in (SEC-002); staff 403")
+    void customerOwnMessagesAndPreferences() throws Exception {
+        String template = published(false);
+        String file = "TF-" + template.toUpperCase().replace('_', '-');
+        String token = "cust-" + template.toLowerCase();
+        GATEWAY.ownFiles.put(token, file);
+        String[] perms = {"customer.notification.read", "customer.notification.preferences"};
+        Map<String, Object> prefs = Map.of("language", "EN", "email", "a.person@example.org",
+                "preferences", Map.of("VEHICLE", List.of("INBOX")));
+
+        MvcResult weak = postAs("/v1/me/notification-preferences", prefs, signedInCustomer(token, "national-id", perms));
+        assertThat(weak.getResponse().getStatus()).isEqualTo(401);
+        assertThat(weak.getResponse().getHeader("WWW-Authenticate")).contains("insufficient_user_authentication");
+        MvcResult strong = postAs("/v1/me/notification-preferences", prefs, signedInCustomer(token, "otp", perms));
+        assertThat(strong.getResponse().getStatus()).as(strong.getResponse().getContentAsString()).isEqualTo(200);
+        JsonNode saved = body(strong);
+        assertThat(saved.get("id").asString()).isEqualTo(file);
+        assertThat(saved.get("email").asString()).isEqualTo("a***@example.org");
+        assertThat(body(getAs("/v1/me/notification-preferences", signedInCustomer(token, "national-id", perms)))
+                .get("preferences").get("VEHICLE").get(0).asString()).isEqualTo("INBOX");
+        assertThat(db.sql("select count(*) from audit_outbox where action = 'RECIPIENT_SAVED' and entity_id = :f")
+                .param("f", file).query(Long.class).single()).isEqualTo(1L);
+
+        String inboxId = send(template, file).get(0).get("id").asString();
+        JsonNode inbox = body(getAs("/v1/me/inbox?unreadOnly=true", signedInCustomer(token, "national-id", perms)))
+                .get("items");
+        assertThat(inbox.findValuesAsString("id")).containsExactly(inboxId);
+        assertThat(body(postAs("/v1/me/inbox/" + inboxId + "/reads", null, signedInCustomer(token, "national-id",
+                perms))).get("readAt").isNull()).isFalse();
+        GATEWAY.ownFiles.put(token + "-x", "TF-SOMEONE-ELSE");
+        assertThat(postAs("/v1/me/inbox/" + inboxId + "/reads", null, signedInCustomer(token + "-x", "otp", perms))
+                .getResponse().getStatus()).isEqualTo(404);
+
+        assertThat(getAs("/v1/me/inbox", user("u-staff-me", "NOTIFICATION_SUPPORT", "customer.notification.read"))
+                .getResponse().getStatus()).as("staff token").isEqualTo(403);
+        MvcResult none = getAs("/v1/me/inbox", signedInCustomer("cust-nofile", "otp", perms));
+        assertThat(none.getResponse().getStatus()).isEqualTo(404);
+        assertThat(code(none)).isEqualTo("OWN_FILE_NOT_FOUND");
+    }
+
     /** A real HTTP stand-in for the messaging gateway: accepts every message with id {@code gw-<clientReference>}. */
     static final class GatewayStub {
         final List<String> received = new CopyOnWriteArrayList<>();
+        /** Customer token → traffic file for {@code GET /v1/me/traffic-file} (ADR-067 d). */
+        final java.util.Map<String, String> ownFiles = new java.util.concurrent.ConcurrentHashMap<>();
         private final HttpServer server;
         private final ObjectMapper mapper = new ObjectMapper();
 
@@ -393,6 +448,17 @@ class NotificationApiIT {
             } catch (IOException e) {
                 throw new IllegalStateException(e);
             }
+            server.createContext("/v1/me/traffic-file", exchange -> {
+                String auth = String.valueOf(exchange.getRequestHeaders().getFirst("Authorization"));
+                String file = ownFiles.get(auth.startsWith("Bearer ") ? auth.substring(7) : "");
+                byte[] answer = (file == null ? "{\"code\":\"OWN_FILE_NOT_FOUND\"}" : "{\"fileNumber\":\"" + file
+                        + "\"}").getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().add("Content-Type", "application/json");
+                exchange.sendResponseHeaders(file == null ? 404 : 200, answer.length);
+                try (OutputStream out = exchange.getResponseBody()) {
+                    out.write(answer);
+                }
+            });
             server.createContext("/", exchange -> {
                 String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
                 received.add(body);

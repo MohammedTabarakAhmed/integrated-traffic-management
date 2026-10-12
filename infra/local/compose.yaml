@@ -800,6 +800,8 @@ services:
       ITMS_NOTIFICATIONS_SMS_GATEWAY_URL: http://messaging-gateway-mock:8080/sms
       ITMS_NOTIFICATIONS_EMAIL_GATEWAY_URL: http://messaging-gateway-mock:8080/email
       ITMS_NOTIFICATIONS_PUSH_GATEWAY_URL: http://messaging-gateway-mock:8080/push
+      # A customer's own messages and preferences (ADR-067 d): their file is looked up with their own token.
+      ITMS_TRAFFIC_FILES_URL: http://traffic-file-service:8080
       # Event-driven notifications (CC-071) from the local broker.
       ITMS_NOTIFICATIONS_CONSUMER_ENABLED: "true"
       # Short-lived login from OpenBao (ADR-039), files under /run/secrets/spring/datasource; owner role on connect.

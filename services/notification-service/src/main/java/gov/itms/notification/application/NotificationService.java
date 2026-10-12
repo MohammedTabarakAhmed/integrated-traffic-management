@@ -393,7 +393,7 @@ public class NotificationService {
         return m;
     }
 
-    private static Map<String, Object> masked(Recipient r) {
+    static Map<String, Object> masked(Recipient r) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("language", r.language().name());
         m.put("phone", Recipient.mask(DeliveryChannel.SMS, r.phone()));

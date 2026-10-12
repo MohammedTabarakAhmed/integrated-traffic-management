@@ -213,6 +213,96 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/Problem' }
 
+  /v1/me/inbox:
+    get:
+      tags: [Notifications]
+      operationId: getOwnInbox
+      summary: The signed-in customer's in-app messages, newest first (CC-070, CH-002, ADR-067 d)
+      description: >-
+        For customer tokens only. Messages addressed to the customer's traffic file (found from the token through
+        traffic-file-service). 404 `OWN_FILE_NOT_FOUND`; 503 `TRAFFIC_FILES_UNAVAILABLE`.
+      x-itms-permission: customer.notification.read
+      x-itms-scope: [own]
+      parameters:
+        - name: unreadOnly
+          in: query
+          schema: { type: boolean, default: false }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200':
+          description: Inbox messages
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/me/inbox/{notificationId}/reads:
+    post:
+      tags: [Notifications]
+      operationId: markOwnInboxRead
+      summary: Mark one of the signed-in customer's in-app messages read (ADR-067 d)
+      x-itms-permission: customer.notification.read
+      x-itms-scope: [own]
+      parameters:
+        - $ref: '#/components/parameters/NotificationId'
+      responses:
+        '200': { $ref: '#/components/responses/Notification' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/me/notification-preferences:
+    get:
+      tags: [Recipients]
+      operationId: getOwnNotificationPreferences
+      summary: The signed-in customer's masked contact points and channel preferences (CC-073, ADR-067 d)
+      x-itms-permission: customer.notification.read
+      x-itms-scope: [own]
+      responses:
+        '200': { $ref: '#/components/responses/Recipient' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [Recipients]
+      operationId: saveOwnNotificationPreferences
+      summary: The signed-in customer sets their contact points and channel preferences (CC-073, SEC-002, ADR-067 d)
+      description: >-
+        For customer tokens only; a profile change, so the token must come from a one-time-password sign-in (acr
+        `otp`), otherwise 401 `insufficient_user_authentication` (SEC-002). Mandatory legal notices ignore preferences
+        and are always sent. Audited with masked values.
+      x-itms-permission: customer.notification.preferences
+      x-itms-scope: [own]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RecipientRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/Recipient' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401':
+          description: Missing or invalid token, or a sign-in too weak for a profile change (SEC-002 step-up)
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
   /v1/recipients/{recipientId}:
     post:
       tags: [Recipients]
@@ -562,3 +652,7 @@ components:
         correlationId: { type: string }
         requirementRefs: { type: array, items: { type: string } }
         errors: { type: array, items: { type: object } }
+        acrValues:
+          description: Sign-in levels that would be accepted, on a SEC-002 step-up refusal (RFC 9470)
+          type: array
+          items: { type: string }

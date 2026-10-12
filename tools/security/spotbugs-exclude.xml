@@ -41,6 +41,7 @@
       <And><Class name="gov.itms.workflow.application.WorkflowService"/><Field name="repo"/></And>
       <And><Class name="gov.itms.workflow.infrastructure.WorkflowServiceConfiguration$EscalationJob"/><Field name="workflow"/></And>
       <And><Class name="gov.itms.notification.application.NotificationService"/><Field name="repo"/></And>
+      <And><Class name="gov.itms.notification.application.CustomerNotifications"/><Field name="repo"/></And>
       <And><Class name="gov.itms.examination.application.ExaminationService"/><Field name="~repo|licensing"/></And>
       <And><Class name="gov.itms.document.application.CertificateService"/><Field name="~repo|store"/></And>
       <And><Class name="gov.itms.document.application.DocumentService"/><Field name="~repo|store"/></And>

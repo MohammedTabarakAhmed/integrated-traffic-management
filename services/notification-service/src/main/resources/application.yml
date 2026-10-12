@@ -42,6 +42,11 @@ itms:
     audience: itms-api
     # Grants come from iam-service (ADR-022). token-claims is the interim ADR-018 mode, for tests only.
     authorisation-source: ${ITMS_AUTHORISATION_SOURCE:iam}
+    # SEC-002 (ADR-067 c): changing one's contact points is a profile change; a customer needs a one-time-password
+    # sign-in (acr otp) for it.
+    step-up:
+      paths:
+        - POST /v1/me/notification-preferences
     iam:
       base-url: ${ITMS_IAM_URL:}
       cache-ttl: ${ITMS_IAM_CACHE_TTL:60s}
@@ -75,11 +80,17 @@ itms:
       - { event-type: itms.vehicle.renewed, subject-type: REGISTRATION, subject-field: vin, recipient-field: ownerFileNumber, expiry-field: registrationExpiry }
       - { event-type: itms.permit.status-changed, subject-type: PERMIT, subject-field: number, recipient-field: trafficFileNumber, expiry-field: expiresOn }
   # API_SPECIFICATION §2, ADR-032: publishing templates and sending need an Idempotency-Key.
+  # A customer's own messages and preferences (ADR-067 d): their file from traffic-file-service with their own token.
+  clients:
+    traffic-files:
+      base-url: ${ITMS_TRAFFIC_FILES_URL:http://localhost:8085}
+      timeout: ${ITMS_TRAFFIC_FILES_TIMEOUT:3s}
   idempotency:
     enabled: true
     paths:
       - /v1/notification-templates
       - /v1/notifications
+      - /v1/me/notification-preferences
     retention: ${ITMS_IDEMPOTENCY_RETENTION:24h}
     lock-timeout: ${ITMS_IDEMPOTENCY_LOCK_TIMEOUT:30s}
     cleanup-interval: ${ITMS_IDEMPOTENCY_CLEANUP_INTERVAL:15m}

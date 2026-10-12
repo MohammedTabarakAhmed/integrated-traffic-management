@@ -166,6 +166,36 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
 
+  /v1/traffic-files/name-searches:
+    post:
+      tags: [Traffic files]
+      operationId: searchTrafficFilesByName
+      summary: Files of people and companies by name (CC-101; partial, either language, transliterated, phonetic; audited, CC-102)
+      description: |
+        Every query word must be found within one of a file's names (given + family name in each language, a
+        company's names): as text after folding (case, diacritics, Arabic letter forms), or by its phonetic key, which
+        is the same for Arabic and Latin script ("محمد", "Mohammed" and "Muhammad" meet). A word whose key is shorter
+        than `itms.traffic-file.name-search.min-key-length` must match as text. EXACT (the whole name) comes before
+        PARTIAL (every word as text) before PHONETIC; merged-away files are left out (ADR-063). The audit record lists
+        the files shown, not the name searched for.
+      x-itms-permission: trafficfile.read
+      x-itms-scope: national
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NameSearchRequest' }
+      responses:
+        '200':
+          description: Matching files, best first, at most `limit` (capped by `itms.traffic-file.name-search.max-results`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NameHitCollection' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
   /v1/traffic-files/{fileNumber}:
     get:
       tags: [Traffic files]
@@ -770,6 +800,45 @@ components:
       required: [document]
       properties:
         document: { $ref: '#/components/schemas/Document' }
+    NameSearchRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 100
+          description: Letters of any script, spaces and . ' - with at least two letters (422 NAME_QUERY_INVALID otherwise)
+        kind:
+          oneOf: [ { type: string, enum: [INDIVIDUAL, COMPANY] }, { type: 'null' } ]
+          description: Only people or only companies; both when absent
+        limit:
+          oneOf: [ { type: integer, minimum: 1, maximum: 100 }, { type: 'null' } ]
+    NameHit:
+      type: object
+      additionalProperties: false
+      required: [fileNumber, kind, status, regionOpened, match]
+      properties:
+        fileNumber: { $ref: '#/components/schemas/FileNumber' }
+        kind: { type: string, enum: [INDIVIDUAL, COMPANY] }
+        status: { type: string, enum: [ACTIVE, CLOSED, DECEASED] }
+        regionOpened: { $ref: '#/components/schemas/Code' }
+        match: { type: string, enum: [EXACT, PARTIAL, PHONETIC] }
+        nameNl:
+          oneOf: [ { type: string }, { type: 'null' } ]
+          description: Given and family name, or the company's name, in the national language
+        nameEn:
+          oneOf: [ { type: string }, { type: 'null' } ]
+          description: Given and family name, or the company's name, in English
+    NameHitCollection:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/NameHit' }
     ProfileUpdateRequest:
       type: object
       additionalProperties: false

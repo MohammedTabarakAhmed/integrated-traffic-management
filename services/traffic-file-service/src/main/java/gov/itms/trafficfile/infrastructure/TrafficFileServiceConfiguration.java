@@ -8,6 +8,7 @@ import gov.itms.trafficfile.application.CommercialRegister;
 import gov.itms.trafficfile.application.CompanyFileService;
 import gov.itms.trafficfile.application.DuplicateMergeService;
 import gov.itms.trafficfile.application.IdentityRegister;
+import gov.itms.trafficfile.application.NameSearchService;
 import gov.itms.trafficfile.application.RegisterSyncService;
 import gov.itms.trafficfile.application.TrafficFileService;
 import java.net.http.HttpClient;
@@ -24,7 +25,7 @@ import tools.jackson.databind.ObjectMapper;
 
 /** Wires the application layer to its JDBC and register adapters. */
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties(TrafficFileProperties.class)
+@EnableConfigurationProperties({TrafficFileProperties.class, NameSearchProperties.class})
 public class TrafficFileServiceConfiguration {
 
     @Bean
@@ -94,5 +95,11 @@ public class TrafficFileServiceConfiguration {
                                           IdentityRegister register, AuditRecorder audit, DomainEventRecorder events,
                                           Clock clock, TrafficFileProperties properties) {
         return new TrafficFileService(files, bans, register, audit, events, clock, properties.nationalIdRegex());
+    }
+
+    @Bean
+    NameSearchService nameSearchService(JdbcClient jdbc, AuditRecorder audit, NameSearchProperties properties) {
+        return new NameSearchService(new JdbcNameIndex(jdbc), audit, properties.maxResults(),
+                properties.minKeyLength());
     }
 }

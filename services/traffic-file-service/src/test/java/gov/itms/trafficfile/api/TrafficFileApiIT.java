@@ -632,6 +632,65 @@ class TrafficFileApiIT {
                 .isInstanceOf(DataAccessException.class).hasMessageContaining("append-only");
     }
 
+    // ------------------------------------------------------------------ name search (CC-101)
+
+    private String namedFile(Map<String, String> name) throws Exception {
+        LocalDate born = LocalDate.of(1971, 1, 1).plusDays(ThreadLocalRandom.current().nextInt(3000));
+        Map<String, Object> request = visitor(newPassport(), born);
+        request.put("visitorIdentity", Map.of("name", name, "nationality", "GBR", "birthDate", born.toString(),
+                "gender", "MALE"));
+        MvcResult r = postAs("/v1/traffic-files/individuals", request, officer());
+        assertThat(r.getResponse().getStatus()).as(r.getResponse().getContentAsString()).isEqualTo(201);
+        return body(r).get("fileNumber").asString();
+    }
+
+    /** file number -> match of a name search. */
+    private Map<String, String> byName(String name, String kind) throws Exception {
+        Map<String, Object> request = new HashMap<>();
+        request.put("name", name);
+        request.put("kind", kind);
+        MvcResult r = postAs("/v1/traffic-files/name-searches", request, reader());
+        assertThat(r.getResponse().getStatus()).as(r.getResponse().getContentAsString()).isEqualTo(200);
+        Map<String, String> hits = new HashMap<>();
+        body(r).get("items").forEach(h -> hits.put(h.get("fileNumber").asString(), h.get("match").asString()));
+        return hits;
+    }
+
+    @Test
+    @Tag("CC-101")
+    @Tag("CC-102")
+    @DisplayName("name search: partial, both languages, transliterated and phonetic; audited without the name")
+    void nameSearch() throws Exception {
+        String mansoori = namedFile(Map.of("givenNl", "مُحَمَّد", "familyNl", "المنصوري", "givenEn", "Mohammed",
+                "familyEn", "Al-Mansoori"));
+        String khalid = namedFile(Map.of("givenEn", "Khalid", "familyEn", "Bin Waleed"));
+        String fatima = namedFile(Map.of("givenNl", "فاطمة", "familyNl", "عبدالرحمن"));
+
+        assertThat(byName("mohammed al mansoori", null)).containsEntry(mansoori, "EXACT");
+        assertThat(byName("محمد المنصوري", null)).as("harakat folded").containsEntry(mansoori, "EXACT");
+        assertThat(byName("Mansoo", null)).as("partial").containsEntry(mansoori, "PARTIAL");
+        assertThat(byName("منصور", null)).as("partial, national language").containsEntry(mansoori, "PARTIAL");
+        assertThat(byName("Muhammad Almansuri", null)).as("phonetic").containsEntry(mansoori, "PHONETIC");
+        assertThat(byName("خالد", null)).as("transliterated, Arabic to Latin").containsEntry(khalid, "PHONETIC");
+        assertThat(byName("Fatima Abdul Rahman", null)).as("transliterated, Latin to Arabic")
+                .containsEntry(fatima, "PHONETIC");
+        assertThat(byName("Mohammed Khalid", null)).as("every word within one name").doesNotContainKeys(
+                mansoori, khalid);
+        assertThat(byName("Mansoori", "COMPANY")).doesNotContainKey(mansoori);
+
+        assertThat(code(postAs("/v1/traffic-files/name-searches", Map.of("name", "12345"), reader())))
+                .isEqualTo("NAME_QUERY_INVALID");
+        assertThat(postAs("/v1/traffic-files/name-searches", Map.of("name", "Mohammed"),
+                user("u-none", "none", "NONE", "vehicle.read")).getResponse().getStatus()).isEqualTo(403);
+
+        List<String> audits = db.sql("select new_value::text from audit_outbox where action = 'TRAFFIC_FILE_NAME_SEARCHED'")
+                .query(String.class).list();
+        assertThat(audits).hasSizeGreaterThanOrEqualTo(9).anyMatch(a -> a.contains(mansoori))
+                .noneMatch(a -> a.contains("Mansoo") || a.contains("منصور"));
+        assertThat(body(getAs("/v1/traffic-files/" + mansoori + "/history", reader())).toString())
+                .doesNotContain("name_key").doesNotContain("name_text");
+    }
+
     // ------------------------------------------------------------------ register changes (DL-010)
 
     private static RequestPostProcessor registerFeed() {

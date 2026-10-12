@@ -70,6 +70,11 @@ itms:
       timeout: ${ITMS_LICENSING_TIMEOUT:3s}
     # Probable duplicates (DL-009): how similar two names must be (Jaro-Winkler, 0.70-1.00).
     duplicate-name-threshold: ${ITMS_TRAFFIC_FILE_DUPLICATE_NAME_THRESHOLD:0.88}
+    # Name search (CC-101, ADR-063): most files per search (1-100) and the phonetic key length (2-6) a query word needs
+    # before it is matched by sound.
+    name-search:
+      max-results: ${ITMS_TRAFFIC_FILE_NAME_SEARCH_MAX_RESULTS:20}
+      min-key-length: ${ITMS_TRAFFIC_FILE_NAME_SEARCH_MIN_KEY_LENGTH:3}
   # API_SPECIFICATION §2, ADR-032: opening a file and updating a profile need an Idempotency-Key; a retry with the same
   # key and request replays the stored response. Retention and lock timeout are set per environment (Q-052).
   idempotency:

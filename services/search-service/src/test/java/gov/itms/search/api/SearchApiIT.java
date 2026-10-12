@@ -74,6 +74,30 @@ class SearchApiIT {
     }
 
     @Test
+    @Tag("CC-101")
+    @DisplayName("CC-101: a query of letters is a name, posted to traffic-file-service's name search; identifier "
+            + "sources are not asked")
+    void nameSearch() throws Exception {
+        OWNERS.answers.put("/v1/traffic-files/name-searches", new SourceStub.Answer(200, "{\"items\":[{\"fileNumber\":"
+                + "\"10000000017\",\"kind\":\"INDIVIDUAL\",\"status\":\"ACTIVE\",\"regionOpened\":\"DXB\","
+                + "\"match\":\"PHONETIC\",\"nameNl\":\"محمد المنصوري\",\"nameEn\":null}]}", 0));
+
+        JsonNode r = api.expect(api.post("/v1/searches", Map.of("query", "Muhammad Almansuri", "types",
+                List.of("TRAFFIC_FILE")), STAFF), 200);
+
+        JsonNode hit = r.get("items").get(0);
+        assertThat(hit.get("type").asString()).isEqualTo("TRAFFIC_FILE");
+        assertThat(hit.get("id").asString()).isEqualTo("10000000017");
+        assertThat(hit.get("fields").get("match").asString()).isEqualTo("PHONETIC");
+        assertThat(hit.get("fields").get("nameNl").asString()).isEqualTo("محمد المنصوري");
+        Map<String, String> statuses = new java.util.HashMap<>();
+        r.get("sources").forEach(s -> statuses.put(s.get("name").asString(), s.get("status").asString()));
+        assertThat(statuses).containsOnlyKeys("traffic-file-name").containsEntry("traffic-file-name", "OK");
+        assertThat(OWNERS.seen).filteredOn(s -> s.target().equals("/v1/traffic-files/name-searches"))
+                .anySatisfy(s -> assertThat(s.body()).isEqualTo("{\"name\":\"Muhammad Almansuri\"}"));
+    }
+
+    @Test
     @Tag("CC-102")
     @Tag("CC-103")
     @DisplayName("CC-100, CC-102: a VIN is asked of vehicle-service with the caller's token; a plate-shaped query also "

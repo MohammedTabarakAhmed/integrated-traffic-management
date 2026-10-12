@@ -224,6 +224,8 @@ final class ApiModels {
         /** Stored row images minus fields the caller may not see (SEC-014). */
         static FileVersionDto of(FileVersion v, boolean sensitive) {
             Map<String, Object> state = new java.util.LinkedHashMap<>(v.state());
+            state.remove("name_text"); // name search keys (V6), derived from the names already shown
+            state.remove("name_key");
             if (!sensitive) {
                 state.computeIfPresent("national_id_no", (k, value) -> mask(value.toString()));
                 state.computeIfPresent("passport_no", (k, value) -> mask(value.toString()));

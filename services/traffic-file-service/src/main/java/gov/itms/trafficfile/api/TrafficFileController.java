@@ -11,11 +11,16 @@ import gov.itms.trafficfile.api.ApiModels.TrafficFileDto;
 import gov.itms.trafficfile.application.Caller;
 import gov.itms.trafficfile.application.CompanyFileService;
 import gov.itms.trafficfile.application.DuplicateMergeService;
+import gov.itms.trafficfile.application.NameIndex;
+import gov.itms.trafficfile.application.NameSearchService;
 import gov.itms.trafficfile.application.TrafficFileService;
 import gov.itms.trafficfile.domain.TrafficFile;
 import jakarta.validation.Valid;
 import gov.itms.trafficfile.domain.Channel;
 import gov.itms.trafficfile.domain.Codes;
+import gov.itms.trafficfile.domain.NameQuery;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
@@ -44,14 +49,40 @@ class TrafficFileController {
     private final TrafficFileService service;
     private final CompanyFileService companies;
     private final DuplicateMergeService merges;
+    private final NameSearchService names;
     private final Callers callers;
 
     TrafficFileController(TrafficFileService service, CompanyFileService companies, DuplicateMergeService merges,
-                          Callers callers) {
+                          NameSearchService names, Callers callers) {
         this.service = service;
         this.companies = companies;
         this.merges = merges;
+        this.names = names;
         this.callers = callers;
+    }
+
+    /** A name search (CC-101); {@code limit} defaults to the configured most. */
+    record NameSearchRequest(@NotBlank @Size(max = 100) String name, TrafficFile.Kind kind,
+                             @Min(1) @Max(100) Integer limit) {
+    }
+
+    record NameHitDto(String fileNumber, TrafficFile.Kind kind, TrafficFile.Status status, String regionOpened,
+                      NameQuery.Match match, String nameNl, String nameEn) {
+        static NameHitDto of(NameIndex.Hit h) {
+            return new NameHitDto(h.fileNumber(), h.kind(), h.status(), h.regionOpened(), h.match(), h.nameNl(),
+                    h.nameEn());
+        }
+    }
+
+    /**
+     * Files of people and companies by name (CC-101): partial, either language, transliterated, phonetic; best match
+     * first. A POST so that the name never appears in a URL or access log; audited (CC-102).
+     */
+    @PostMapping("/name-searches")
+    @PreAuthorize("hasAuthority('trafficfile.read')")
+    Collection<NameHitDto> searchByName(@Valid @RequestBody NameSearchRequest body) {
+        NameQuery query = new NameQuery(body.name(), body.kind(), body.limit() == null ? 100 : body.limit());
+        return new Collection<>(names.search(query, callers.current()).stream().map(NameHitDto::of).toList());
     }
 
     record CandidateDto(TrafficFileDto file, double nameSimilarity) {

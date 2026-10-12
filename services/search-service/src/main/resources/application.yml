@@ -63,6 +63,19 @@ itms:
         id-field: fileNumber
         region-field: regionOpened
         fields: [kind, category, type, status]
+      # People and companies by name (CC-101): partial, both languages, transliterated, phonetic; a query with a
+      # letter and no digit.
+      - name: traffic-file-name
+        type: TRAFFIC_FILE
+        base-url: ${ITMS_TRAFFIC_FILES_URL:http://localhost:8085}
+        method: POST
+        path: /v1/traffic-files/name-searches
+        body: '{"name":{q}}'
+        pattern: '^(?=.*\p{L}.*\p{L})[\p{L}\p{M} .''-]{2,100}$'
+        items-field: items
+        id-field: fileNumber
+        region-field: regionOpened
+        fields: [kind, status, match, nameNl, nameEn]
       - name: vehicle-vin
         type: VEHICLE
         base-url: ${ITMS_VEHICLES_URL:http://localhost:8095}

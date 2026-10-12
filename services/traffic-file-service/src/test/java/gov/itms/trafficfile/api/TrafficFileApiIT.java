@@ -304,6 +304,38 @@ class TrafficFileApiIT {
                 officer()))).isEqualTo("BIRTH_DATE_IN_FUTURE");
     }
 
+    private static RequestPostProcessor customer(String nationalId, String... permissions) {
+        return jwt().jwt(j -> j.subject("u-cust-" + nationalId).claim("preferred_username", nationalId)
+                .claim("subject_type", "CUSTOMER").claim("national_id", nationalId)
+                .claim("roles", List.of("CUSTOMER")).claim("permissions", Arrays.asList(permissions)));
+    }
+
+    @Test
+    @Tag("CH-002")
+    @Tag("CC-001")
+    @DisplayName("ADR-067 d: a customer reads only their own file, found by the national id in the token; the view "
+            + "is audited; staff and customers without the permission get 403; no file is 404")
+    void ownFile() throws Exception {
+        String number = fileOf(IdentityRegisterStub.CITIZEN);
+
+        MvcResult own = getAs("/v1/me/traffic-file", customer(IdentityRegisterStub.CITIZEN,
+                "customer.trafficfile.read"));
+        assertThat(own.getResponse().getStatus()).isEqualTo(200);
+        assertThat(body(own).get("fileNumber").asString()).isEqualTo(number);
+        assertThat(body(own).get("identity").get("nationalIdNo").asString()).isEqualTo(IdentityRegisterStub.CITIZEN);
+        assertThat(db.sql("select count(*) from audit_outbox where action = 'TRAFFIC_FILE_VIEWED' and entity_id = :n "
+                        + "and new_value::text like '%OWNER%'")
+                .param("n", number).query(Long.class).single()).isPositive();
+
+        assertThat(getAs("/v1/me/traffic-file", customer(IdentityRegisterStub.CITIZEN)).getResponse().getStatus())
+                .as("customer without the permission").isEqualTo(403);
+        assertThat(getAs("/v1/me/traffic-file", user("u-staff", "staff", "READER", "trafficfile.read",
+                "customer.trafficfile.read")).getResponse().getStatus()).as("staff token").isEqualTo(403);
+        MvcResult none = getAs("/v1/me/traffic-file", customer("784190000000001", "customer.trafficfile.read"));
+        assertThat(none.getResponse().getStatus()).isEqualTo(404);
+        assertThat(code(none)).isEqualTo("OWN_FILE_NOT_FOUND");
+    }
+
     @Test
     @Tag("SEC-014")
     @DisplayName("full identity numbers and health data only for trafficfile.sensitive.read")

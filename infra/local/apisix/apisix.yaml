@@ -173,7 +173,8 @@ routes:
     upstream_id: iam-service
     plugin_config_id: protected-api
     uris:
-      - /v1/me/*
+      - /v1/me/assignments
+      - /v1/me/authorisation
       - /v1/permissions
       - /v1/permissions/*
       - /v1/roles
@@ -222,6 +223,7 @@ routes:
     upstream_id: traffic-file-service
     plugin_config_id: protected-api
     uris:
+      - /v1/me/traffic-file
       - /v1/traffic-files/*
       - /v1/ban-entries
       - /v1/ban-entries/*

@@ -215,6 +215,26 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
 
+  /v1/me/traffic-file:
+    get:
+      tags: [Traffic files]
+      operationId: getOwnTrafficFile
+      summary: The signed-in customer's own traffic file (ADR-067 d, CH-002; the view is audited, CC-120)
+      description: >-
+        For customer tokens only (subject_type=CUSTOMER with a national_id claim); staff tokens get 403. The file is
+        found by the national id in the token, never by a parameter, and is shown unmasked to its owner.
+      x-itms-permission: customer.trafficfile.read
+      x-itms-scope: [own]
+      responses:
+        '200':
+          description: The customer's traffic file
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TrafficFile' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
   /v1/traffic-files/{fileNumber}/history:
     get:
       tags: [Traffic files]

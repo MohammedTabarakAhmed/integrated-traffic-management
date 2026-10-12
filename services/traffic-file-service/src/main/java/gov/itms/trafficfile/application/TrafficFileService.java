@@ -43,6 +43,8 @@ public class TrafficFileService {
     public static final String READ = "trafficfile.read";
     public static final String UPDATE = "trafficfile.update";
     public static final String SENSITIVE_READ = "trafficfile.sensitive.read";
+    /** A customer's own file (ADR-067 d); held only through the implicit CUSTOMER role. */
+    public static final String CUSTOMER_READ = "customer.trafficfile.read";
     static final String ENTITY = "TrafficFile";
     static final String EVENT_OPENED = "itms.traffic-file.opened";
     static final String EVENT_PROFILE_UPDATED = "itms.traffic-file.profile-updated";
@@ -165,6 +167,23 @@ public class TrafficFileService {
         return found.map(f -> DomainException.conflict("FILE_ALREADY_EXISTS",
                 "this identity document already has traffic file " + f.fileNumber(), List.of("DL-001", "DL-009"),
                 f.fileNumber()));
+    }
+
+    /**
+     * The signed-in customer's own traffic file (ADR-067 d, CH-002). The national id comes from the token, never from
+     * the request, so no one else's file is reachable; the view is audited like a staff view (CC-120).
+     */
+    @Transactional
+    public TrafficFile own(String nationalId, Caller caller) {
+        if (!caller.grants().holds(CUSTOMER_READ)) {
+            throw new DomainException(DomainException.Kind.OUT_OF_SCOPE, "SCOPE_EXCEEDED",
+                    "you may not read your traffic file here", List.of("CC-001"));
+        }
+        TrafficFile file = files.findByNationalId(nationalId).orElseThrow(() -> new DomainException(
+                DomainException.Kind.NOT_FOUND, "OWN_FILE_NOT_FOUND", "you have no traffic file yet",
+                List.of("DL-001")));
+        audit.record("TRAFFIC_FILE_VIEWED", ENTITY, file.fileNumber(), null, Map.of("viewer", "OWNER"), null);
+        return file;
     }
 
     @Transactional

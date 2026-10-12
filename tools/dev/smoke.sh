@@ -1268,4 +1268,14 @@ acr=$(claims_of "$(customer_token 784198812345672 "$DEV_CUSTOMER_PASSWORD" otp)"
 echo "   784199012345671 signed in through the national digital ID: subject_type CUSTOMER, acr national-id, no grants in the token, only the CUSTOMER grant without scopes from iam, staff endpoint 403"
 echo "   784198812345672 stepped up with a one-time password (enrolled on first use): acr otp"
 
+echo "54. Customer own data (ADR-067 d): through the gateway a customer reads their own traffic file, found by the national id in the token; a staff token gets 403"
+own=$(curl -sf -H "Authorization: Bearer $CUSTOMER" -H "X-Channel: PORTAL" "$GW/v1/me/traffic-file") \
+  || { echo "FAIL: GET /v1/me/traffic-file for the customer"; exit 1; }
+own_id=$(printf '%s' "$own" | json_field "['identity']['nationalIdNo']")
+[[ "$own_id" == 784199012345671 ]] || { echo "FAIL: /v1/me/traffic-file returned another file ($own_id)"; exit 1; }
+status=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $(token dev.checker "$DEV_CHECKER_PASSWORD")" \
+  "$GW/v1/me/traffic-file")
+[[ "$status" == 403 ]] || { echo "FAIL: a staff token reached /v1/me/traffic-file ($status)"; exit 1; }
+echo "   own file $(printf '%s' "$own" | json_field "['fileNumber']") for the signed-in national id; staff 403"
+
 echo "SMOKE OK"

@@ -59,6 +59,10 @@ itms:
   clients:
     # CC-032: eligibility before submission, hold-eligibility-service POST /v1/eligibility-checks. Its account needs
     # the iam role ELIGIBILITY_CHECKER. Without an answer a submission is refused (503 ELIGIBILITY_UNAVAILABLE).
+    # CC-025, ADR-067 d: the customer's own file, GET /v1/me/traffic-file with the customer's own token (no account).
+    traffic-files:
+      base-url: ${ITMS_TRAFFIC_FILES_URL}
+      timeout: ${ITMS_TRAFFIC_FILES_TIMEOUT:3s}
     eligibility:
       base-url: ${ITMS_ELIGIBILITY_URL}
       token-uri: ${ITMS_OIDC_TOKEN_URI}

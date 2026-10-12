@@ -28,6 +28,7 @@
       <And><Class name="gov.itms.refdata.application.ReferenceDataService"/><Field name="~lists|items|changes"/></And>
       <And><Class name="gov.itms.transaction.application.CatalogueService"/><Field name="~services|rules|changes"/></And>
       <And><Class name="gov.itms.transaction.application.TransactionService"/><Field name="~services|rules|transactions"/></And>
+      <And><Class name="gov.itms.transaction.application.CustomerTransactions"/><Field name="transactions"/></And>
       <And><Class name="gov.itms.trafficfile.application.BanListService"/><Field name="~bans|files"/></And>
       <And><Class name="gov.itms.trafficfile.application.CompanyFileService"/><Field name="files"/></And>
       <And><Class name="gov.itms.trafficfile.application.DuplicateMergeService"/><Field name="files"/></And>

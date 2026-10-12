@@ -207,6 +207,8 @@ routes:
       - /v1/services/*
       - /v1/catalogue-changes
       - /v1/catalogue-changes/*
+      - /v1/me/transactions
+      - /v1/me/transactions/*
       - /v1/transactions
       - /v1/transactions/*
   - id: hold-eligibility-service

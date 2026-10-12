@@ -1,13 +1,16 @@
 package gov.itms.transaction.infrastructure;
 
 import gov.itms.platform.audit.AuditRecorder;
+import gov.itms.platform.client.OwnTrafficFile;
 import gov.itms.platform.client.ServiceClientProperties;
 import gov.itms.platform.client.ServiceClients;
 import gov.itms.transaction.application.CatalogueService;
+import gov.itms.transaction.application.CustomerTransactions;
 import gov.itms.transaction.application.EligibilityChecker;
 import gov.itms.transaction.application.TransactionService;
 import io.micrometer.observation.ObservationRegistry;
 import java.time.Clock;
+import java.time.Duration;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -35,6 +38,19 @@ public class TransactionServiceConfiguration {
         return new TransactionService(new JdbcServiceDefinitionRepository(jdbc),
                 new JdbcAvailabilityRuleRepository(jdbc), new JdbcTransactionRepository(jdbc), eligibility, audit,
                 clock);
+    }
+
+    /**
+     * The signed-in customer's own transactions (CC-025, ADR-067 d). Their file comes from traffic-file-service
+     * ({@code itms.clients.traffic-files.*}) with the customer's own token, so this service needs no account there.
+     */
+    @Bean
+    CustomerTransactions customerTransactions(JdbcClient jdbc, AuditRecorder audit, Environment environment,
+                                              ObjectProvider<ObservationRegistry> observations) {
+        return new CustomerTransactions(new JdbcTransactionRepository(jdbc), new RemoteOwnFile(OwnTrafficFile.create(
+                environment.getRequiredProperty("itms.clients.traffic-files.base-url"),
+                environment.getRequiredProperty("itms.clients.traffic-files.timeout", Duration.class),
+                observations.getIfAvailable(() -> ObservationRegistry.NOOP))), audit);
     }
 
     /**

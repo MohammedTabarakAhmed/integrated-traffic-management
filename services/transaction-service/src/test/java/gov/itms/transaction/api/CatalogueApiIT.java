@@ -54,7 +54,8 @@ import tools.jackson.databind.ObjectMapper;
         // Never called here: submission (and so eligibility, CC-032) is covered by TransactionApiIT.
         "itms.clients.eligibility.base-url=http://127.0.0.1:9",
         "itms.clients.eligibility.token-uri=http://127.0.0.1:9/token",
-        "itms.clients.eligibility.client-secret=unused"})
+        "itms.clients.eligibility.client-secret=unused",
+        "itms.clients.traffic-files.base-url=http://127.0.0.1:9"})
 @AutoConfigureMockMvc
 @Testcontainers
 class CatalogueApiIT {

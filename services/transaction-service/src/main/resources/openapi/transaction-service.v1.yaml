@@ -350,6 +350,83 @@ paths:
         '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
 
+  /v1/me/transactions:
+    get:
+      tags: [Transactions]
+      operationId: listOwnTransactions
+      summary: The signed-in customer's own transactions, newest first (CC-025, ADR-067 d; audited, CC-120)
+      description: |
+        For customer tokens only (subject_type=CUSTOMER with a national_id claim); staff tokens get 403. The applicant
+        file is the one traffic-file-service finds for the national id in the token (the token is relayed), never a
+        parameter; transactions opened through any channel are listed. Cursor pagination as for
+        `GET /v1/transactions`. 404 `OWN_FILE_NOT_FOUND` without a traffic file; 503 `TRAFFIC_FILES_UNAVAILABLE`.
+      x-itms-permission: customer.transaction.read
+      x-itms-scope: [own]
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/TransactionStatus' }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - name: cursor
+          in: query
+          schema: { type: string, maxLength: 100 }
+      responses:
+        '200':
+          description: One page of transactions
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransactionPage' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/me/transactions/{reference}:
+    get:
+      tags: [Transactions]
+      operationId: getOwnTransaction
+      summary: One of the signed-in customer's transactions by reference (CC-025, ADR-067 d; audited, CC-120)
+      description: >-
+        Another applicant's reference answers 404 `TRANSACTION_NOT_FOUND`, as if it did not exist (CC-001).
+      x-itms-permission: customer.transaction.read
+      x-itms-scope: [own]
+      parameters:
+        - $ref: '#/components/parameters/Reference'
+      responses:
+        '200':
+          description: Transaction
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Transaction' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/me/transactions/{reference}/status-history:
+    get:
+      tags: [Transactions]
+      operationId: getOwnTransactionStatusHistory
+      summary: Every status change of one of the customer's transactions, oldest first (CC-023, CC-025; audited)
+      x-itms-permission: customer.transaction.read
+      x-itms-scope: [own]
+      parameters:
+        - $ref: '#/components/parameters/Reference'
+      responses:
+        '200':
+          description: Status changes
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusChangeCollection' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
   /v1/transactions/{reference}:
     get:
       tags: [Transactions]

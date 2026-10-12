@@ -73,6 +73,8 @@ class TransactionApiIT {
         registry.add("itms.clients.eligibility.token-uri", () -> ELIGIBILITY.baseUrl() + "/token");
         registry.add("itms.clients.eligibility.client-id", () -> EligibilityStub.CLIENT_ID);
         registry.add("itms.clients.eligibility.client-secret", () -> EligibilityStub.CLIENT_SECRET);
+        registry.add("itms.clients.traffic-files.base-url", ELIGIBILITY::baseUrl);
+        registry.add("itms.clients.traffic-files.timeout", () -> "3s");
     }
 
     private static final LocalDate TODAY = LocalDate.now(ZoneOffset.UTC);
@@ -402,6 +404,60 @@ class TransactionApiIT {
         assertThat(body(getAs("/v1/transactions/" + ref, officer())).get("status").asString()).isEqualTo("DRAFT");
         assertThat(body(postVia("/v1/transactions/" + ref + "/submissions", null, officer(), "PORTAL"))
                 .get("status").asString()).isEqualTo("IN_REVIEW");
+    }
+
+    private static RequestPostProcessor customer(String token, String... permissions) {
+        return jwt().jwt(j -> j.tokenValue(token).subject("u-" + token).claim("preferred_username", token)
+                .claim("subject_type", "CUSTOMER").claim("national_id", "784199012345671")
+                .claim("roles", List.of("CUSTOMER")).claim("permissions", Arrays.asList(permissions)));
+    }
+
+    @Test
+    @Tag("CC-025")
+    @Tag("CC-001")
+    @Tag("CC-120")
+    @DisplayName("CC-025 (ADR-067 d): a signed-in customer tracks their own transactions of any channel by "
+            + "reference; another applicant's reference is 404; views audited; staff 403, no file 404")
+    void customerTracksOwnTransactions() throws Exception {
+        define("ITX_OWN", null, true, true);
+        List<String> own = new java.util.ArrayList<>();
+        for (String channel : List.of("BACKOFFICE", "PORTAL")) {
+            Map<String, Object> request = newTransaction("ITX_OWN", "VEHICLE", "VIN-OWN", "R1", null);
+            request.put("applicantFileNumber", "TF-OWN-1");
+            MvcResult r = postVia("/v1/transactions", request, officer(), channel);
+            assertThat(r.getResponse().getStatus()).as(r.getResponse().getContentAsString()).isEqualTo(201);
+            own.add(body(r).get("reference").asString());
+        }
+        Map<String, Object> others = newTransaction("ITX_OWN", "VEHICLE", "VIN-OTHER", "R1", null);
+        others.put("applicantFileNumber", "TF-OTHER-1");
+        String other = body(postAs("/v1/transactions", others, officer())).get("reference").asString();
+        ELIGIBILITY.ownFiles.put("cust-own", "TF-OWN-1");
+        RequestPostProcessor me = customer("cust-own", "customer.transaction.read");
+
+        MvcResult listed = getAs("/v1/me/transactions", me);
+        assertThat(listed.getResponse().getStatus()).as(listed.getResponse().getContentAsString()).isEqualTo(200);
+        assertThat(body(listed).get("items")).extracting(n -> n.get("reference").asString())
+                .containsExactly(own.get(1), own.get(0));
+        assertThat(body(getAs("/v1/me/transactions/" + own.get(0), me)).get("applicantFileNumber").asString())
+                .isEqualTo("TF-OWN-1");
+        assertThat(body(getAs("/v1/me/transactions/" + own.get(0) + "/status-history", me)).get("items"))
+                .isNotEmpty();
+        MvcResult notMine = getAs("/v1/me/transactions/" + other, me);
+        assertThat(notMine.getResponse().getStatus()).isEqualTo(404);
+        assertThat(body(notMine).get("code").asString()).isEqualTo("TRANSACTION_NOT_FOUND");
+        assertThat(getAs("/v1/me/transactions/" + other + "/status-history", me).getResponse().getStatus())
+                .isEqualTo(404);
+        assertThat(db.sql("select count(*) from audit_outbox where new_value::text like '%OWNER%' and action in "
+                + "('TRANSACTION_LIST_VIEWED', 'TRANSACTION_VIEWED', 'TRANSACTION_HISTORY_VIEWED')")
+                .query(Long.class).single()).isGreaterThanOrEqualTo(3L);
+
+        assertThat(getAs("/v1/me/transactions", customer("cust-own")).getResponse().getStatus())
+                .as("customer without the permission").isEqualTo(403);
+        assertThat(getAs("/v1/me/transactions", user("u-staff-own", "reader", "transaction.read",
+                "customer.transaction.read")).getResponse().getStatus()).as("staff token").isEqualTo(403);
+        MvcResult none = getAs("/v1/me/transactions", customer("cust-nofile", "customer.transaction.read"));
+        assertThat(none.getResponse().getStatus()).isEqualTo(404);
+        assertThat(body(none).get("code").asString()).isEqualTo("OWN_FILE_NOT_FOUND");
     }
 
     @Test

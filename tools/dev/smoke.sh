@@ -1289,4 +1289,12 @@ points_file=$(curl -sf -H "Authorization: Bearer $CUSTOMER" -H "X-Channel: PORTA
 [[ "$points_file" == "$own_file" ]] || { echo "FAIL: /v1/me/black-point-account is for $points_file"; exit 1; }
 echo "   violations and black points of $own_file only"
 
+echo "56. Customer own transactions (CC-025, ADR-067 d): the customer tracks only transactions whose applicant is their own file"
+curl -sf -H "Authorization: Bearer $CUSTOMER" -H "X-Channel: PORTAL" "$GW/v1/me/transactions" | "$PY" -c "
+import json,sys
+items=json.load(sys.stdin)['items']
+bad=[t['reference'] for t in items if t['applicantFileNumber']!='$own_file']
+sys.exit('FAIL: /v1/me/transactions shows other applicants: '+','.join(bad) if bad else None)" || exit 1
+echo "   transactions of $own_file only"
+
 echo "SMOKE OK"

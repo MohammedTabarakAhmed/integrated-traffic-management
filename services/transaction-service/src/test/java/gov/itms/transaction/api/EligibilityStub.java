@@ -31,6 +31,8 @@ final class EligibilityStub {
     }
 
     final List<Received> received = new CopyOnWriteArrayList<>();
+    /** Customer token → traffic file number for {@code GET /v1/me/traffic-file} (ADR-067 d). */
+    final java.util.Map<String, String> ownFiles = new java.util.concurrent.ConcurrentHashMap<>();
     private final ObjectMapper json = new ObjectMapper();
     private final HttpServer server;
 
@@ -42,6 +44,16 @@ final class EligibilityStub {
         }
         server.createContext("/token", this::token);
         server.createContext("/v1/eligibility-checks", this::check);
+        server.createContext("/v1/me/traffic-file", exchange -> {
+            // traffic-file-service with the relayed customer token (ADR-067 d): that token's file, or 404.
+            String auth = String.valueOf(exchange.getRequestHeaders().getFirst("Authorization"));
+            String file = ownFiles.get(auth.startsWith("Bearer ") ? auth.substring(7) : "");
+            if (file == null) {
+                respond(exchange, 404, "{\"code\":\"OWN_FILE_NOT_FOUND\"}");
+                return;
+            }
+            respond(exchange, 200, "{\"fileNumber\":\"" + file + "\"}");
+        });
         server.start();
     }
 

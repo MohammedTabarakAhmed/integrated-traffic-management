@@ -799,6 +799,8 @@ paths:
         Each grant keeps its own scopes; grants are never merged across assignments, so a permission held in one
         scope is not widened by another assignment. Every ITMS service resolves its callers' permissions from this
         endpoint by forwarding the caller's bearer token (ADR-022). Any authenticated subject may read their own.
+        A customer (token claim `subject_type=CUSTOMER`, ADR-067) gets only the implicit `CUSTOMER` grant: its
+        `customer.*` permissions with empty scopes; role assignments are ignored.
       x-itms-permission: authenticated
       x-itms-scope: [own]
       responses:
@@ -1287,12 +1289,23 @@ components:
       properties:
         roleCode: { $ref: '#/components/schemas/RoleCode' }
         permissions: { type: array, items: { $ref: '#/components/schemas/PermissionCode' } }
-        scopes: { $ref: '#/components/schemas/Scopes' }
+        scopes: { $ref: '#/components/schemas/GrantScopes' }
         approvalLimits:
           type: array
           description: The role's approval limits (CC-003); they apply within this grant's scopes only.
           items: { $ref: '#/components/schemas/ApprovalLimit' }
         validTo: { oneOf: [ { type: string, format: date-time }, { type: 'null' } ] }
+    GrantScopes:
+      type: object
+      additionalProperties: false
+      description: |
+        Scopes of a grant: those of its assignment, or none at all for the customer grant (ADR-067), which then
+        reaches no region, centre or module.
+      required: [regions, centres, modules]
+      properties:
+        regions: { type: array, maxItems: 100, uniqueItems: true, items: { $ref: '#/components/schemas/ScopeValue' } }
+        centres: { type: array, maxItems: 100, uniqueItems: true, items: { $ref: '#/components/schemas/ScopeValue' } }
+        modules: { type: array, maxItems: 100, uniqueItems: true, items: { $ref: '#/components/schemas/ScopeValue' } }
     EffectiveAuthorisation:
       type: object
       additionalProperties: false

@@ -51,6 +51,10 @@ public class IamService {
     public static final String DELEGATION_CREATE = "iam.delegation.create";
     public static final String DELEGATION_READ = "iam.delegation.read";
     public static final String SUBJECT_DEACTIVATE = "iam.subject.deactivate";
+    /** The implicit role of every signed-in customer (ADR-067); never assigned explicitly. */
+    public static final String CUSTOMER_ROLE = "CUSTOMER";
+    static final String CUSTOMER_PERMISSION_PREFIX = "customer.";
+    static final Scopes CUSTOMER_SCOPES = new Scopes(Set.of(), Set.of(), Set.of());
     static final String BOOTSTRAP_ROLE = "IT_ADMINISTRATOR";
     static final String BOOTSTRAP_ACTOR = "SYSTEM_BOOTSTRAP";
 
@@ -231,6 +235,10 @@ public class IamService {
         Role role = roles.find(assignment.roleCode()).orElseThrow(() -> roleNotFound(roleCode));
         if (!role.active()) {
             throw DomainException.validation("ROLE_INACTIVE", "role " + role.code() + " is inactive", role.code());
+        }
+        if (CUSTOMER_ROLE.equals(role.code())) {
+            throw DomainException.validation("ROLE_NOT_ASSIGNABLE", "the customer role comes with customer sign-in "
+                    + "and is never assigned (ADR-067)", role.code());
         }
         assignments.lockSubjects(List.of(assignment.subjectId()));
         boolean duplicate = assignments.search(assignment.subjectId(), role.code(), RoleAssignment.Status.ACTIVE)
@@ -516,6 +524,26 @@ public class IamService {
                             a.validTo(), limitCache.computeIfAbsent(r.code(), this::grantLimits))));
         }
         return new Authorisation(subjectId, grants, now);
+    }
+
+    /**
+     * ADR-067 (b): a customer's only grant. Role assignments are ignored; the active role {@value #CUSTOMER_ROLE}
+     * gives its {@code customer.*} permissions with no region, centre or module, so no staff endpoint and no scoped
+     * record is reachable. Without that role a customer has no grant at all.
+     */
+    @Transactional(readOnly = true)
+    public Authorisation customerAuthorisation(String subjectId) {
+        Instant now = now();
+        List<Authorisation.Grant> grants = roles.find(CUSTOMER_ROLE).filter(Role::active)
+                .map(r -> new Authorisation.Grant(r.code(), customerPermissions(r.permissions()), CUSTOMER_SCOPES,
+                        null))
+                .stream().toList();
+        return new Authorisation(subjectId, grants, now);
+    }
+
+    private static Set<String> customerPermissions(Collection<String> permissions) {
+        return permissions.stream().filter(p -> p.startsWith(CUSTOMER_PERMISSION_PREFIX))
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
     }
 
     private boolean sourceEffectiveAt(RoleAssignment delegation, Instant at) {

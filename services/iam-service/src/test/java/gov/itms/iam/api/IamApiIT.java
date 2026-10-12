@@ -1355,4 +1355,33 @@ class IamApiIT {
         assertThat(text.getResponse().getStatus()).isEqualTo(415);
         assertThat(body(text).get("code").asString()).isEqualTo("UNSUPPORTED_MEDIA_TYPE");
     }
+
+    @Test
+    @Tag("CC-001")
+    @DisplayName("CC-001 (ADR-067): a customer token gets only the CUSTOMER grant without scopes, whatever is "
+            + "assigned to the subject; the role cannot be assigned")
+    void customerGrant() throws Exception {
+        assign("u-customer", "REFDATA_MAKER", List.of("R1"), ADMIN);
+        RequestPostProcessor customer = jwt().jwt(j -> j.subject("u-customer")
+                .claim("preferred_username", "784199012345671").claim("subject_type", "CUSTOMER")
+                .claim("national_id", "784199012345671"));
+
+        MvcResult r = getAs("/v1/me/authorisation", customer);
+        assertThat(r.getResponse().getStatus()).isEqualTo(200);
+        assertThat(body(r).get("grants")).singleElement().satisfies(g -> {
+            assertThat(g.get("roleCode").asString()).isEqualTo("CUSTOMER");
+            assertThat(g.get("permissions")).isEmpty();
+            assertThat(g.get("scopes").get("regions")).isEmpty();
+            assertThat(g.get("scopes").get("centres")).isEmpty();
+            assertThat(g.get("scopes").get("modules")).isEmpty();
+        });
+        assertThat(getAs("/v1/roles", customer).getResponse().getStatus()).isEqualTo(403);
+        assertThat(myGrants("u-customer")).singleElement()
+                .satisfies(g -> assertThat(g.get("roleCode").asString()).isEqualTo("REFDATA_MAKER"));
+
+        MvcResult refused = postAs("/v1/role-assignments", assignment("u-staff-cust", "CUSTOMER", List.of("R1")),
+                ADMIN);
+        assertThat(refused.getResponse().getStatus()).isEqualTo(422);
+        assertThat(body(refused).get("code").asString()).isEqualTo("ROLE_NOT_ASSIGNABLE");
+    }
 }

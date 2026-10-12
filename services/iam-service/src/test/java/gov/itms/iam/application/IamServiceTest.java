@@ -95,6 +95,38 @@ class IamServiceTest {
                 caller);
     }
 
+    // ------------------------------------------------------------------ customers (ADR-067)
+
+    @Test
+    @Tag("CC-001")
+    @DisplayName("CC-001 (ADR-067): a customer gets only the CUSTOMER grant, customer.* permissions without scopes; "
+            + "assignments are ignored and the role cannot be assigned")
+    void customerGrant() {
+        permissions.rows.put("customer.file.read", new Permission("customer.file.read", "svc", NAME));
+        roles.insert(Role.create("CUSTOMER", NAME, null, List.of("customer.file.read", "refdata.read")), "seed", NOW);
+        assign("u-cust", assignmentScopes("R1"), admin(Scopes.NATIONAL));
+
+        Authorisation customer = service.customerAuthorisation("u-cust");
+        assertThat(customer.subjectId()).isEqualTo("u-cust");
+        assertThat(customer.grants()).singleElement().satisfies(g -> {
+            assertThat(g.roleCode()).isEqualTo("CUSTOMER");
+            assertThat(g.permissions()).containsExactly("customer.file.read");
+            assertThat(g.scopes().regions()).isEmpty();
+            assertThat(g.scopes().centres()).isEmpty();
+            assertThat(g.scopes().modules()).isEmpty();
+        });
+        assertThat(customer.allows("customer.file.read", ScopeTarget.region("R1"))).as("no region").isFalse();
+        assertThat(customer.allows("refdata.read", ScopeTarget.UNSCOPED)).as("staff permission dropped").isFalse();
+        assertThat(service.effectiveAuthorisation("u-cust").roles()).containsExactly("REFDATA_MAKER");
+
+        assertThatThrownBy(() -> service.assign("u-staff", "u-staff.name", "CUSTOMER", assignmentScopes("R1"), null,
+                null, "try", ADMIN, admin(Scopes.NATIONAL))).satisfies(code("ROLE_NOT_ASSIGNABLE"));
+
+        service.updateRole("CUSTOMER", NAME, null, false, List.of("customer.file.read"), 1, "switch off", ADMIN,
+                admin(Scopes.NATIONAL));
+        assertThat(service.customerAuthorisation("u-cust").grants()).as("inactive role").isEmpty();
+    }
+
     // ------------------------------------------------------------------ roles (CC-005)
 
     @Test

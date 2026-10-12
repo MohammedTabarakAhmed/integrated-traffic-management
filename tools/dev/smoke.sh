@@ -1228,6 +1228,11 @@ status=$(curl -s -o /dev/null -w '%{http_code}' "$TOKEN_URL" -d grant_type=passw
 [[ "$status" == 400 || "$status" == 401 ]] || { echo "FAIL: the customer signed in to itms with a password ($status)"; exit 1; }
 status=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $CUSTOMER" "$IAM/v1/roles")
 [[ "$status" == 403 ]] || { echo "FAIL: a customer token reached a staff endpoint ($status)"; exit 1; }
-echo "   784199012345671 signed in through the national digital ID: subject_type CUSTOMER, no grants in the token, staff endpoint 403"
+curl -sf -H "Authorization: Bearer $CUSTOMER" "$IAM/v1/me/authorisation" | "$PY" -c "
+import json,sys
+g=json.load(sys.stdin)['grants']
+ok=len(g)==1 and g[0]['roleCode']=='CUSTOMER' and not any(g[0]['scopes'].values()) and all(p.startswith('customer.') for p in g[0]['permissions'])
+sys.exit(None if ok else 'FAIL: ADR-067 b customer grants '+json.dumps(g))" || exit 1
+echo "   784199012345671 signed in through the national digital ID: subject_type CUSTOMER, no grants in the token, only the CUSTOMER grant without scopes from iam, staff endpoint 403"
 
 echo "SMOKE OK"

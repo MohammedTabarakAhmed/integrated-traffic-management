@@ -1031,14 +1031,14 @@ S_MAKER=$(token dev.maker "$DEV_MAKER_PASSWORD"); S_CHECKER=$(token dev.checker 
 GW=http://localhost:9080
 res=$(post_to "$GW" "$S_MAKER" /v1/searches "{\"query\":\"$vin\"}")
 expect "$res" 200
-printf '%s' "$(body_of "$res")" | "$PY" -c "import json,sys; r=json.load(sys.stdin); hits=[h for h in r['items'] if h['type']=='VEHICLE' and h['id']==sys.argv[1]]; src={s['name']: s['status'] for s in r['sources']}; assert hits and hits[0]['fields'].get('status')=='REGISTERED' and src.get('vehicle-vin')=='OK' and 'licence' not in src, r" "$vin"   || { echo "FAIL: search for $vin: $(body_of "$res")"; exit 1; }
+printf '%s' "$(body_of "$res")" | "$PY" -c "import json,sys; r=json.load(sys.stdin); hits=[h for h in r['items'] if h['type']=='VEHICLE' and h['id']==sys.argv[1]]; src={s['name']: s['status'] for s in r['sources']}; assert hits and hits[0]['fields'].get('status')=='REGISTERED' and src.get('vehicle-vin')=='OK' and src.get('licence')=='OK', r" "$vin"   || { echo "FAIL: search for $vin: $(body_of "$res")"; exit 1; }
 res=$(post_to "$GW" "$S_MAKER" /v1/searches "{\"query\":\"$first_fine\",\"types\":[\"VIOLATION\"]}")
 expect "$res" 200
 [[ "$(body_of "$res" | json_field "['items'][0]['reference']")" == "$first_fine" ]]   || { echo "FAIL: search for $first_fine: $(body_of "$res")"; exit 1; }
 expect "$(post_to "$GW" "$S_MAKER" /v1/searches '{"query":"a%b"}')" 422 QUERY_INVALID
 searches=$(db_sql search-postgres search "$SEARCH_DB_USER" "select count(*) from audit_outbox where action = 'SEARCH_PERFORMED'")
 (( searches >= 2 )) || { echo "FAIL: CC-102 searches not audited ($searches)"; exit 1; }
-echo "   $vin -> VEHICLE (vehicle-vin OK); $first_fine -> VIOLATION; malformed query 422; $searches searches audited"
+echo "   $vin -> VEHICLE (vehicle-vin OK, licence source OK); $first_fine -> VIOLATION; malformed query 422; $searches searches audited"
 
 echo "49. Reports (RPT-001, RPT-002, RPT-004, RPT-020, RPT-022): the recorded violations from the warehouse as JSON and CSV, within the caller's regions; identities pseudonymised"
 S_MAKER=$(token dev.maker "$DEV_MAKER_PASSWORD"); S_CHECKER=$(token dev.checker "$DEV_CHECKER_PASSWORD") # 5-minute tokens

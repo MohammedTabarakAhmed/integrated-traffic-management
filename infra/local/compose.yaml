@@ -816,6 +816,12 @@ services:
       ITMS_DOCUMENTS_STORE_BUCKET: itms-documents
       ITMS_DOCUMENTS_SCANNER_HOST: clamav
       ITMS_DOCUMENTS_VERIFICATION_URL: http://localhost:9080/v1/certificate-verifications
+      # Certificates of other modules rendered from their events (CC-082); the holder's name from traffic-file-service
+      # with this service's own client-credentials account (ADR-034).
+      ITMS_DOCUMENTS_CONSUMER_ENABLED: "true"
+      ITMS_TRAFFIC_FILES_URL: http://traffic-file-service:8080
+      ITMS_OIDC_TOKEN_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/token
+      ITMS_SERVICE_CLIENT_ID: itms-document-service
       # Short-lived login from OpenBao (ADR-039), files under /run/secrets/spring/datasource; owner role on connect.
       SPRING_DATASOURCE_HIKARI_CONNECTIONINITSQL: SET ROLE itms_owner
       ITMS_OIDC_ISSUER: http://localhost:8180/realms/itms
@@ -827,6 +833,8 @@ services:
         target: itms.documents.store.access-key
       - source: minio_secret_key
         target: itms.documents.store.secret-key
+      - source: document_service_client_secret
+        target: itms.clients.traffic-files.client-secret
     volumes:
       - type: volume
         source: db-credentials
@@ -1735,6 +1743,8 @@ secrets:
     environment: DEV_VIOLATION_SERVICE_SECRET
   device_service_client_secret:
     environment: DEV_DEVICE_SERVICE_SECRET
+  document_service_client_secret:
+    environment: DEV_DOCUMENT_SERVICE_SECRET
   device_db_password:
     environment: DEVICE_DB_PASSWORD
   accident_db_password:

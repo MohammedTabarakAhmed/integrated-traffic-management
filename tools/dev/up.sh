@@ -93,6 +93,7 @@ wanted = {
     "DEV_VEHICLE_SERVICE_SECRET": lambda: secrets.token_urlsafe(32),
     "DEV_VIOLATION_SERVICE_SECRET": lambda: secrets.token_urlsafe(32),
     "DEV_DEVICE_SERVICE_SECRET": lambda: secrets.token_urlsafe(32),
+    "DEV_DOCUMENT_SERVICE_SECRET": lambda: secrets.token_urlsafe(32),
     "GRAFANA_ADMIN_PASSWORD": lambda: secrets.token_urlsafe(16),
     "BAO_ROOT_TOKEN": lambda: secrets.token_urlsafe(24),
 }
@@ -181,6 +182,7 @@ KC=(env MSYS_NO_PATHCONV=1 docker compose "${COMPOSE_FILES[@]}" --env-file "$ENV
 "${KC[@]}" update clients/7d0c1a3e-5b2f-4c1d-9e8a-100000000003 -r itms -s "secret=$DEV_VEHICLE_SERVICE_SECRET"
 "${KC[@]}" update clients/7d0c1a3e-5b2f-4c1d-9e8a-100000000004 -r itms -s "secret=$DEV_VIOLATION_SERVICE_SECRET"
 "${KC[@]}" update clients/7d0c1a3e-5b2f-4c1d-9e8a-100000000005 -r itms -s "secret=$DEV_DEVICE_SERVICE_SECRET"
+"${KC[@]}" update clients/7d0c1a3e-5b2f-4c1d-9e8a-100000000010 -r itms -s "secret=$DEV_DOCUMENT_SERVICE_SECRET"
 
 echo "== Granting development roles through iam-service (dev.iam-admin is the bootstrap administrator)"
 IAM=http://localhost:8082
@@ -252,6 +254,8 @@ grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker PAYMENT_GATEWAY_ADAPTER
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker CASHIER_SUPERVISOR
 # Vehicles (VL-*; ADR-055): dev.maker records vehicles and registers them; dev.checker manages plate series and records inspections locally.
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker VEHICLE_OFFICER
+# Vehicle transactions such as certificates (VL-020; smoke step 50).
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker VEHICLE_SERVICE_OFFICER
 # Customs/dealer certificate feed (VL-002, VL-010): locally dev.maker stands in for the customs adapter's account.
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker CUSTOMS_INTEGRATION
 # Own instalment plans for open fines (VF-071, VF-073).
@@ -282,6 +286,8 @@ grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000013 service-account-itms-violation-servic
 # violation-service asks rental-service which contract covered a vehicle (TR-032, VF-014, UAT-2).
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000013 service-account-itms-violation-service RENTAL_COVERAGE_READER
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000014 service-account-itms-device-service DEVICE_VIOLATION_RECORDER
+# document-service prints the holder's name on the certificates it renders for other modules (CC-082).
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000020 service-account-itms-document-service TRAFFIC_FILE_READER_SERVICE
 # Enforcement device registry and manual capture quality queue (VF-010, VF-011, VF-080, VF-081).
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker DEVICE_ADMIN
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker DEVICE_GATEWAY

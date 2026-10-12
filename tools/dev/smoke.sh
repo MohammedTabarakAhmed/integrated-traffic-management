@@ -571,8 +571,9 @@ S_MAKER=$(token dev.maker "$DEV_MAKER_PASSWORD") # fresh: earlier tokens may hav
 S_CHECKER=$(token dev.checker "$DEV_CHECKER_PASSWORD")
 SMK=$(date +%s)
 post_to() { # base token path body [channel] -> prints "<body>\n<status>"
+  # The body goes on stdin: on Windows curl's arguments pass through the ANSI code page, which turns Arabic into "?".
   curl -s -w '\n%{http_code}' -H "Authorization: Bearer $2" -H 'Content-Type: application/json' \
-    -H "X-Channel: ${5:-BACKOFFICE}" -H "Idempotency-Key: $(new_key)" "$1$3" -d "$4"
+    -H "X-Channel: ${5:-BACKOFFICE}" -H "Idempotency-Key: $(new_key)" "$1$3" --data-binary @- <<<"$4"
 }
 get_from() { curl -s -H "Authorization: Bearer $2" "$1$3"; } # base token path
 db_sql() { "${DC[@]}" exec -T "$1" psql -qtA -U "$3" -d "$2" -c "$4"; } # container database user query
@@ -1038,5 +1039,83 @@ expect "$(post_to "$GW" "$S_MAKER" /v1/searches '{"query":"a%b"}')" 422 QUERY_IN
 searches=$(db_sql search-postgres search "$SEARCH_DB_USER" "select count(*) from audit_outbox where action = 'SEARCH_PERFORMED'")
 (( searches >= 2 )) || { echo "FAIL: CC-102 searches not audited ($searches)"; exit 1; }
 echo "   $vin -> VEHICLE (vehicle-vin OK); $first_fine -> VIOLATION; malformed query 422; $searches searches audited"
+
+echo "49. Reports (RPT-001, RPT-002, RPT-004, RPT-020, RPT-022): the recorded violations from the warehouse as JSON and CSV, within the caller's regions; identities pseudonymised"
+S_MAKER=$(token dev.maker "$DEV_MAKER_PASSWORD"); S_CHECKER=$(token dev.checker "$DEV_CHECKER_PASSWORD") # 5-minute tokens
+rep_from=$("$PY" -c "import datetime; print((datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=1)).date())")
+rep_to=$(date -u +%F)
+rep_body="{\"code\":\"VIOLATIONS_RECORDED\",\"from\":\"$rep_from\",\"to\":\"$rep_to\",\"regions\":[\"DXB\"]}"
+rep_count() { post_to "$GW" "$S_CHECKER" /v1/report-runs "$rep_body" | body_of_pipe | "$PY" -c "import json,sys; print(sum(r['count'] for r in json.load(sys.stdin)['rows']))" 2>/dev/null || echo 0; }
+counted() { (( $(rep_count) >= 3 )); }
+wait_until 60 counted || { echo "FAIL: RPT-001 the warehouse does not count the recorded violations: $(post_to "$GW" "$S_CHECKER" /v1/report-runs "$rep_body")"; exit 1; }
+bom=$(curl -s -H "Authorization: Bearer $S_CHECKER" -H 'Content-Type: application/json' -H 'Accept: text/csv' -H 'X-Channel: BACKOFFICE' "$GW/v1/report-runs" -d "$rep_body" | head -c 3 | od -An -tx1 | tr -d ' \n')
+[[ "$bom" == efbbbf ]] || { echo "FAIL: RPT-002 the CSV does not start with a UTF-8 byte-order mark ($bom)"; exit 1; }
+expect "$(post_to "$GW" "$S_MAKER" /v1/report-runs "$rep_body")" 403
+expect "$(post_to "$GW" "$S_CHECKER" /v1/report-runs "{\"code\":\"VIOLATIONS_RECORDED\",\"from\":\"$rep_to\",\"to\":\"$rep_from\"}")" 422 PERIOD_INVALID
+rep_sql() { db_sql reporting-postgres reporting "$REPORTING_DB_USER" "$1"; }
+(( $(rep_sql "select count(*) from fact_event where type = 'itms.violation.recorded'") > 0 )) || { echo "FAIL: RPT-020 no violation facts"; exit 1; }
+[[ "$(rep_sql "select count(*) from fact_event where data::text like '%TF-SMK-$SMK%'")" == 0 ]] || { echo "FAIL: RPT-022 a readable traffic file number is in the warehouse"; exit 1; }
+echo "   $(rep_count) violations recorded in DXB $rep_from..$rep_to; CSV with BOM; a user without report.read 403; reversed period 422; no readable file number in the warehouse"
+
+echo "50. Module certificates (CC-082; Q-075 f): an ownership certificate issued by vehicle-service is rendered by document-service with the holder's name from the traffic file"
+S_MAKER=$(token dev.maker "$DEV_MAKER_PASSWORD"); S_CHECKER=$(token dev.checker "$DEV_CHECKER_PASSWORD") # 5-minute tokens
+TFS=http://localhost:8085
+res=$(post_to "$TFS" "$S_CHECKER" /v1/traffic-files/individuals "{\"document\":{\"type\":\"PASSPORT\",\"passportNo\":\"CT$SMK\",\"passportCountry\":\"GBR\"},\"category\":\"INDIVIDUAL\",\"type\":\"VISITOR\",\"regionOpened\":\"DXB\",\"visitorIdentity\":{\"name\":{\"givenEn\":\"Certa\",\"familyEn\":\"Holder\"},\"nationality\":\"GBR\",\"birthDate\":\"1980-02-02\",\"gender\":\"FEMALE\"}}")
+expect "$res" 201
+holder=$(body_of "$res" | json_field "['fileNumber']")
+cvin=$(printf 'WDB%013d2' "$SMK")
+cspec="{\"engineNo\":\"ENC-$SMK\",\"make\":\"TOYOTA\",\"model\":\"COROLLA\",\"modelYear\":$(date -u +%Y),\"bodyType\":\"SEDAN\",\"colours\":[\"WHITE\"],\"fuelType\":\"PETROL\",\"steering\":\"LEFT\",\"seats\":5,\"emptyWeightKg\":1200,\"grossWeightKg\":1700,\"axles\":2,\"cylinders\":4,\"category\":\"PRIVATE\"}"
+expect "$(post_to "$VEH" "$S_MAKER" /v1/customs-certificates "{\"certificateNo\":\"CC-$cvin\",\"source\":\"CUSTOMS\",\"issuerCode\":\"DXB_CUSTOMS\",\"vin\":\"$cvin\",\"spec\":$cspec,\"issuedOn\":\"$today\"}" PARTNER)" 201
+expect "$(post_to "$VEH" "$S_MAKER" /v1/vehicles "{\"customsCertificateNo\":\"CC-$cvin\",\"ownerFileNumber\":\"$holder\",\"region\":\"DXB\"}")" 201
+pay_request() { # vehicle request response -> pays its payable at the counter
+  local ref="VR-$(body_of "$1" | json_field "['id']" | tr '[:lower:]' '[:upper:]')" p
+  p=$(pay_sql "select id from payable where item_ref = '$ref'")
+  [[ -n "$p" ]] || { echo "FAIL: no payable $ref at payment-service"; exit 1; }
+  expect "$(post_to "$PAY" "$S_MAKER" "/v1/baskets/$(basket_of "[\"$p\"]")/payments" "{\"method\":\"CASH\",\"counterReference\":\"TILL-$ref\"}")" 201
+}
+res=$(post_to "$VEH" "$S_MAKER" "/v1/vehicles/$cvin/registrations" '{"customerCategory":"CITIZEN"}' PORTAL)
+expect "$res" 201
+pay_request "$res"
+cregistered() { [[ "$(get_from "$VEH" "$S_MAKER" "/v1/vehicles/$cvin" | json_field "['status']")" == REGISTERED ]]; }
+wait_until 60 cregistered || { echo "FAIL: vehicle $cvin not registered after its payment"; exit 1; }
+cert_total=$(curl -s -H "Authorization: Bearer $S_MAKER" -H 'Content-Type: application/json' -H 'X-Channel: BACKOFFICE' "$FEES/v1/quotes" \
+  -d '{"serviceCode":"VEH_CERTIFICATE","region":"DXB","customerCategory":"CITIZEN","subjectCategory":"PRIVATE"}' \
+  | "$PY" -c "import json,sys; print(json.load(sys.stdin).get('total', 0))" 2>/dev/null || echo 0)
+if [[ "$cert_total" == 0 ]]; then # first run on this stack: publish the certificate fee
+  res=$(post_to "$FEES" "$S_MAKER" /v1/fee-versions "{\"feeCode\":\"VEH_CERTIFICATE_FEE\",\"serviceCode\":\"VEH_CERTIFICATE\",\"nameNl\":\"رسم شهادة المركبة\",\"nameEn\":\"Vehicle certificate fee\",\"financialItem\":\"REV_VEHICLE_REG\",\"beneficiary\":\"AUTHORITY\",\"method\":{\"type\":\"FIXED\",\"amount\":5000},\"effectiveFrom\":\"$today\",\"reason\":\"smoke test certificate fee\"}")
+  expect "$res" 201
+  expect "$(post_to "$FEES" "$S_CHECKER" "/v1/fee-versions/$(body_of "$res" | json_field "['id']")/approvals" '{"reason":"checked"}')" 200
+fi
+res=$(post_to "$VEH" "$S_MAKER" "/v1/vehicles/$cvin/certificates" '{"kind":"OWNERSHIP","customerCategory":"CITIZEN"}')
+expect "$res" 201
+pay_request "$res"
+veh_cert() { get_from "$VEH" "$S_MAKER" "/v1/vehicles/$cvin/certificates" | "$PY" -c "import json,sys; print(next(c['number'] for c in json.load(sys.stdin)['items'] if c['kind'] == 'OWNERSHIP'))" 2>/dev/null; }
+issued() { [[ -n "$(veh_cert)" ]]; }
+wait_until 60 issued || { echo "FAIL: VL-020 ownership certificate of $cvin not issued after its payment"; exit 1; }
+vcert=$(veh_cert)
+doc_sql() { db_sql document-postgres document "$DOC_DB_USER" "$1"; }
+rendered() { [[ "$(doc_sql "select holder_name_en || '|' || template_code from certificate where reference = '$vcert'")" == "Certa Holder|VL_CERT_OWNERSHIP" ]]; }
+wait_until 120 rendered || { echo "FAIL: CC-082 certificate $vcert not rendered by document-service (holder name from $holder)"; exit 1; }
+read -r dcert dcode <<<"$(doc_sql "select number || ' ' || verification_code from certificate where reference = '$vcert'")"
+[[ "$(curl -s "$GW/v1/certificate-verifications/$dcert?code=$dcode" | json_field "['validity']")" == VALID ]] \
+  || { echo "FAIL: CC-083 rendered certificate $dcert does not verify"; exit 1; }
+echo "   $vcert (vehicle-service) -> $dcert rendered from VL_CERT_OWNERSHIP for Certa Holder ($holder), verified without a token"
+
+echo "51. Name search (CC-101, CC-102): a file with an Arabic name only is found through the unified search by its Latin spelling (transliterated, phonetic) and by part of its name"
+S_MAKER=$(token dev.maker "$DEV_MAKER_PASSWORD") # 5-minute token
+# A family name unique to this run, in Arabic letters and their Latin spellings (digit n -> the n-th pair).
+read -r ar_tag la_tag <<<"$("$PY" -c "import sys; d=sys.argv[1]; print(''.join('بتثجفخدذرز'[int(c)] for c in d), ''.join(['b','t','th','j','f','kh','d','dh','r','z'][int(c)] for c in d))" "$SMK")"
+res=$(post_to "$TFS" "$S_CHECKER" /v1/traffic-files/individuals "{\"document\":{\"type\":\"PASSPORT\",\"passportNo\":\"SN$SMK\",\"passportCountry\":\"JOR\"},\"category\":\"INDIVIDUAL\",\"type\":\"VISITOR\",\"regionOpened\":\"DXB\",\"visitorIdentity\":{\"name\":{\"givenNl\":\"سالم\",\"familyNl\":\"$ar_tag\"},\"nationality\":\"JOR\",\"birthDate\":\"1979-03-03\",\"gender\":\"MALE\"}}")
+expect "$res" 201
+named=$(body_of "$res" | json_field "['fileNumber']")
+name_hit() { # query -> match of $named among the TRAFFIC_FILE hits
+  post_to "$GW" "$S_MAKER" /v1/searches "{\"query\":\"$1\",\"types\":[\"TRAFFIC_FILE\"]}" | body_of_pipe \
+    | "$PY" -c "import json,sys; r=json.load(sys.stdin); print(next((h['fields'].get('match') for h in r['items'] if h['id']==sys.argv[1]), 'NONE'))" "$named"
+}
+[[ "$(name_hit "Salem $la_tag")" == PHONETIC ]] || { echo "FAIL: CC-101 'Salem $la_tag' did not find $named: $(post_to "$GW" "$S_MAKER" /v1/searches "{\"query\":\"Salem $la_tag\"}")"; exit 1; }
+[[ "$(name_hit "$ar_tag")" == PARTIAL ]] || { echo "FAIL: CC-101 '$ar_tag' did not find $named"; exit 1; }
+named_searches=$(db_sql traffic-file-postgres trafficfile "$TF_DB_USER" "select count(*) from audit_outbox where action = 'TRAFFIC_FILE_NAME_SEARCHED' and new_value::text like '%$named%'")
+(( named_searches >= 2 )) || { echo "FAIL: CC-102 name searches not audited ($named_searches)"; exit 1; }
+echo "   $named (Arabic name only): 'Salem $la_tag' -> PHONETIC, '$ar_tag' -> PARTIAL through the gateway; $named_searches searches audited"
 
 echo "SMOKE OK"

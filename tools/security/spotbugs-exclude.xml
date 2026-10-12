@@ -38,6 +38,7 @@
       <And><Class name="gov.itms.workflow.application.WorkflowService"/><Field name="repo"/></And>
       <And><Class name="gov.itms.workflow.infrastructure.WorkflowServiceConfiguration$EscalationJob"/><Field name="workflow"/></And>
       <And><Class name="gov.itms.notification.application.NotificationService"/><Field name="repo"/></And>
+      <And><Class name="gov.itms.examination.application.ExaminationService"/><Field name="~repo|licensing"/></And>
       <And><Class name="gov.itms.document.application.CertificateService"/><Field name="~repo|store"/></And>
       <And><Class name="gov.itms.document.application.DocumentService"/><Field name="~repo|store"/></And>
       <And><Class name="gov.itms.appointment.application.AppointmentService"/><Field name="repo"/></And>
@@ -215,5 +216,13 @@
   <Match>
     <Bug pattern="VA_FORMAT_STRING_USES_NEWLINE"/>
     <Class name="gov.itms.document.infrastructure.HtmlCertificateRenderer"/>
+  </Match>
+  <!-- PREDICTABLE_RANDOM in Exams.drawPaper: the theory paper is drawn deterministically from a seed so that a disputed
+       paper can be reproduced (DL-033); the seed itself comes from SecureRandom (ExaminationService.book) and the
+       answers are never sent to the candidate, so predictability of the shuffle given the seed is the purpose. -->
+  <Match>
+    <Class name="gov.itms.examination.domain.Exams"/>
+    <Method name="drawPaper"/>
+    <Bug pattern="PREDICTABLE_RANDOM"/>
   </Match>
 </FindBugsFilter>

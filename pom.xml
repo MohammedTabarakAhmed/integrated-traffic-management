@@ -49,6 +49,7 @@
     <module>services/crossborder-service</module>
     <module>services/search-service</module>
     <module>services/reporting-service</module>
+    <module>services/examination-service</module>
   </modules>
 
   <properties>

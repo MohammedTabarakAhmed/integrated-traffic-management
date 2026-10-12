@@ -1,0 +1,1995 @@
+openapi: 3.1.0
+info:
+  title: ITMS Examination Service
+  version: 1.0.0
+  description: Learning files, driving schools, examination committees and calendars, theory and practical tests, exceptions
+    and the hand-off of passed files to licensing (DL-030..DL-045, DL-036; ADR-065). Records are scoped by the region of the
+    learning file, school or committee (CC-001). Rule values (expiry, failed attempts, extra hours, pass marks, retest waits)
+    are configuration and provisional until the Authority confirms them (ADR-064).
+servers:
+- url: /
+security:
+- bearerAuth: []
+tags:
+- name: Examination
+paths:
+  /v1/test-types/{code}:
+    put:
+      tags:
+      - Examination
+      operationId: saveTestType
+      summary: 'Create or change a test type: scoring sheet, pass mark, retest wait, fee (DL-043)'
+      x-itms-permission: exam.settings.manage
+      x-itms-scope: national
+      parameters:
+      - name: code
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[A-Z0-9_]{1,40}$
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TestTypeRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestType'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/test-types/{code}/questions:
+    post:
+      tags:
+      - Examination
+      operationId: addQuestion
+      summary: Add a question to a theory test's bank, in one language, weighted (DL-033)
+      x-itms-permission: exam.settings.manage
+      x-itms-scope: national
+      parameters:
+      - name: code
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[A-Z0-9_]{1,40}$
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuestionRequest'
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuestionCreated'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/training-certificate-types/{code}:
+    put:
+      tags:
+      - Examination
+      operationId: saveCertificateType
+      summary: Create or change a training certificate type (DL-044)
+      x-itms-permission: exam.settings.manage
+      x-itms-scope: national
+      parameters:
+      - name: code
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[A-Z0-9_]{1,40}$
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CertificateTypeRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CertificateType'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/driving-schools:
+    post:
+      tags:
+      - Examination
+      operationId: registerSchool
+      summary: Register a driving school (DL-044)
+      x-itms-permission: exam.school.manage
+      x-itms-scope:
+      - region
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SchoolRequest'
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/School'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/driving-schools/{id}/branches:
+    post:
+      tags:
+      - Examination
+      operationId: addBranch
+      summary: Add a branch to a driving school (DL-044)
+      x-itms-permission: exam.school.manage
+      x-itms-scope:
+      - region
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BranchRequest'
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Branch'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/driving-schools/{id}/vehicles:
+    post:
+      tags:
+      - Examination
+      operationId: addSchoolVehicle
+      summary: Add a dual-control training vehicle (DL-044)
+      x-itms-permission: exam.school.manage
+      x-itms-scope:
+      - region
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VehicleRequest'
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SchoolVehicle'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/driving-schools/{id}/instructors:
+    post:
+      tags:
+      - Examination
+      operationId: addInstructor
+      summary: Add an instructor with grade and classes (DL-044)
+      x-itms-permission: exam.school.manage
+      x-itms-scope:
+      - region
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InstructorRequest'
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Instructor'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/driving-schools/{id}/complaints:
+    post:
+      tags:
+      - Examination
+      operationId: recordComplaint
+      summary: Record a complaint about a school or instructor (DL-045)
+      x-itms-permission: exam.school.manage
+      x-itms-scope:
+      - region
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComplaintRequest'
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Created'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/driving-schools/{id}/rating:
+    get:
+      tags:
+      - Examination
+      operationId: rateSchool
+      summary: Pass rate on first attempts and complaints of a school or instructor (DL-045)
+      x-itms-permission: exam.school.read
+      x-itms-scope:
+      - region
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: instructorId
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Rating'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/learning-files:
+    post:
+      tags:
+      - Examination
+      operationId: openLearningFile
+      summary: Open a learning file for a class (DL-030)
+      x-itms-permission: exam.file.manage
+      x-itms-scope:
+      - region
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FileRequest'
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearningFile'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/learning-files/{id}:
+    get:
+      tags:
+      - Examination
+      operationId: getLearningFile
+      summary: A learning file (DL-030)
+      x-itms-permission: exam.file.read
+      x-itms-scope:
+      - region
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearningFile'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/learning-files/{id}/transitions:
+    post:
+      tags:
+      - Examination
+      operationId: moveLearningFile
+      summary: Start training, mark ready for test, or cancel (DL-030, DL-032)
+      x-itms-permission: exam.file.manage
+      x-itms-scope:
+      - region
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MoveRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearningFile'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/learning-files/{id}/training-sessions:
+    post:
+      tags:
+      - Examination
+      operationId: recordTraining
+      summary: 'Record training hours: progress (DL-031) and extra hours (DL-032)'
+      x-itms-permission: exam.file.manage
+      x-itms-scope:
+      - region
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TrainingRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LearningFile'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/learning-files/{id}/results:
+    get:
+      tags:
+      - Examination
+      operationId: listResults
+      summary: The file's test results, oldest first (DL-033, DL-034)
+      x-itms-permission: exam.file.read
+      x-itms-scope:
+      - region
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultCollection'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/learning-files/{id}/licensing-transfer:
+    get:
+      tags:
+      - Examination
+      operationId: getLicensingTransfer
+      summary: The hand-off of the passed file to licensing (DL-036)
+      x-itms-permission: exam.file.read
+      x-itms-scope:
+      - region
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferView'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/learning-files/{id}/bookings:
+    post:
+      tags:
+      - Examination
+      operationId: bookTest
+      summary: Book a slot; examiner assigned by rotation, never the instructor (DL-032, DL-035, DL-043)
+      x-itms-permission: exam.booking.manage
+      x-itms-scope:
+      - region
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BookingRequest'
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/committees:
+    post:
+      tags:
+      - Examination
+      operationId: createCommittee
+      summary: Create an examination committee with head, examiners and observers (DL-040)
+      x-itms-permission: exam.committee.manage
+      x-itms-scope:
+      - region
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommitteeRequest'
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Committee'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/committees/{id}/slots:
+    post:
+      tags:
+      - Examination
+      operationId: createSlot
+      summary: The committee head adds a calendar slot with capacity (DL-041)
+      x-itms-permission: exam.calendar.manage
+      x-itms-scope:
+      - region
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SlotRequest'
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Slot'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/calendar-usage:
+    get:
+      tags:
+      - Examination
+      operationId: calendarUsage
+      summary: Past and future slots of a location with their usage (DL-042)
+      x-itms-permission: exam.calendar.read
+      x-itms-scope:
+      - region
+      parameters:
+      - name: location
+        in: query
+        required: true
+        schema:
+          type: string
+          maxLength: 80
+      - name: region
+        in: query
+        required: true
+        schema:
+          type: string
+          pattern: ^[A-Z0-9_]{1,40}$
+      - name: from
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date-time
+      - name: to
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date-time
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SlotUsageCollection'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/bookings/{id}/paper:
+    get:
+      tags:
+      - Examination
+      operationId: getPaper
+      summary: The randomised theory paper of a booking in a language, without answers (DL-033)
+      x-itms-permission: exam.test.conduct
+      x-itms-scope:
+      - region
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: language
+        in: query
+        required: true
+        schema:
+          type: string
+          pattern: ^[a-z]{2}$
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaperCollection'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/bookings/{id}/theory-answers:
+    post:
+      tags:
+      - Examination
+      operationId: submitTheoryAnswers
+      summary: Submit the theory answers; scored against the pass mark (DL-033)
+      x-itms-permission: exam.test.conduct
+      x-itms-scope:
+      - region
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TheoryRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Result'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/bookings/{id}/practical-results:
+    post:
+      tags:
+      - Examination
+      operationId: recordPracticalResult
+      summary: The assigned examiner records a road or yard result, offline-sync safe (DL-034, DL-035, DL-037, DL-038)
+      x-itms-permission: exam.result.record
+      x-itms-scope:
+      - region
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PracticalRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Result'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/result-exceptions:
+    get:
+      tags:
+      - Examination
+      operationId: listResultExceptions
+      summary: Open flagged results of a region for supervisor review (DL-037)
+      x-itms-permission: exam.exception.decide
+      x-itms-scope:
+      - region
+      parameters:
+      - name: region
+        in: query
+        required: true
+        schema:
+          type: string
+          pattern: ^[A-Z0-9_]{1,40}$
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExceptionCollection'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/result-exceptions/{id}/decisions:
+    post:
+      tags:
+      - Examination
+      operationId: decideResultException
+      summary: Accept or reject a flagged result; a rejected pass does not count (DL-037)
+      x-itms-permission: exam.exception.decide
+      x-itms-scope:
+      - region
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecisionRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExceptionItem'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        pattern: ^[A-Za-z0-9._:-]{8,128}$
+  responses:
+    Problem:
+      description: The request was refused
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+  schemas:
+    Problem:
+      type: object
+      properties:
+        type:
+          type: string
+          maxLength: 300
+        title:
+          type: string
+          maxLength: 300
+        status:
+          type: integer
+        detail:
+          type: string
+          maxLength: 2000
+        instance:
+          type: string
+          maxLength: 1000
+        code:
+          type: string
+          maxLength: 80
+        requirementRefs:
+          type: array
+          items:
+            type: string
+            maxLength: 20
+        correlationId:
+          type: string
+          maxLength: 100
+        errors:
+          type: array
+      additionalProperties: true
+    SheetItem:
+      type: object
+      properties:
+        code:
+          type: string
+          pattern: ^[A-Z0-9_]{1,40}$
+        textNl:
+          type: string
+          maxLength: 300
+        textEn:
+          type: string
+          maxLength: 300
+        penalty:
+          type: integer
+          minimum: 0
+          maximum: 1000
+        critical:
+          type: boolean
+      required:
+      - code
+      - textNl
+      - textEn
+      - penalty
+      - critical
+      additionalProperties: false
+    TestTypeRequest:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum:
+          - THEORY
+          - YARD
+          - ROAD
+        nameNl:
+          type: string
+          maxLength: 200
+        nameEn:
+          type: string
+          maxLength: 200
+        maxScore:
+          type: integer
+          minimum: 1
+          maximum: 1000
+        passMark:
+          type: integer
+          minimum: 1
+          maximum: 1000
+        retestWaitDays:
+          type: integer
+          minimum: 0
+          maximum: 365
+        feeServiceCode:
+          type:
+          - string
+          - 'null'
+          pattern: ^[A-Z0-9_]{1,40}$
+        questionCount:
+          type: integer
+          minimum: 0
+          maximum: 200
+        sheet:
+          type:
+          - array
+          - 'null'
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/SheetItem'
+        active:
+          type: boolean
+      required:
+      - kind
+      - nameNl
+      - nameEn
+      - maxScore
+      - passMark
+      - retestWaitDays
+      - questionCount
+      - active
+      additionalProperties: false
+    TestType:
+      type: object
+      properties:
+        code:
+          type: string
+        kind:
+          type: string
+        nameNl:
+          type: string
+        nameEn:
+          type: string
+        maxScore:
+          type: integer
+        passMark:
+          type: integer
+        retestWaitDays:
+          type: integer
+        feeServiceCode:
+          type:
+          - string
+          - 'null'
+        questionCount:
+          type: integer
+        sheet:
+          type: array
+        active:
+          type: boolean
+      required:
+      - code
+      - kind
+      - maxScore
+      - passMark
+      additionalProperties: true
+    CertificateTypeRequest:
+      type: object
+      properties:
+        nameNl:
+          type: string
+          maxLength: 200
+        nameEn:
+          type: string
+          maxLength: 200
+        hours:
+          type: integer
+          minimum: 1
+          maximum: 500
+      required:
+      - nameNl
+      - nameEn
+      - hours
+      additionalProperties: false
+    CertificateType:
+      type: object
+      properties:
+        code:
+          type: string
+        hours:
+          type: integer
+      required:
+      - code
+      additionalProperties: true
+    QuestionRequest:
+      type: object
+      properties:
+        language:
+          type: string
+          pattern: ^[a-z]{2}$
+        category:
+          type: string
+          pattern: ^[A-Z0-9_]{1,40}$
+        weight:
+          type: integer
+          minimum: 1
+          maximum: 100
+        text:
+          type: string
+          maxLength: 2000
+        options:
+          type: array
+          minItems: 2
+          maxItems: 6
+          items:
+            type: string
+            maxLength: 500
+        correctOption:
+          type: integer
+          minimum: 0
+          maximum: 5
+      required:
+      - language
+      - category
+      - weight
+      - text
+      - options
+      - correctOption
+      additionalProperties: false
+    QuestionCreated:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        testTypeCode:
+          type: string
+        language:
+          type: string
+        category:
+          type: string
+        weight:
+          type: integer
+      required:
+      - id
+      additionalProperties: true
+    SchoolRequest:
+      type: object
+      properties:
+        code:
+          type: string
+          pattern: ^[A-Z0-9_]{1,40}$
+        nameNl:
+          type: string
+          maxLength: 200
+        nameEn:
+          type: string
+          maxLength: 200
+        region:
+          type: string
+          pattern: ^[A-Z0-9_]{1,40}$
+      required:
+      - code
+      - nameNl
+      - nameEn
+      - region
+      additionalProperties: false
+    School:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        region:
+          type: string
+        status:
+          type: string
+      required:
+      - id
+      - code
+      - region
+      additionalProperties: true
+    BranchRequest:
+      type: object
+      properties:
+        code:
+          type: string
+          pattern: ^[A-Z0-9_]{1,40}$
+        address:
+          type: string
+          maxLength: 500
+        region:
+          type: string
+          pattern: ^[A-Z0-9_]{1,40}$
+      required:
+      - code
+      - address
+      - region
+      additionalProperties: false
+    Branch:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        schoolId:
+          type: string
+          format: uuid
+        code:
+          type: string
+      required:
+      - id
+      additionalProperties: true
+    VehicleRequest:
+      type: object
+      properties:
+        plate:
+          type: string
+          maxLength: 40
+        classCode:
+          type: string
+          pattern: ^[A-Z0-9_]{1,40}$
+        dualControls:
+          type: boolean
+      required:
+      - plate
+      - classCode
+      - dualControls
+      additionalProperties: false
+    SchoolVehicle:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        schoolId:
+          type: string
+          format: uuid
+        plate:
+          type: string
+      required:
+      - id
+      additionalProperties: true
+    InstructorRequest:
+      type: object
+      properties:
+        userId:
+          type:
+          - string
+          - 'null'
+          maxLength: 100
+        trafficFileNumber:
+          type: string
+          maxLength: 40
+        grade:
+          type: string
+          pattern: ^[A-Z0-9_]{1,40}$
+        classes:
+          type: array
+          minItems: 1
+          maxItems: 20
+          uniqueItems: true
+          items:
+            type: string
+            pattern: ^[A-Z0-9_]{1,40}$
+      required:
+      - trafficFileNumber
+      - grade
+      - classes
+      additionalProperties: false
+    Instructor:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        schoolId:
+          type: string
+          format: uuid
+        grade:
+          type: string
+        classes:
+          type: array
+      required:
+      - id
+      additionalProperties: true
+    ComplaintRequest:
+      type: object
+      properties:
+        instructorId:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        summary:
+          type: string
+          maxLength: 1000
+      required:
+      - summary
+      additionalProperties: false
+    Created:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+      required:
+      - id
+      additionalProperties: true
+    Rating:
+      type: object
+      properties:
+        subjectId:
+          type: string
+          format: uuid
+        learners:
+          type: integer
+        firstAttempts:
+          type: integer
+        firstPasses:
+          type: integer
+        complaints:
+          type: integer
+        passRatePerMille:
+          type: integer
+        complaintsPer100:
+          type: integer
+      required:
+      - subjectId
+      - passRatePerMille
+      additionalProperties: true
+    FileRequest:
+      type: object
+      properties:
+        trafficFileNumber:
+          type: string
+          maxLength: 40
+        classCode:
+          type: string
+          pattern: ^[A-Z0-9_]{1,40}$
+        gearbox:
+          type: string
+          enum:
+          - MANUAL
+          - AUTOMATIC
+        region:
+          type: string
+          pattern: ^[A-Z0-9_]{1,40}$
+        schoolId:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        instructorId:
+          type:
+          - string
+          - 'null'
+          format: uuid
+      required:
+      - trafficFileNumber
+      - classCode
+      - gearbox
+      - region
+      additionalProperties: false
+    LearningFile:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+        trafficFileNumber:
+          type: string
+        classCode:
+          type: string
+        gearbox:
+          type: string
+        region:
+          type: string
+        schoolId:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        instructorId:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        status:
+          type: string
+          enum:
+          - OPEN
+          - IN_TRAINING
+          - READY_FOR_TEST
+          - PASSED
+          - FAILED
+          - EXPIRED
+          - CANCELLED
+        failedAttempts:
+          type: integer
+        extraHoursRequired:
+          type: integer
+        trainingHours:
+          type: integer
+        openedAt:
+          type: string
+          format: date-time
+        lastProgressAt:
+          type: string
+          format: date-time
+        version:
+          type: integer
+      required:
+      - id
+      - number
+      - status
+      - region
+      additionalProperties: true
+    MoveRequest:
+      type: object
+      properties:
+        action:
+          type: string
+          enum:
+          - start-training
+          - ready-for-test
+          - cancel
+        reason:
+          type:
+          - string
+          - 'null'
+          maxLength: 500
+      required:
+      - action
+      additionalProperties: false
+    TrainingRequest:
+      type: object
+      properties:
+        instructorId:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        hours:
+          type: integer
+          minimum: 1
+          maximum: 12
+        certificateType:
+          type:
+          - string
+          - 'null'
+          pattern: ^[A-Z0-9_]{1,40}$
+        heldOn:
+          type: string
+          format: date
+      required:
+      - hours
+      - heldOn
+      additionalProperties: false
+    Result:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        bookingId:
+          type: string
+          format: uuid
+        fileId:
+          type: string
+          format: uuid
+        testTypeCode:
+          type: string
+        examinerId:
+          type:
+          - string
+          - 'null'
+        clientResultId:
+          type:
+          - string
+          - 'null'
+        score:
+          type: integer
+        passed:
+          type: boolean
+        faults:
+          type: array
+          items:
+            type: string
+        recordedAt:
+          type: string
+          format: date-time
+        firstAttempt:
+          type: boolean
+        exceptions:
+          type: array
+          items:
+            type: string
+      required:
+      - id
+      - bookingId
+      - score
+      - passed
+      - exceptions
+      additionalProperties: true
+    ResultCollection:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Result'
+      required:
+      - items
+      additionalProperties: true
+    TransferView:
+      type: object
+      properties:
+        status:
+          type: string
+          enum:
+          - PENDING
+          - SENT
+        attempts:
+          type: integer
+        licensingTransferId:
+          type:
+          - string
+          - 'null'
+      required:
+      - status
+      additionalProperties: true
+    Member:
+      type: object
+      properties:
+        userId:
+          type: string
+          maxLength: 100
+        role:
+          type: string
+          enum:
+          - HEAD
+          - EXAMINER
+          - OBSERVER
+      required:
+      - userId
+      - role
+      additionalProperties: false
+    CommitteeRequest:
+      type: object
+      properties:
+        code:
+          type: string
+          pattern: ^[A-Z0-9_]{1,40}$
+        location:
+          type: string
+          maxLength: 80
+        region:
+          type: string
+          pattern: ^[A-Z0-9_]{1,40}$
+        validFrom:
+          type: string
+          format: date
+        validTo:
+          type: string
+          format: date
+        members:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/Member'
+      required:
+      - code
+      - location
+      - region
+      - validFrom
+      - validTo
+      - members
+      additionalProperties: false
+    Committee:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        members:
+          type: array
+      required:
+      - id
+      additionalProperties: true
+    SlotRequest:
+      type: object
+      properties:
+        classCode:
+          type: string
+          pattern: ^[A-Z0-9_]{1,40}$
+        testTypeCode:
+          type: string
+          pattern: ^[A-Z0-9_]{1,40}$
+        startsAt:
+          type: string
+          format: date-time
+        capacity:
+          type: integer
+          minimum: 1
+          maximum: 500
+      required:
+      - classCode
+      - testTypeCode
+      - startsAt
+      - capacity
+      additionalProperties: false
+    Slot:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        committeeId:
+          type: string
+          format: uuid
+        startsAt:
+          type: string
+          format: date-time
+        capacity:
+          type: integer
+        booked:
+          type: integer
+      required:
+      - id
+      additionalProperties: true
+    SlotUsage:
+      type: object
+      properties:
+        slotId:
+          type: string
+          format: uuid
+        location:
+          type: string
+        classCode:
+          type: string
+        testTypeCode:
+          type: string
+        startsAt:
+          type: string
+          format: date-time
+        capacity:
+          type: integer
+        booked:
+          type: integer
+        sat:
+          type: integer
+        noShows:
+          type: integer
+      required:
+      - slotId
+      - capacity
+      - booked
+      additionalProperties: true
+    SlotUsageCollection:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SlotUsage'
+      required:
+      - items
+      additionalProperties: true
+    BookingRequest:
+      type: object
+      properties:
+        slotId:
+          type: string
+          format: uuid
+      required:
+      - slotId
+      additionalProperties: false
+    Booking:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        slotId:
+          type: string
+          format: uuid
+        fileId:
+          type: string
+          format: uuid
+        testTypeCode:
+          type: string
+        examinerId:
+          type:
+          - string
+          - 'null'
+        status:
+          type: string
+        bookedAt:
+          type: string
+          format: date-time
+      required:
+      - id
+      - status
+      additionalProperties: true
+    PaperQuestion:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        category:
+          type: string
+        text:
+          type: string
+        options:
+          type: array
+          items:
+            type: string
+      required:
+      - id
+      - text
+      - options
+      additionalProperties: true
+    PaperCollection:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PaperQuestion'
+      required:
+      - items
+      additionalProperties: true
+    TheoryRequest:
+      type: object
+      properties:
+        language:
+          type: string
+          pattern: ^[a-z]{2}$
+        answers:
+          type: object
+          maxProperties: 200
+          propertyNames:
+            pattern: ^[0-9a-f-]{36}$
+          additionalProperties:
+            type: integer
+            minimum: 0
+            maximum: 5
+      required:
+      - language
+      - answers
+      additionalProperties: false
+    RoutePoint:
+      type: object
+      properties:
+        lat:
+          type: number
+          minimum: -90
+          maximum: 90
+        lon:
+          type: number
+          minimum: -180
+          maximum: 180
+        at:
+          type: string
+          format: date-time
+      required:
+      - lat
+      - lon
+      - at
+      additionalProperties: false
+    PracticalRequest:
+      type: object
+      properties:
+        clientResultId:
+          type: string
+          pattern: ^[A-Za-z0-9._:-]{8,80}$
+        faults:
+          type: array
+          maxItems: 100
+          items:
+            type: string
+            pattern: ^[A-Z0-9_]{1,40}$
+        route:
+          type:
+          - array
+          - 'null'
+          maxItems: 5000
+          items:
+            $ref: '#/components/schemas/RoutePoint'
+        recordedAt:
+          type: string
+          format: date-time
+        videoDocumentId:
+          type:
+          - string
+          - 'null'
+          format: uuid
+      required:
+      - clientResultId
+      - faults
+      - recordedAt
+      additionalProperties: false
+    ExceptionItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        resultId:
+          type: string
+          format: uuid
+        reason:
+          type: string
+        status:
+          type: string
+          enum:
+          - OPEN
+          - ACCEPTED
+          - REJECTED
+        raisedAt:
+          type: string
+          format: date-time
+        decidedBy:
+          type:
+          - string
+          - 'null'
+        decisionReason:
+          type:
+          - string
+          - 'null'
+      required:
+      - id
+      - reason
+      - status
+      additionalProperties: true
+    ExceptionCollection:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExceptionItem'
+      required:
+      - items
+      additionalProperties: true
+    DecisionRequest:
+      type: object
+      properties:
+        accept:
+          type: boolean
+        reason:
+          type: string
+          maxLength: 500
+      required:
+      - accept
+      - reason
+      additionalProperties: false

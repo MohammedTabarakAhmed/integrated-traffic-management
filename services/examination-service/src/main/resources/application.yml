@@ -1,0 +1,81 @@
+spring:
+  application:
+    name: examination-service
+  config:
+    import: "optional:configtree:${ITMS_SECRETS_DIR:/run/secrets/}"
+  datasource:
+    url: ${EXAM_DB_URL}
+    username: ${EXAM_DB_USER:}
+    password: ${EXAM_DB_PASSWORD:}
+  flyway:
+    locations: classpath:db/platform,classpath:db/migration
+    out-of-order: true
+  kafka:
+    bootstrap-servers: ${ITMS_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+  threads:
+    virtual:
+      enabled: true
+itms:
+  events:
+    enabled: ${ITMS_EVENTS_ENABLED:false}
+    audit-topic: ${ITMS_EVENTS_AUDIT_TOPIC:itms.audit.v1}
+    domain-topic: ${ITMS_EVENTS_DOMAIN_TOPIC:}
+    batch-size: ${ITMS_EVENTS_BATCH_SIZE:100}
+    send-timeout: ${ITMS_EVENTS_SEND_TIMEOUT:10s}
+    relay-interval: ${ITMS_EVENTS_RELAY_INTERVAL:1s}
+  security:
+    issuer: ${ITMS_OIDC_ISSUER}
+    jwk-set-uri: ${ITMS_OIDC_JWKS_URI}
+    audience: itms-api
+    authorisation-source: ${ITMS_AUTHORISATION_SOURCE:iam}
+    iam:
+      base-url: ${ITMS_IAM_URL:}
+      cache-ttl: ${ITMS_IAM_CACHE_TTL:60s}
+  # Examination rules (DL-031, DL-032, DL-037, DL-043). Values are provisional until the Authority confirms them
+  # (ADR-064 decision 13); the licence classes' test lists mirror licensing-service's class catalogue.
+  examination:
+    file-expiry-months: ${ITMS_EXAM_FILE_EXPIRY_MONTHS:12}
+    failed-attempts-threshold: ${ITMS_EXAM_FAILED_ATTEMPTS_THRESHOLD:3}
+    extra-training-hours: ${ITMS_EXAM_EXTRA_TRAINING_HOURS:10}
+    zone: ${ITMS_TIME_ZONE:Asia/Dubai}
+    working-from: ${ITMS_EXAM_WORKING_FROM:07:00}
+    working-to: ${ITMS_EXAM_WORKING_TO:20:00}
+    minimum-route: ${ITMS_EXAM_MINIMUM_ROUTE:10m}
+    batch-size: 200
+    class-tests:
+      LIGHT: THEORY_LIGHT,ROAD_LIGHT
+      MOTORCYCLE: THEORY_MOTORCYCLE,YARD_MOTORCYCLE,ROAD_MOTORCYCLE
+      HEAVY: THEORY_HEAVY,YARD_HEAVY,ROAD_HEAVY
+  # Passed files go to licensing-service with this service's own client-credentials account (DL-036, ADR-034).
+  clients:
+    licensing:
+      base-url: ${ITMS_LICENSING_URL:http://localhost:8098}
+      token-uri: ${ITMS_OIDC_TOKEN_URI:http://localhost:8180/realms/itms/protocol/openid-connect/token}
+      client-id: ${ITMS_SERVICE_CLIENT_ID:itms-examination-service}
+      client-secret: ${ITMS_SERVICE_CLIENT_SECRET:}
+      timeout: ${ITMS_LICENSING_TIMEOUT:3s}
+  idempotency:
+    enabled: true
+    paths: [/v1/driving-schools, /v1/driving-schools/*/branches, /v1/driving-schools/*/vehicles,
+            /v1/driving-schools/*/instructors, /v1/driving-schools/*/complaints, /v1/test-types/*/questions,
+            /v1/learning-files, /v1/learning-files/*/transitions, /v1/learning-files/*/training-sessions,
+            /v1/learning-files/*/bookings, /v1/committees, /v1/committees/*/slots, /v1/bookings/*/theory-answers,
+            /v1/bookings/*/practical-results, /v1/result-exceptions/*/decisions]
+    retention: 24h
+    lock-timeout: 30s
+    cleanup-interval: 15m
+management:
+  server:
+    port: ${ITMS_MANAGEMENT_PORT:8090}
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+server:
+  error:
+    include-stacktrace: never
+    include-message: never

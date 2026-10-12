@@ -27,6 +27,11 @@ public final class Ports {
 
         Optional<Payable> findPayableByItem(Payable.ItemType type, String itemRef);
 
+        /** Payables of a traffic file, newest first, optionally only in {@code status} (ADR-067 d). */
+        default List<Payable> payablesOfFile(String trafficFileNumber, Payable.Status status, int limit) {
+            return List.of();
+        }
+
         void savePayableStatus(Payable payable);
 
         boolean payableHeld(UUID id);
@@ -109,6 +114,20 @@ public final class Ports {
 
     public static class GatewayUnavailableException extends RuntimeException {
         public GatewayUnavailableException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
+    /**
+     * The signed-in customer's traffic file (ADR-067 d), from traffic-file-service by the national id in their token.
+     * Empty when they have no file; throws {@link TrafficFilesUnavailableException} when it cannot answer.
+     */
+    public interface OwnFile {
+        Optional<String> fileNumber();
+    }
+
+    public static class TrafficFilesUnavailableException extends RuntimeException {
+        public TrafficFilesUnavailableException(String message, Throwable cause) {
             super(message, cause);
         }
     }

@@ -50,6 +50,14 @@ class DomainExceptionAdvice {
         return Problems.of(HttpStatus.SERVICE_UNAVAILABLE, "GATEWAY_UNAVAILABLE", detail, List.of("FN-001"));
     }
 
+    /** traffic-file-service did not answer, so the customer's own file is unknown (ADR-067 d): nothing was done. */
+    @ExceptionHandler(gov.itms.payment.application.Ports.TrafficFilesUnavailableException.class)
+    ProblemDetail trafficFilesUnavailable(RuntimeException e) {
+        String detail = messages.getMessage("problem.TRAFFIC_FILES_UNAVAILABLE", null, "try again later",
+                LocaleContextHolder.getLocale());
+        return Problems.of(HttpStatus.SERVICE_UNAVAILABLE, "TRAFFIC_FILES_UNAVAILABLE", detail, List.of("CH-005"));
+    }
+
     /** Two changes to the same record crossed; the second must re-read (DAT-002). */
     @ExceptionHandler(OptimisticLockingFailureException.class)
     ProblemDetail concurrent(OptimisticLockingFailureException e) {

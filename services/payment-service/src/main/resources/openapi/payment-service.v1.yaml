@@ -112,6 +112,87 @@ paths:
         '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
 
+  /v1/me/payables:
+    get:
+      tags: [Payments]
+      operationId: listOwnPayables
+      summary: The signed-in customer's own items with their itemised lines, newest first (CC-047, ADR-067 d; audited)
+      description: >-
+        For customer tokens only (subject_type=CUSTOMER with a national_id claim); staff tokens get 403. The items are
+        those of the traffic file traffic-file-service finds for the national id in the token (the token is relayed),
+        never a parameter. `paused` marks an open item under objection, which cannot be paid now (VF-052).
+        404 `OWN_FILE_NOT_FOUND` without a traffic file; 503 `TRAFFIC_FILES_UNAVAILABLE`.
+      x-itms-permission: customer.payment.make
+      x-itms-scope: [own]
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [OPEN, PAID, CANCELLED] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+      responses:
+        '200':
+          description: The customer's items
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [payable, paused]
+                      properties:
+                        payable: { $ref: '#/components/schemas/Payable' }
+                        paused: { type: boolean }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
+  /v1/me/baskets:
+    post:
+      tags: [Payments]
+      operationId: createOwnBasket
+      summary: Put one, several or all of the customer's own open items in one basket (VF-070, ADR-067 d)
+      description: |
+        For customer tokens only. Without `payableIds` the basket holds every open item of the customer's file that is
+        not paused (422 `NOTHING_TO_PAY` when there is none). Naming an item of another file answers 404
+        `PAYABLE_NOT_FOUND`. The customer then pays the basket online with `POST /v1/baskets/{basketId}/payments`
+        (FN-001). 503 `TRAFFIC_FILES_UNAVAILABLE`.
+      x-itms-permission: customer.payment.make
+      x-itms-scope: [own]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                payableIds: { type: array, maxItems: 100, items: { type: string, format: uuid } }
+      responses:
+        '201':
+          description: Created
+          headers:
+            Location: { schema: { type: string } }
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Basket' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
   /v1/baskets:
     post:
       tags: [Payments]

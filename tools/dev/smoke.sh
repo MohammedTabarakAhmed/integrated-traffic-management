@@ -1297,4 +1297,16 @@ bad=[t['reference'] for t in items if t['applicantFileNumber']!='$own_file']
 sys.exit('FAIL: /v1/me/transactions shows other applicants: '+','.join(bad) if bad else None)" || exit 1
 echo "   transactions of $own_file only"
 
+echo "57. Customer own payment (VF-070, CC-047, ADR-067 d): the customer sees only their own items, itemised, and baskets all open ones in one go"
+curl -sf -H "Authorization: Bearer $CUSTOMER" -H "X-Channel: PORTAL" "$GW/v1/me/payables?status=OPEN" | "$PY" -c "
+import json,sys
+items=json.load(sys.stdin)['items']
+bad=[i['payable']['id'] for i in items if i['payable']['trafficFileNumber']!='$own_file' or not i['payable']['lines']]
+sys.exit('FAIL: /v1/me/payables shows other files or items without lines: '+','.join(bad) if bad else None)" || exit 1
+res=$(curl -s -w '\n%{http_code}' -H "Authorization: Bearer $CUSTOMER" -H "X-Channel: PORTAL" -H "Content-Type: application/json" \
+  -H "Idempotency-Key: smoke-own-basket-$(date +%s%N)" -d '{}' "$GW/v1/me/baskets")
+code=$(printf '%s' "$res" | tail -n1); body=$(printf '%s' "$res" | sed '$d')
+[[ "$code" == 201 || ( "$code" == 422 && "$body" == *NOTHING_TO_PAY* ) ]] || { echo "FAIL: POST /v1/me/baskets ($code) $body"; exit 1; }
+echo "   own items of $own_file only; basket of every open item: HTTP $code"
+
 echo "SMOKE OK"

@@ -92,6 +92,14 @@ class JdbcPaymentRepository implements Ports.PaymentRepository {
     }
 
     @Override
+    public List<Payable> payablesOfFile(String trafficFileNumber, Payable.Status status, int limit) {
+        return jdbc.sql(PAYABLE_SELECT + " where traffic_file_number = :f and (cast(:s as varchar) is null or status = :s)"
+                        + " order by created_at desc, id limit :n")
+                .param("f", trafficFileNumber).param("s", status == null ? null : status.name()).param("n", limit)
+                .query(this::mapPayable).list();
+    }
+
+    @Override
     public void savePayableStatus(Payable p) {
         jdbc.sql("update payable set status = :s where id = :id").param("s", p.status().name()).param("id", p.id())
                 .update();

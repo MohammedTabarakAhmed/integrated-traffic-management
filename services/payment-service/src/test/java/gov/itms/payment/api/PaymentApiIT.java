@@ -86,6 +86,8 @@ class PaymentApiIT {
     @ServiceConnection
     static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:17-alpine");
 
+    /** Customer token → traffic file number for {@code GET /v1/me/traffic-file} (ADR-067 d). */
+    private static final Map<String, String> OWN_FILES = new java.util.concurrent.ConcurrentHashMap<>();
     private static final HttpServer GATEWAY = gateway();
     private static final AtomicInteger REGIONS = new AtomicInteger();
     private static final Set<String> TILLS = java.util.concurrent.ConcurrentHashMap.newKeySet();
@@ -102,6 +104,18 @@ class PaymentApiIT {
                         .getBytes(StandardCharsets.UTF_8);
                 exchange.getResponseHeaders().add("Content-Type", "application/json");
                 exchange.sendResponseHeaders(201, body.length);
+                try (OutputStream out = exchange.getResponseBody()) {
+                    out.write(body);
+                }
+            });
+            s.createContext("/v1/me/traffic-file", exchange -> {
+                // traffic-file-service with the relayed customer token (ADR-067 d): that token's file, or 404.
+                String auth = String.valueOf(exchange.getRequestHeaders().getFirst("Authorization"));
+                String file = OWN_FILES.get(auth.startsWith("Bearer ") ? auth.substring(7) : "");
+                byte[] body = (file == null ? "{\"code\":\"OWN_FILE_NOT_FOUND\"}" : "{\"fileNumber\":\"" + file + "\"}")
+                        .getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().add("Content-Type", "application/json");
+                exchange.sendResponseHeaders(file == null ? 404 : 200, body.length);
                 try (OutputStream out = exchange.getResponseBody()) {
                     out.write(body);
                 }
@@ -125,6 +139,8 @@ class PaymentApiIT {
     @DynamicPropertySource
     static void gatewayUrl(DynamicPropertyRegistry registry) {
         registry.add("itms.payments.gateway.base-url", () -> "http://127.0.0.1:" + GATEWAY.getAddress().getPort());
+        registry.add("itms.clients.traffic-files.base-url",
+                () -> "http://127.0.0.1:" + GATEWAY.getAddress().getPort());
     }
 
     /**
@@ -293,6 +309,78 @@ class PaymentApiIT {
                 HmacCallbackVerifierTest.sign(signatureKey, UUID.fromString(paymentId), txn, status, amount, "XTS",
                         paidAt)));
         return postAs("/v1/payments/" + paymentId + "/callbacks", body, gatewayAdapter(), "PARTNER");
+    }
+
+    private static RequestPostProcessor ownCustomer(String token, String... permissions) {
+        return jwt().jwt(j -> j.tokenValue(token).subject("u-" + token).claim("preferred_username", token)
+                .claim("subject_type", "CUSTOMER").claim("national_id", "784199012345671")
+                .claim("roles", List.of("CUSTOMER")).claim("permissions", Arrays.asList(permissions)));
+    }
+
+    private String payableOf(String file, String region, String ref, long amount) throws Exception {
+        MvcResult r = postAs("/v1/payables", Map.of("itemType", "VIOLATION", "itemRef", ref, "trafficFileNumber",
+                file, "region", region, "currency", "XTS", "lines", List.of(
+                        Map.of("financialItem", "FINE_REVENUE", "beneficiary", "AUTHORITY", "description", "Fine",
+                                "amountMinor", amount),
+                        Map.of("financialItem", "KNOWLEDGE_FEE", "beneficiary", "AUTHORITY", "description", "Fee",
+                                "amountMinor", 100))), registrar());
+        assertThat(r.getResponse().getStatus()).as(r.getResponse().getContentAsString()).isEqualTo(201);
+        return body(r).get("id").asString();
+    }
+
+    @Test
+    @Tag("VF-070")
+    @Tag("CC-047")
+    @Tag("CC-001")
+    @DisplayName("ADR-067 d: a customer sees their own items itemised and puts one, several or all open ones in one "
+            + "basket, which they pay online; another file's item is 404; staff 403, no file 404")
+    void customerPaysOwnItems() throws Exception {
+        String region = newRegion();
+        String file = "TF-OWN-" + REGIONS.incrementAndGet();
+        String first = payableOf(file, region, unique("VF-O1-"), 1_000);
+        String second = payableOf(file, region, unique("VF-O2-"), 2_000);
+        String paused = payableOf(file, region, unique("VF-O3-"), 3_000);
+        String others = payableOf("TF-OTHER-" + REGIONS.incrementAndGet(), region, unique("VF-OX-"), 500);
+        assertThat(postAs("/v1/payables/" + paused + "/holds", Map.of("sourceRef", "OBJ-OWN", "reason",
+                "under objection"), user("svc-objection", "OBJECTION_SERVICE", "payment.payable.hold"))
+                .getResponse().getStatus()).isEqualTo(204);
+        String token = "cust-" + UUID.randomUUID();
+        OWN_FILES.put(token, file);
+        RequestPostProcessor me = ownCustomer(token, "customer.payment.make");
+
+        JsonNode items = body(call(get("/v1/me/payables?status=OPEN"), Request.Method.GET,
+                "/v1/me/payables?status=OPEN", null, me, null, "PORTAL")).get("items");
+        assertThat(items).hasSize(3);
+        assertThat(items).allSatisfy(i -> assertThat(i.get("payable").get("lines")).hasSize(2));
+        assertThat(items).filteredOn(i -> i.get("paused").asBoolean())
+                .singleElement().satisfies(i -> assertThat(i.get("payable").get("id").asString()).isEqualTo(paused));
+
+        MvcResult all = postAs("/v1/me/baskets", Map.of(), me, "PORTAL");
+        assertThat(all.getResponse().getStatus()).as(all.getResponse().getContentAsString()).isEqualTo(201);
+        assertThat(body(all).get("payableIds")).extracting(JsonNode::asString)
+                .containsExactlyInAnyOrder(first, second);
+        assertThat(body(all).get("totalMinor").asLong()).isEqualTo(3_200);
+        MvcResult one = postAs("/v1/me/baskets", Map.of("payableIds", List.of(first)), me, "PORTAL");
+        assertThat(body(one).get("totalMinor").asLong()).isEqualTo(1_100);
+        MvcResult started = postAs("/v1/baskets/" + body(all).get("id").asString() + "/payments",
+                Map.of("method", "GATEWAY_CARD", "returnUrl", "https://portal.test/back"), me, "PORTAL");
+        assertThat(started.getResponse().getStatus()).as(started.getResponse().getContentAsString()).isEqualTo(201);
+        assertThat(body(started).get("redirectUrl").asString()).startsWith("https://gw.test/pay/");
+
+        MvcResult notMine = postAs("/v1/me/baskets", Map.of("payableIds", List.of(first, others)), me, "PORTAL");
+        assertThat(notMine.getResponse().getStatus()).isEqualTo(404);
+        assertThat(code(notMine)).isEqualTo("PAYABLE_NOT_FOUND");
+        assertThat(db.sql("select count(*) from audit_outbox where action = 'PAYABLES_VIEWED' and entity_id = :f")
+                .param("f", file).query(Long.class).single()).isEqualTo(1L);
+
+        assertThat(postAs("/v1/me/baskets", Map.of(), user("u-staff-own", "CASHIER", "customer.payment.make"),
+                "PORTAL").getResponse().getStatus()).as("staff token").isEqualTo(403);
+        assertThat(postAs("/v1/me/baskets", Map.of(), ownCustomer(token), "PORTAL").getResponse().getStatus())
+                .as("customer without the permission").isEqualTo(403);
+        MvcResult none = postAs("/v1/me/baskets", Map.of(), ownCustomer("cust-nofile", "customer.payment.make"),
+                "PORTAL");
+        assertThat(none.getResponse().getStatus()).isEqualTo(404);
+        assertThat(code(none)).isEqualTo("OWN_FILE_NOT_FOUND");
     }
 
     @Test

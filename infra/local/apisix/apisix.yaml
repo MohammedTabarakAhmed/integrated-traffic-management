@@ -320,6 +320,8 @@ routes:
     upstream_id: payment-service
     plugin_config_id: protected-api
     uris:
+      - /v1/me/payables
+      - /v1/me/baskets
       - /v1/payables
       - /v1/payables/*
       - /v1/baskets

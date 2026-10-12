@@ -57,6 +57,11 @@ itms:
       base-url: ${ITMS_PAYMENTS_GATEWAY_URL:http://localhost:8098}
       timeout: ${ITMS_PAYMENTS_GATEWAY_TIMEOUT:5s}
       callback-base-url: ${ITMS_PAYMENTS_CALLBACK_BASE_URL:http://localhost:9080}
+  # A customer's own items (ADR-067 d): their file from traffic-file-service with the customer's own token (no account).
+  clients:
+    traffic-files:
+      base-url: ${ITMS_TRAFFIC_FILES_URL:http://localhost:8085}
+      timeout: ${ITMS_TRAFFIC_FILES_TIMEOUT:3s}
   # API_SPECIFICATION §2, ADR-032: registering, basket creation, paying and cancelling need an Idempotency-Key. The
   # gateway callback is idempotent by its own transaction id instead (FN-004).
   idempotency:
@@ -64,6 +69,7 @@ itms:
     paths:
       - /v1/payables
       - /v1/baskets
+      - /v1/me/baskets
       - /v1/baskets/*/payments
       - /v1/receipts/*/cancellations
       - /v1/payables/*/holds

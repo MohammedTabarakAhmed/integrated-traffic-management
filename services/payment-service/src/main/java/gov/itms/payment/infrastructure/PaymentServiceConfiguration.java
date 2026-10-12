@@ -1,10 +1,13 @@
 package gov.itms.payment.infrastructure;
 
+import gov.itms.payment.application.CustomerPayments;
 import gov.itms.payment.application.PaymentService;
 import gov.itms.payment.application.FinanceOperations;
 import gov.itms.payment.application.Ports;
 import gov.itms.payment.domain.Payment;
 import gov.itms.platform.audit.AuditRecorder;
+import gov.itms.platform.client.OwnTrafficFile;
+import gov.itms.platform.client.ServiceCallException;
 import gov.itms.platform.events.DomainEventRecorder;
 import gov.itms.platform.security.CurrentActorProvider;
 import java.net.URI;
@@ -15,6 +18,9 @@ import java.time.ZoneId;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
+import io.micrometer.observation.ObservationRegistry;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.core.env.Environment;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -104,6 +110,26 @@ public class PaymentServiceConfiguration {
                 gateway, new GatewayAdapters.HmacCallbackVerifier(keys), audit, events,
                 new PaymentService.Settings(Set.copyOf(properties.acceptedMethods()), properties.inquiryAfter(),
                         properties.resolutionWindow(), ZoneId.of(properties.businessZone())), clock);
+    }
+
+    /** The signed-in customer's own items (ADR-067 d); the file is looked up with the customer's own token. */
+    @Bean
+    CustomerPayments customerPayments(JdbcClient jdbc, ObjectMapper json, PaymentService payments, AuditRecorder audit,
+                                      Environment environment, ObjectProvider<ObservationRegistry> observations) {
+        OwnTrafficFile files = OwnTrafficFile.create(
+                environment.getRequiredProperty("itms.clients.traffic-files.base-url"),
+                environment.getRequiredProperty("itms.clients.traffic-files.timeout", Duration.class),
+                observations.getIfAvailable(() -> ObservationRegistry.NOOP));
+        Ports.OwnFile own = () -> {
+            try {
+                return files.fileNumber();
+            } catch (ServiceCallException e) {
+                LoggerFactory.getLogger(CustomerPayments.class).warn("Own traffic file lookup failed: {}",
+                        e.getMessage());
+                throw new Ports.TrafficFilesUnavailableException("your traffic file cannot be found now", e);
+            }
+        };
+        return new CustomerPayments(new JdbcPaymentRepository(jdbc, json), own, payments, audit);
     }
 
     @Bean

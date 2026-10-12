@@ -1033,6 +1033,8 @@ services:
       # Partner #20 mock (ICD-03 draft; infra/local/mocks/payment-gateway); callback key is the secret file below.
       ITMS_PAYMENTS_GATEWAY_URL: http://payment-gateway-mock:8080
       ITMS_PAYMENTS_CALLBACK_BASE_URL: http://localhost:9080
+      # A customer's own items (ADR-067 d): their file is looked up with their own token.
+      ITMS_TRAFFIC_FILES_URL: http://traffic-file-service:8080
       # Short-lived login from OpenBao (ADR-039), files under /run/secrets/spring/datasource; owner role on connect.
       SPRING_DATASOURCE_HIKARI_CONNECTIONINITSQL: SET ROLE itms_owner
       ITMS_OIDC_ISSUER: http://localhost:8180/realms/itms

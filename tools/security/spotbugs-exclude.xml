@@ -48,6 +48,7 @@
       <And><Class name="gov.itms.appointment.infrastructure.AppointmentServiceConfiguration$ReminderJob"/><Field name="appointments"/></And>
       <And><Class name="gov.itms.audit.application.AuditService"/><Field name="store"/></And>
       <And><Class name="gov.itms.payment.application.PaymentService"/><Field name="repo"/></And>
+      <And><Class name="gov.itms.payment.application.CustomerPayments"/><Field name="~repo|payments"/></And>
       <And><Class name="gov.itms.payment.infrastructure.PaymentServiceConfiguration$PendingJob"/><Field name="payments"/></And>
       <And><Class name="gov.itms.violation.application.ViolationService"/><Field name="repo"/></And>
       <And><Class name="gov.itms.licensing.application.LicenceClassService"/><Field name="classes"/></And>

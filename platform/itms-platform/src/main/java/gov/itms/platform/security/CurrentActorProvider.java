@@ -5,6 +5,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
@@ -40,6 +41,20 @@ public class CurrentActorProvider {
             correlationId = cid == null ? null : cid.toString();
         }
         return new CurrentActor(jwt.getSubject(), username, roles, channel, ip, correlationId);
+    }
+
+    /**
+     * The signed-in customer (ADR-067 d): {@code subject_type=CUSTOMER} and a {@code national_id} in the token. Any
+     * other caller, staff included, is refused with 403, so a {@code /v1/me/...} endpoint never serves a staff token
+     * or a customer token without a national id.
+     */
+    public CurrentCustomer customer() {
+        var jwt = token().getToken();
+        String nationalId = jwt.getClaimAsString(SubjectType.NATIONAL_ID_CLAIM);
+        if (!SubjectType.isCustomer(jwt) || nationalId == null || nationalId.isBlank()) {
+            throw new AccessDeniedException("Only a signed-in customer with a national id may use this endpoint");
+        }
+        return new CurrentCustomer(jwt.getSubject(), nationalId.strip());
     }
 
     /** Grants of the current subject (CC-001). Empty if the request was not authorised through ITMS. */

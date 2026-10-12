@@ -1370,7 +1370,9 @@ class IamApiIT {
         assertThat(r.getResponse().getStatus()).isEqualTo(200);
         assertThat(body(r).get("grants")).singleElement().satisfies(g -> {
             assertThat(g.get("roleCode").asString()).isEqualTo("CUSTOMER");
-            assertThat(g.get("permissions")).isEmpty();
+            assertThat(g.get("permissions")).extracting(p -> p.asString()).containsExactlyInAnyOrder(
+                    "customer.trafficfile.read", "customer.violation.read", "customer.transaction.read",
+                    "customer.payment.make");
             assertThat(g.get("scopes").get("regions")).isEmpty();
             assertThat(g.get("scopes").get("centres")).isEmpty();
             assertThat(g.get("scopes").get("modules")).isEmpty();

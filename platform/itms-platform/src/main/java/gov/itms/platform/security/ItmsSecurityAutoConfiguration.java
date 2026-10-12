@@ -62,7 +62,8 @@ public class ItmsSecurityAutoConfiguration {
                     a.anyRequest().authenticated();
                 })
                 .oauth2ResourceServer(o -> o.jwt(j -> j.jwtAuthenticationConverter(converter)))
-                .addFilterAfter(new AuthorisationFilter(resolver, messages, json), BearerTokenAuthenticationFilter.class);
+                .addFilterAfter(new AuthorisationFilter(resolver, messages, json), BearerTokenAuthenticationFilter.class)
+                .addFilterAfter(new StepUpFilter(properties.stepUp(), messages, json), AuthorisationFilter.class);
         return http.build();
     }
 

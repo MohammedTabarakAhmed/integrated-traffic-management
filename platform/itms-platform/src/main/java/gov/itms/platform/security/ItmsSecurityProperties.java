@@ -19,6 +19,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param iam                 iam-service client settings ({@code iam} mode)
  * @param publicPaths         GET paths (Ant patterns) open without a token, for deliberately public pages such as
  *                            certificate verification (CC-083); empty by default, every other request needs a token
+ * @param stepUp              customer step-up on sensitive services (SEC-002, ADR-067)
  */
 @ConfigurationProperties("itms.security")
 public record ItmsSecurityProperties(
@@ -29,15 +30,47 @@ public record ItmsSecurityProperties(
         @DefaultValue("permissions") String permissionsClaim,
         @DefaultValue("roles") String rolesClaim,
         @DefaultValue Iam iam,
-        List<String> publicPaths) {
+        List<String> publicPaths,
+        @DefaultValue StepUp stepUp) {
 
     public enum AuthorisationSource { IAM, TOKEN_CLAIMS }
 
     public ItmsSecurityProperties {
         publicPaths = publicPaths == null ? List.of() : List.copyOf(publicPaths);
+        stepUp = stepUp == null ? new StepUp(List.of("otp"), List.of()) : stepUp;
         for (String p : publicPaths) {
             if (p == null || !p.startsWith("/v1/") || p.contains("..")) {
                 throw new IllegalArgumentException("itms.security.public-paths must be /v1/ paths (SEC-001)");
+            }
+        }
+    }
+
+    /**
+     * Step-up for customers on sensitive services (SEC-002, Q-007, ADR-067 c). A customer token reaching one of
+     * {@code paths} must carry an {@code acr} in {@code acrValues}, otherwise the request ends with 401
+     * {@code insufficient_user_authentication} (RFC 9470). Staff are not affected: their MFA is enforced at sign-in.
+     *
+     * @param acrValues accepted {@code acr} values, at least one (default {@code otp})
+     * @param paths     {@code METHOD /v1/pattern} entries (Spring path patterns); empty by default
+     */
+    public record StepUp(@DefaultValue("otp") List<String> acrValues, List<String> paths) {
+
+        private static final java.util.regex.Pattern ACR = java.util.regex.Pattern.compile("^[A-Za-z0-9_.:-]{1,64}$");
+        private static final java.util.regex.Pattern PATH =
+                java.util.regex.Pattern.compile("^(GET|POST|PUT|PATCH|DELETE) /v1/[A-Za-z0-9_{}*/.-]*$");
+
+        public StepUp {
+            acrValues = acrValues == null ? List.of() : List.copyOf(acrValues);
+            paths = paths == null ? List.of() : List.copyOf(paths);
+            if (acrValues.isEmpty() || acrValues.stream().anyMatch(a -> a == null || !ACR.matcher(a).matches())) {
+                throw new IllegalArgumentException("itms.security.step-up.acr-values needs 1+ values of "
+                        + "letters, digits and _.:- (at most 64 characters)");
+            }
+            for (String p : paths) {
+                if (p == null || !PATH.matcher(p).matches() || p.contains("..")) {
+                    throw new IllegalArgumentException("itms.security.step-up.paths entries are 'METHOD /v1/pattern', "
+                            + "not " + p);
+                }
             }
         }
     }

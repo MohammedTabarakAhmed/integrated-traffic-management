@@ -1167,13 +1167,13 @@ lic_sql() { db_sql licensing-postgres licensing "$LIC_DB_USER" "$1"; }
 echo "   $lf_number ($holder): theory 30/30, road 95 by the committee head; PASSED and received by licensing-service"
 
 echo "53. Customer sign-in (ADR-067; Q-050, CH-001): a customer signs in to itms-portal only through the mock national digital ID; the token says who, never what they may do"
-# Browser sign-in with PKCE through both realms, as a portal would; prints the itms access token.
+# Browser sign-in with PKCE through both realms, as a portal would; prints the itms access token. With a third
+# argument the signed-in customer then asks again for that acr in the same session (step-up, SEC-002): a one-time
+# password is enrolled on first use from the authenticator secret on the page (TOTP, RFC 6238).
 customer_token() {
-  "$PY" - "$1" "$2" <<'PYEOF'
-import base64, hashlib, html, http.cookiejar, json, re, secrets, sys, urllib.parse, urllib.request
+  "$PY" - "$1" "$2" "${3:-}" <<'PYEOF'
+import base64, hashlib, hmac, html, http.cookiejar, json, re, secrets, struct, sys, time, urllib.parse, urllib.request
 KC, CB = "http://localhost:8180", "http://localhost:5173/callback"
-verifier = secrets.token_urlsafe(48)
-challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
 class Callback(Exception):
     pass
 class StopAtCallback(urllib.request.HTTPRedirectHandler):
@@ -1186,26 +1186,44 @@ class LocalCookies(http.cookiejar.DefaultCookiePolicy):
         return True
 browser = urllib.request.build_opener(
     urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar(LocalCookies())), StopAtCallback())
-query = urllib.parse.urlencode({"client_id": "itms-portal", "response_type": "code", "scope": "openid",
-                                "redirect_uri": CB, "state": secrets.token_hex(8), "code_challenge": challenge,
-                                "code_challenge_method": "S256"})
-page = browser.open(f"{KC}/realms/itms/protocol/openid-connect/auth?{query}").read().decode()
-form = re.search(r'<form[^>]*id="kc-form-login"[^>]*>', page)
-action = form and re.search(r'action="([^"]+)"', form.group(0))
-if not action or "/realms/national-id-mock/" not in html.unescape(action.group(1)):
-    sys.exit("FAIL: itms-portal did not go straight to the national digital ID login")
-try:
-    page = browser.open(html.unescape(action.group(1)),
-                        urllib.parse.urlencode({"username": sys.argv[1], "password": sys.argv[2]}).encode()).read().decode()
-    title = re.search(r"<title>(.*?)</title>", page, re.S)
-    sys.exit("FAIL: sign-in stopped on a page: " + (title.group(1).strip() if title else page[:200]))
-except Callback as done:
-    callback = str(done)
-code = urllib.parse.parse_qs(urllib.parse.urlparse(callback).query)["code"][0]
-token = json.load(urllib.request.urlopen(f"{KC}/realms/itms/protocol/openid-connect/token", urllib.parse.urlencode(
-    {"grant_type": "authorization_code", "client_id": "itms-portal", "code": code, "redirect_uri": CB,
-     "code_verifier": verifier}).encode()))
-print(token["access_token"])
+def totp(secret):
+    mac = hmac.new(secret.encode(), struct.pack(">Q", int(time.time()) // 30), hashlib.sha1).digest()
+    return "%06d" % ((struct.unpack(">I", mac[(mac[-1] & 15):(mac[-1] & 15) + 4])[0] & 0x7FFFFFFF) % 1000000)
+def post(page, fields):
+    action = re.search(r'<form[^>]*action="([^"]+)"', page)
+    return browser.open(html.unescape(action.group(1)), urllib.parse.urlencode(fields).encode()).read().decode()
+def sign_in(acr):
+    verifier = secrets.token_urlsafe(48)
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+    params = {"client_id": "itms-portal", "response_type": "code", "scope": "openid", "redirect_uri": CB,
+              "state": secrets.token_hex(8), "code_challenge": challenge, "code_challenge_method": "S256"}
+    if acr:
+        params["acr_values"] = acr
+    try:
+        page = browser.open(f"{KC}/realms/itms/protocol/openid-connect/auth?{urllib.parse.urlencode(params)}").read().decode()
+        for _ in range(4):
+            form = re.search(r'<form[^>]*id="kc-form-login"[^>]*>', page)
+            login = form and re.search(r'action="([^"]+)"', form.group(0))
+            secret = re.search(r'name="totpSecret" value="([^"]+)"', page)
+            if login:
+                if "/realms/national-id-mock/" not in html.unescape(login.group(1)):
+                    sys.exit("FAIL: itms-portal did not go straight to the national digital ID login")
+                page = post(page, {"username": sys.argv[1], "password": sys.argv[2]})
+            elif secret and acr:  # first step-up: enrol an authenticator
+                value = html.unescape(secret.group(1))
+                page = post(page, {"totp": totp(value), "totpSecret": value, "userLabel": "smoke"})
+            else:
+                title = re.search(r"<title>(.*?)</title>", page, re.S)
+                sys.exit("FAIL: sign-in stopped on a page: " + (title.group(1).strip() if title else page[:200])
+                         + " " + str(re.findall(r'(?:<form[^>]*id|<input[^>]*name)="([^"]+)"', page)))
+        sys.exit("FAIL: sign-in did not finish")
+    except Callback as done:
+        code = urllib.parse.parse_qs(urllib.parse.urlparse(str(done)).query)["code"][0]
+    return json.load(urllib.request.urlopen(f"{KC}/realms/itms/protocol/openid-connect/token", urllib.parse.urlencode(
+        {"grant_type": "authorization_code", "client_id": "itms-portal", "code": code, "redirect_uri": CB,
+         "code_verifier": verifier}).encode()))["access_token"]
+token = sign_in(None)
+print(sign_in(sys.argv[3]) if sys.argv[3] else token)
 PYEOF
 }
 claims_of() { printf '%s' "$1" | "$PY" -c "import base64,json,sys; p=sys.stdin.read().split('.')[1]; print(json.dumps(json.loads(base64.urlsafe_b64decode(p+'='*(-len(p)%4)))))"; }
@@ -1216,6 +1234,7 @@ import json,sys
 c=json.load(sys.stdin); aud=c['aud'] if isinstance(c['aud'],list) else [c['aud']]
 bad=[k for k,ok in {'subject_type':c.get('subject_type')=='CUSTOMER','national_id':c.get('national_id')=='784199012345671',
   'preferred_username':c.get('preferred_username')=='784199012345671','azp':c.get('azp')=='itms-portal','aud':'itms-api' in aud,
+  'acr national-id':c.get('acr')=='national-id',
   'no permissions':'permissions' not in c and 'roles' not in c}.items() if not ok]
 sys.exit('FAIL: customer token claims '+','.join(bad)+': '+json.dumps(c)) if bad else None" || exit 1
 again=$(claims_of "$(customer_token 784199012345671 "$DEV_CUSTOMER_PASSWORD")" | json_field "['sub']")
@@ -1233,6 +1252,20 @@ import json,sys
 g=json.load(sys.stdin)['grants']
 ok=len(g)==1 and g[0]['roleCode']=='CUSTOMER' and not any(g[0]['scopes'].values()) and all(p.startswith('customer.') for p in g[0]['permissions'])
 sys.exit(None if ok else 'FAIL: ADR-067 b customer grants '+json.dumps(g))" || exit 1
-echo "   784199012345671 signed in through the national digital ID: subject_type CUSTOMER, no grants in the token, only the CUSTOMER grant without scopes from iam, staff endpoint 403"
+# Step-up (SEC-002, Q-007, ADR-067 c): asked for acr otp, the national digital ID has the customer enrol a one-time
+# password on first use. The second mock person's authenticator is removed first, so every run enrols afresh.
+KC_ADMIN_TOKEN=$(curl -sf http://localhost:8180/realms/master/protocol/openid-connect/token -d grant_type=password \
+  -d client_id=admin-cli --data-urlencode "username=$KC_ADMIN_USER" --data-urlencode "password=$KC_ADMIN_PASSWORD" \
+  | json_field "['access_token']")
+kc_admin() { curl -sf -H "Authorization: Bearer $KC_ADMIN_TOKEN" "$@"; }
+for uid in $(kc_admin "http://localhost:8180/admin/realms/national-id-mock/users?username=784198812345672&exact=true" | "$PY" -c "import json,sys; print(' '.join(u['id'] for u in json.load(sys.stdin)))"); do
+  for cid in $(kc_admin "http://localhost:8180/admin/realms/national-id-mock/users/$uid/credentials" | "$PY" -c "import json,sys; print(' '.join(c['id'] for c in json.load(sys.stdin) if c['type']=='otp'))"); do
+    kc_admin -X DELETE "http://localhost:8180/admin/realms/national-id-mock/users/$uid/credentials/$cid"
+  done
+done
+acr=$(claims_of "$(customer_token 784198812345672 "$DEV_CUSTOMER_PASSWORD" otp)" | json_field "['acr']")
+[[ "$acr" == otp ]] || { echo "FAIL: SEC-002 step-up token has acr $acr"; exit 1; }
+echo "   784199012345671 signed in through the national digital ID: subject_type CUSTOMER, acr national-id, no grants in the token, only the CUSTOMER grant without scopes from iam, staff endpoint 403"
+echo "   784198812345672 stepped up with a one-time password (enrolled on first use): acr otp"
 
 echo "SMOKE OK"

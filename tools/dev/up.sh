@@ -242,6 +242,66 @@ else
 fi
 "${KC[@]}" update clients/7d0c1a3e-5b2f-4c1d-9e8a-100000000020 -r itms \
   -s "authenticationFlowBindingOverrides.browser=$(kc_flow_id customer-browser)"
+kc_exec_id() { # realm flow match-field value -> execution id in that flow
+  "${KC[@]}" get "authentication/flows/$2/executions" -r "$1" --fields id,providerId,displayName --format csv \
+    --noquotes | tr -d '\r' | awk -F, -v f="$3" -v v="$4" '(f == "provider" && $2 == v) || (f == "name" && $3 == v) {print $1; exit}'
+}
+kc_require() { # realm flow execution-id requirement
+  "${KC[@]}" update "authentication/flows/$2/executions" -r "$1" -b "{\"id\":\"$3\",\"requirement\":\"$4\"}"
+}
+kc_add() { # realm flow provider requirement [config-alias config-json]
+  "${KC[@]}" create "authentication/flows/$2/executions/execution" -r "$1" -s provider="$3" >/dev/null
+  local id; id=$(kc_exec_id "$1" "$2" provider "$3"); kc_require "$1" "$2" "$id" "$4"
+  [[ -z "${5:-}" ]] || "${KC[@]}" create "authentication/executions/$id/config" -r "$1" \
+    -b "{\"alias\":\"$5\",\"config\":$6}" >/dev/null
+}
+kc_subflow() { # realm parent alias requirement
+  "${KC[@]}" create "authentication/flows/$2/executions/flow" -r "$1" -s alias="$3" -s type=basic-flow \
+    -s provider=registration-page-form >/dev/null
+  kc_require "$1" "$2" "$(kc_exec_id "$1" "$2" name "$3")" "$4"
+}
+# Step-up (SEC-002, Q-007): the national digital ID does the second factor. Its sign-in has two levels, password
+# (acr national-id) and a one-time password enrolled on first use (acr otp, valid 5 minutes); ITMS forwards the
+# portal's acr_values to it and passes the acr it asserts into the customer's token.
+if ! "${KC[@]}" get authentication/flows -r national-id-mock --fields alias --format csv --noquotes | tr -d '\r' \
+    | grep -qx national-id-sign-in; then
+  "${KC[@]}" create authentication/flows -r national-id-mock -s alias=national-id-sign-in -s providerId=basic-flow \
+    -s topLevel=true -s builtIn=false -s "description=ADR-067 c" >/dev/null
+  kc_add national-id-mock national-id-sign-in auth-cookie ALTERNATIVE
+  kc_subflow national-id-mock national-id-sign-in national-id-levels ALTERNATIVE
+  kc_subflow national-id-mock national-id-levels national-id-level-1 CONDITIONAL
+  kc_add national-id-mock national-id-level-1 conditional-level-of-authentication REQUIRED national-id-loa-1 \
+    '{"loa-condition-level":"1","loa-max-age":"36000"}'
+  kc_add national-id-mock national-id-level-1 auth-username-password-form REQUIRED
+  kc_subflow national-id-mock national-id-levels national-id-level-2 CONDITIONAL
+  kc_add national-id-mock national-id-level-2 conditional-level-of-authentication REQUIRED national-id-loa-2 \
+    '{"loa-condition-level":"2","loa-max-age":"300"}'
+  kc_add national-id-mock national-id-level-2 auth-otp-form REQUIRED
+  "${KC[@]}" update realms/national-id-mock -s browserFlow=national-id-sign-in
+fi
+"${KC[@]}" update clients/8e1d2b4f-6c3a-4d2e-9f0b-200000000001 -r national-id-mock -f - <<'ACR'
+{"attributes": {"acr.loa.map": "{\"national-id\":1,\"otp\":2}", "default.acr.values": "national-id"}}
+ACR
+"${KC[@]}" update identity-provider/instances/national-id -r itms -s config.forwardParameters=acr_values
+if [[ -z "$("${KC[@]}" get identity-provider/instances/national-id/mappers -r itms --fields name --format csv \
+    --noquotes | tr -d '\r' | grep -x 'national id acr')" ]]; then
+  "${KC[@]}" create identity-provider/instances/national-id/mappers -r itms -b '{"name": "national id acr",
+    "identityProviderAlias": "national-id", "identityProviderMapper": "oidc-user-session-note-idp-mapper",
+    "config": {"claims": "[{\"key\":\"acr\",\"value\":\".*\"}]", "are.claim.values.regex": "true",
+    "syncMode": "FORCE"}}' >/dev/null
+fi
+# itms-portal tokens carry the national ID's acr, not the itms realm's own: the built-in acr scope is removed.
+PORTAL=7d0c1a3e-5b2f-4c1d-9e8a-100000000020
+acr_scope=$("${KC[@]}" get "clients/$PORTAL/default-client-scopes" -r itms --fields id,name --format csv --noquotes \
+  | tr -d '\r' | awk -F, '$2 == "acr" {print $1}')
+[[ -z "$acr_scope" ]] || "${KC[@]}" delete "clients/$PORTAL/default-client-scopes/$acr_scope" -r itms
+if [[ -z "$("${KC[@]}" get "clients/$PORTAL/protocol-mappers/models" -r itms --fields name --format csv --noquotes \
+    | tr -d '\r' | grep -x 'national id acr')" ]]; then
+  "${KC[@]}" create "clients/$PORTAL/protocol-mappers/models" -r itms -b '{"name": "national id acr",
+    "protocol": "openid-connect", "protocolMapper": "oidc-usersessionmodel-note-mapper", "config": {
+    "user.session.note": "acr", "claim.name": "acr", "jsonType.label": "String", "access.token.claim": "true",
+    "id.token.claim": "true", "introspection.token.claim": "true"}}' >/dev/null
+fi
 
 echo "== Granting development roles through iam-service (dev.iam-admin is the bootstrap administrator)"
 IAM=http://localhost:8082

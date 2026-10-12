@@ -19,6 +19,7 @@
       <And><Class name="gov.itms.platform.idempotency.IdempotencyFilter"/><Field name="~json|keys"/></And>
       <And><Class name="gov.itms.platform.idempotency.IdempotencyKeys"/><Field name="store"/></And>
       <And><Class name="gov.itms.platform.security.AuthorisationFilter"/><Field name="json"/></And>
+      <And><Class name="gov.itms.platform.security.StepUpFilter"/><Field name="json"/></And>
       <And><Class name="gov.itms.hold.application.EligibilityService"/><Field name="holds"/></And>
       <And><Class name="gov.itms.hold.application.HoldService"/><Field name="holds"/></And>
       <And><Class name="gov.itms.iam.application.AccessReviewService"/><Field name="~reviews|assignments"/></And>
@@ -155,6 +156,7 @@
     <Or>
       <And><Class name="gov.itms.platform.idempotency.IdempotencyFilter"/><Method name="writeProblem"/></And>
       <And><Class name="gov.itms.platform.security.AuthorisationFilter"/><Method name="writeUnavailable"/></And>
+      <And><Class name="gov.itms.platform.security.StepUpFilter"/><Method name="writeStepUp"/></And>
     </Or>
   </Match>
 

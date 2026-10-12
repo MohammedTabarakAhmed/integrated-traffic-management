@@ -608,6 +608,55 @@ paths:
         '422': { $ref: '#/components/responses/Problem' }
         '503': { $ref: '#/components/responses/Problem' }
 
+  /v1/licences/{licenceId}/class-additions:
+    post:
+      tags: [Licences]
+      operationId: requestClassAddition
+      summary: Add the classes of passed examination files to a licence in force (DL-053)
+      description: |
+        The licence must be ACTIVE (409 `LICENCE_NOT_IN_FORCE`); every transfer open, of the holder, one per class
+        (422 `LICENCE_CLASS_DUPLICATE`); no class already on the licence (409 `CLASS_ALREADY_HELD`); no other class
+        addition waiting (409 `REQUEST_OPEN`); a rule in force for the licence's customer category; no hold blocks
+        service `LIC_ADD_CLASS` (422 `ELIGIBILITY_BLOCKED`). The fee is quoted (quantity `CLASSES`) and the payable
+        registered; on payment the classes join the licence with today's issue date (automatic-only as for a new
+        licence; a suspended licence takes them suspended), the licence's validity is unchanged and
+        `itms.licence.class-added` is published.
+      x-itms-permission: licensing.licence.issue
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/LicenceId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [transferIds]
+              properties:
+                transferIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 10
+                  uniqueItems: true
+                  items: { type: string, format: uuid }
+      responses:
+        '201':
+          description: Request opened; waits for payment
+          headers:
+            Idempotent-Replayed: { $ref: '#/components/headers/IdempotentReplayed' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LicenceRequest' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+
   /v1/licence-requests/{requestId}:
     get:
       tags: [Licences]
@@ -1858,7 +1907,7 @@ components:
         reason: { type: string, minLength: 3, maxLength: 500 }
     RequestKind:
       type: string
-      enum: [ISSUE, RENEWAL, REPLACEMENT, CHANGE, NOC, EXCHANGE, TEMP_PERMIT, IDP]
+      enum: [ISSUE, RENEWAL, REPLACEMENT, CHANGE, NOC, EXCHANGE, TEMP_PERMIT, IDP, ADD_CLASS]
     LicenceRequest:
       type: object
       additionalProperties: false

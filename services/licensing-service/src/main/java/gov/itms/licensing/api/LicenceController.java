@@ -75,6 +75,18 @@ class LicenceController {
         return ResponseEntity.created(URI.create("/v1/licence-requests/" + r.id())).body(RequestDto.of(r));
     }
 
+    /** Adds the classes of passed examination files to a licence in force (DL-053). */
+    record ClassAdditionRequest(@jakarta.validation.constraints.NotNull
+                                @jakarta.validation.constraints.Size(min = 1, max = 10) List<UUID> transferIds) {
+    }
+
+    @PostMapping("/v1/licences/{licenceId}/class-additions")
+    @PreAuthorize("hasAuthority('licensing.licence.issue')")
+    ResponseEntity<RequestDto> addClass(@PathVariable UUID licenceId, @Valid @RequestBody ClassAdditionRequest body) {
+        LicenceRequest r = licences.requestClassAddition(licenceId, body.transferIds(), callers.current());
+        return ResponseEntity.created(URI.create("/v1/licence-requests/" + r.id())).body(RequestDto.of(r));
+    }
+
     @GetMapping("/v1/licence-requests/{requestId}")
     @PreAuthorize("hasAuthority('licensing.licence.read')")
     RequestDto request(@PathVariable UUID requestId) {

@@ -672,6 +672,50 @@ class LicensingApiIT {
         return new String[] {file, paid(request).get("licenceId").asString(), classCode};
     }
 
+    @Test
+    @Tag("DL-053")
+    @DisplayName("DL-053: a class passed later joins the licence on payment; a held class, a second waiting request and "
+            + "someone else's transfer are refused")
+    void classAddition() throws Exception {
+        String newClass = licensable("IT_ADD", "LZ");
+        String[] held = issued("IT_ADD", 120);
+        String file = held[0];
+        String licence = held[1];
+        String transfer = transferred(file, newClass, "AUTOMATIC", "IT_ADD");
+
+        String sameClass = transferred(file + "9", held[2], "MANUAL", "IT_ADD");
+        assertThat(code(postAs("/v1/licences/" + licence + "/class-additions", Map.of("transferIds",
+                List.of(sameClass)), officer()))).as("another person's transfer").isEqualTo("TRANSFER_OTHER_PERSON");
+        String again = expect(postAs("/v1/examination-transfers", Map.of("examinationFileRef", "EX-" + file
+                + "-AGAIN", "trafficFileNumber", file, "classCode", held[2], "gearbox", "MANUAL", "passedOn",
+                TODAY.toString(), "region", "IT_ADD"), sender()), 201).get("id").asString();
+        assertThat(code(postAs("/v1/licences/" + licence + "/class-additions", Map.of("transferIds", List.of(again)),
+                officer()))).isEqualTo("CLASS_ALREADY_HELD");
+
+        JsonNode request = expect(postAs("/v1/licences/" + licence + "/class-additions", Map.of("transferIds",
+                List.of(transfer)), officer()), 201);
+        assertThat(request.get("kind").asString()).isEqualTo("ADD_CLASS");
+        assertThat(request.get("status").asString()).isEqualTo("AWAITING_PAYMENT");
+        assertThat(PARTNERS.quotes.getLast().get("serviceCode").asString()).isEqualTo("LIC_ADD_CLASS");
+        assertThat(code(postAs("/v1/licences/" + licence + "/class-additions", Map.of("transferIds",
+                List.of(transfer)), officer()))).isEqualTo("REQUEST_OPEN");
+
+        JsonNode done = paid(request);
+        assertThat(done.get("status").asString()).isEqualTo("COMPLETED");
+        JsonNode after = body(getAs("/v1/licences/" + licence, officer()));
+        assertThat(after.get("classes")).hasSize(2);
+        JsonNode added = after.get("classes").get(0).get("classCode").asString().equals(newClass)
+                ? after.get("classes").get(0) : after.get("classes").get(1);
+        assertThat(added.get("classCode").asString()).isEqualTo(newClass);
+        assertThat(added.get("issuedOn").asString()).isEqualTo(TODAY.toString());
+        assertThat(body(getAs("/v1/examination-transfers/" + transfer, officer())).get("status").asString())
+                .isEqualTo("USED");
+        assertThat(db.sql("select count(*) from event_outbox where event_type = 'itms.licence.class-added'")
+                .query(Long.class).single()).isGreaterThanOrEqualTo(1);
+        assertThat(db.sql("select count(*) from audit_outbox where action = 'LICENCE_CLASS_ADDED'")
+                .query(Long.class).single()).isGreaterThanOrEqualTo(1);
+    }
+
     private void eyeTest(String file, String classCode, boolean lenses) throws Exception {
         expect(postAs("/v1/eye-tests", Map.of("trafficFileNumber", file, "centreCode", "OPT_1", "reference",
                 "ET-" + newFile(), "testedOn", TODAY.toString(), "result", "PASS", "correctiveLenses", lenses,

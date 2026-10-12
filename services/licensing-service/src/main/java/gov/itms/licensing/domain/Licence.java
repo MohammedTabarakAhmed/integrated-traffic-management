@@ -216,6 +216,23 @@ public final class Licence {
         }
     }
 
+    /**
+     * DL-053: a class passed later joins the licence with today's issue date; a suspended licence takes it suspended.
+     * The licence's own validity does not change.
+     */
+    public void addClass(LicenceClass added) {
+        if (status != Status.ACTIVE && status != Status.SUSPENDED) {
+            throw DomainException.conflict("LICENCE_NOT_IN_FORCE", "a class can be added only to a licence in force",
+                    List.of("DL-053"));
+        }
+        if (classes.stream().anyMatch(c -> c.classCode().equals(added.classCode())
+                && c.status() != ClassStatus.CANCELLED)) {
+            throw DomainException.conflict("CLASS_ALREADY_HELD", "the licence already has class " + added.classCode(),
+                    List.of("DL-053"), added.classCode());
+        }
+        classes.add(status == Status.SUSPENDED ? added.withStatus(ClassStatus.SUSPENDED) : added);
+    }
+
     /** The codes of the classes in force on the licence. */
     public List<String> activeClassCodes() {
         return classes.stream().filter(c -> c.status() == ClassStatus.ACTIVE).map(LicenceClass::classCode).toList();

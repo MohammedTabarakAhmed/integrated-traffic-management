@@ -213,6 +213,79 @@ public class LicenceService {
     }
 
     /**
+     * DL-053: asks to add the classes of passed examination files to the holder's licence in force. The same checks
+     * as a new licence (transfers of this person, class rules for the licence's customer category, no holds, fee) and
+     * none of the classes may already be on the licence; the classes join it when the fee is paid.
+     */
+    @Transactional
+    public LicenceRequest requestClassAddition(UUID licenceId, List<UUID> transferIds, Caller caller) {
+        Channel channel = LicenceClassService.channelOf(caller);
+        Licence l = licenceInRegion(licenceId, ISSUE, caller, false);
+        if (transferIds.isEmpty() || transferIds.size() > MAX_TRANSFERS
+                || new HashSet<>(transferIds).size() != transferIds.size()) {
+            throw DomainException.validation("LIST_SIZE_INVALID", "transferIds needs 1 to " + MAX_TRANSFERS
+                    + " different entries", List.of("DL-053"), "transferIds", 1, MAX_TRANSFERS);
+        }
+        repo.lockHolder(l.trafficFileNumber());
+        if (l.status() != Licence.Status.ACTIVE) {
+            throw DomainException.conflict("LICENCE_NOT_IN_FORCE", "a class can be added only to an active licence",
+                    List.of("DL-053"));
+        }
+        List<ExaminationTransfer> transfers = openTransfers(l.trafficFileNumber(), transferIds);
+        for (ExaminationTransfer t : transfers) {
+            if (l.classes().stream().anyMatch(c -> c.classCode().equals(t.spec().classCode())
+                    && c.status() != Licence.ClassStatus.CANCELLED)) {
+                throw DomainException.conflict("CLASS_ALREADY_HELD", "the licence already has class "
+                        + t.spec().classCode(), List.of("DL-053"), t.spec().classCode());
+            }
+        }
+        if (!repo.openRequests(l.trafficFileNumber(), LicenceRequest.Kind.ADD_CLASS).isEmpty()) {
+            throw DomainException.conflict("REQUEST_OPEN", "a class addition of this person waits for payment",
+                    List.of("DL-053"));
+        }
+        LocalDate today = today();
+        terms(classCodes(transfers), l.customerCategory(), l.residencyExpiresOn(), today, today);
+        String serviceCode = rules.serviceCode(LicenceRequest.Kind.ADD_CLASS);
+        requireNoHolds(serviceCode, l.trafficFileNumber(), l.licenceNumber(), channel);
+        Ports.FeeQuotes.Quote quote = fees.quote(serviceCode, l.region(), l.customerCategory(), null,
+                Map.of("CLASSES", transfers.size()), null);
+        return open(LicenceRequest.Kind.ADD_CLASS, l.id(), l.trafficFileNumber(), l.region(), quote,
+                Map.of("customerCategory", l.customerCategory()), transferIds, channel, caller.actor().id(), null);
+    }
+
+    /** DL-053: the paid classes join the licence; history, audit and {@code itms.licence.class-added}. */
+    private Licence addClasses(LicenceRequest r, CurrentActor system) {
+        repo.lockHolder(r.trafficFileNumber());
+        Instant now = clock.instant();
+        LocalDate today = today();
+        Licence l = repo.licenceForUpdate(r.licenceId()).orElseThrow(() -> licenceNotFound(r.licenceId()));
+        List<String> added = new ArrayList<>();
+        List<ExaminationTransfer> used = new ArrayList<>();
+        for (UUID id : r.transferIds()) {
+            ExaminationTransfer t = repo.transferForUpdate(id).orElseThrow(() -> transferNotFound(id));
+            t.requireTransferred();
+            LicenceClassVersion v = classes.ruleOn(t.spec().classCode(), l.customerCategory(), today).version();
+            l.addClass(new Licence.LicenceClass(t.spec().classCode(), v.id(), today, Licence.ClassStatus.ACTIVE,
+                    automaticOnly(t, v), t.id()));
+            added.add(t.spec().classCode());
+            used.add(t);
+        }
+        repo.updateLicence(l);
+        for (ExaminationTransfer t : used) {
+            t.usedBy(l.id(), now);
+            repo.updateTransfer(t);
+        }
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("requestId", r.id().toString());
+        detail.put("addedClasses", added);
+        detail.put("classes", l.activeClassCodes());
+        repo.history(l.id(), "CLASS_ADDED", system.userId(), detail, now);
+        audit.recordAs(system, "LICENCE_CLASS_ADDED", ENTITY, l.licenceNumber(), null, detail, null);
+        events.recordAs(system, "itms.licence.class-added", l.licenceNumber(), detail);
+        return l;
+    }
+
+    /**
      * Completes a request whose payable payment-service confirmed ({@code itms.payment.confirmed}). Repeats and
      * other items are ignored, so a re-delivered event changes nothing (INT-005).
      *
@@ -231,6 +304,7 @@ public class LicenceService {
         LicenceRequest r = found.get();
         CurrentActor system = CurrentActor.system(SYSTEM);
         Licence licence = r.kind() == LicenceRequest.Kind.ISSUE ? issue(r, system)
+                : r.kind() == LicenceRequest.Kind.ADD_CLASS ? addClasses(r, system)
                 : handlers.stream().filter(h -> h.handles(r.kind())).findFirst()
                 .orElseThrow(() -> new IllegalStateException("no handler for " + r.kind())).completed(r, system);
         repo.updateRequest(r.completed(licence == null ? r.licenceId() : licence.id(), clock.instant()));

@@ -18,7 +18,7 @@ public record LicenceRequest(UUID id, Kind kind, Status status, UUID licenceId, 
                              Map<String, String> payload, List<UUID> transferIds, String requestedBy,
                              Channel channel, Instant requestedAt, Instant completedAt) {
 
-    public enum Kind { ISSUE, RENEWAL, REPLACEMENT, CHANGE, NOC, EXCHANGE, TEMP_PERMIT, IDP }
+    public enum Kind { ISSUE, RENEWAL, REPLACEMENT, CHANGE, NOC, EXCHANGE, TEMP_PERMIT, IDP, ADD_CLASS }
 
     public enum Status { AWAITING_PAYMENT, COMPLETED }
 

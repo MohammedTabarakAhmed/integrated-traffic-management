@@ -490,3 +490,28 @@ html[dir='rtl'] .drawer { animation-name: slide-rtl; }
 .btn.bell { position: relative; padding: 10px 12px; }
 .bell-n { position: absolute; top: -6px; inset-inline-end: -6px; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 10px;
   background: var(--red); color: #fff; font-size: 11px; font-weight: 800; display: grid; place-items: center; box-shadow: 0 0 12px rgba(244, 63, 94, 0.7); }
+
+/* ---------- my services ---------- */
+.row input[type='checkbox'] { width: 18px; height: 18px; accent-color: #6366f1; }
+.plan-box { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-top: 14px; padding: 14px; border-radius: 14px; border: 1px solid var(--line-strong); background: rgba(7, 11, 22, 0.4); }
+.plan-box input[type='range'] { accent-color: #8b5cf6; padding: 0; border: 0; background: none; }
+.plan-sum { display: flex; flex-direction: column; min-width: 140px; }
+.plan-sum b { font-size: 24px; }
+.plan-sum small { color: var(--muted); font-size: 12px; }
+.plan { margin-top: 10px; padding: 12px; border-radius: 12px; border: 1px solid var(--line); }
+.schedule { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 6px; margin-top: 10px; }
+.inst { display: flex; flex-direction: column; padding: 8px; border-radius: 10px; background: rgba(148, 163, 214, 0.06); font-size: 12.5px; }
+.inst small { color: var(--muted); font-size: 11px; }
+.inst.paid { background: rgba(52, 211, 153, 0.12); }
+.days { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 12px; }
+.day { font: inherit; display: flex; flex-direction: column; align-items: center; min-width: 58px; padding: 8px 6px; border-radius: 12px; cursor: pointer;
+  border: 1px solid var(--line-strong); background: rgba(7, 11, 22, 0.4); color: var(--muted); }
+.day b { font-size: 18px; color: var(--text); }
+.day.on { background: var(--grad); color: #050816; border-color: transparent; }
+.day.on b { color: #050816; }
+.slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+.slot { font: inherit; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 9px 6px; border-radius: 10px; cursor: pointer;
+  border: 1px solid rgba(34, 211, 238, 0.3); background: rgba(34, 211, 238, 0.06); color: var(--text); font-weight: 600; font-size: 13.5px; }
+.slot small { color: var(--muted); font-weight: 400; font-size: 11px; }
+.slot:hover:not(:disabled) { background: rgba(34, 211, 238, 0.15); }
+.slot:disabled { opacity: 0.35; cursor: default; }

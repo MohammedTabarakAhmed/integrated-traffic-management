@@ -69,7 +69,7 @@ export function Kpi({ icon, value, label, tone = '' }: { icon: ReactNode; value:
 
 export function StatusPill({ s }: { s: string }) {
   const { t } = useI18n()
-  const tone = ['PAID', 'COMPLETED', 'ACTIVE', 'DELIVERED', 'SENT'].includes(s)
+  const tone = ['PAID', 'COMPLETED', 'ACTIVE', 'DELIVERED', 'SENT', 'BOOKED', 'ATTENDED', 'ISSUED', 'APPROVED'].includes(s)
     ? 'ok' : ['OPEN', 'PENDING', 'SUBMITTED', 'IN_PROGRESS'].includes(s)
       ? 'warn' : ['CANCELLED', 'REJECTED', 'FAILED'].includes(s) ? 'bad' : 'info'
   return <span className={`pill ${tone}`}>{t.status[s] ?? s.replace(/_/g, ' ').toLowerCase()}</span>

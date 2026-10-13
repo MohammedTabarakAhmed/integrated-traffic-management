@@ -117,6 +117,22 @@ if [[ "$s" == 201 ]]; then
   echo "   DEMO_CARD $ref cancelled"
 fi
 
+echo "4b. My services: a large fine for an instalment plan (VF-071 minimum 5,000) and a service centre with slots (CC-090)"
+catalogue DEMO_OVERLOAD 600000 0 "حمولة زائدة على شاحنة" "Truck over the permitted load"
+open_overload=$(curl -sf -H "Authorization: Bearer $MAKER" "$VIO/v1/violations?fileNumber=$FILE&status=OPEN&limit=500" \
+  | "$PY" -c "import json,sys; print(sum(1 for v in json.load(sys.stdin)['items'] if v['catalogueCode']=='DEMO_OVERLOAD'))")
+if [[ "$open_overload" == 0 ]]; then
+  at=$("$PY" -c "import datetime; print((datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(minutes=3)).strftime('%Y-%m-%dT%H:%M:%SZ'))")
+  need "$(post "$MAKER" "$VIO/v1/violations" "{\"catalogueCode\":\"DEMO_OVERLOAD\",\"occurredAt\":\"$at\",\"region\":\"DXB\",\"location\":\"Jebel Ali Port, gate 4\",\"plate\":\"A 12345\",\"ownerFileNumber\":\"$FILE\",\"driverFileNumber\":\"$FILE\",\"source\":\"OFFICER\"}" FIELD)" 201
+  echo "   DEMO_OVERLOAD fine (AED 6,000, no points) recorded"
+fi
+APPT=http://localhost:8092
+hours=$("$PY" -c "import json; print(json.dumps({d: [{'opens': '08:00', 'closes': '20:00'}] for d in ['MONDAY','TUESDAY','WEDNESDAY','THURSDAY','FRIDAY','SATURDAY','SUNDAY']}))")
+need "$(post "$MAKER" "$APPT/v1/appointment-centres" "{\"code\":\"DEMO_DXB_HQ\",\"region\":\"DXB\",\"zone\":\"Asia/Dubai\",\"weeklyHours\":$hours,\"active\":true}")" 200
+need "$(post "$MAKER" "$APPT/v1/appointment-resources" '{"code":"DEMO_DXB_HQ_R1","centreCode":"DEMO_DXB_HQ","type":"EXAMINER","name":"Counter 1","services":["DEMO_EYE_TEST"],"capacity":2,"active":true}')" 200
+need "$(post "$MAKER" "$APPT/v1/appointment-service-settings" '{"serviceCode":"DEMO_EYE_TEST","slotMinutes":30,"horizonDays":30,"minLeadMinutes":60,"maxChanges":2,"noShowLimit":2,"noShowWindowDays":90,"penaltyDays":30}')" 200
+echo "   centre DEMO_DXB_HQ (08:00-20:00, 2 counters) offers DEMO_EYE_TEST in 30-minute slots"
+
 echo "5. Module tour set-up (configuration each module needs once; nothing is created twice)"
 FEES=http://localhost:8086; VEH=http://localhost:8095; PERMIT=http://localhost:8102; GEO=http://localhost:8103
 RENT=http://localhost:8101; XB=http://localhost:8106

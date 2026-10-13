@@ -6,6 +6,7 @@ import { useI18n } from './i18n'
 import ControlRoom from './pages/ControlRoom'
 import Dashboard from './pages/Dashboard'
 import Analytics from './pages/Analytics'
+import Assistant from './pages/Assistant'
 import Home from './pages/Home'
 import Modules from './pages/Modules'
 import Platform from './pages/Platform'
@@ -56,7 +57,7 @@ export default function App() {
       { r: 'home', label: t.nav.home, icon: <HomeIcon size={18} /> },
       { r: 'dashboard', label: t.nav.dashboard, icon: <LayoutDashboard size={18} /> },
       { r: 'settings', label: t.nav.settings, icon: <BellRing size={18} /> },
-      { r: 'assistant', label: t.nav.assistant, icon: <Bot size={18} />, soon: true },
+      { r: 'assistant', label: t.nav.assistant, icon: <Bot size={18} /> },
     ] },
     { sec: t.sections.staff, items: [
       { r: 'control', label: t.nav.control, icon: <Radar size={18} /> },
@@ -85,6 +86,7 @@ export default function App() {
   } else if (route === 'control') page = <ControlRoom />
   else if (route === 'modules') page = <Modules />
   else if (route === 'analytics') page = <Analytics />
+  else if (route === 'assistant') page = <Assistant go={go} />
   else if (route === 'platform') page = <Platform />
   else if (route === 'receipt') page = <Receipt go={go} />
   else page = <div className="card empty" style={{ padding: 60 }}>{t.comingSoon}</div>

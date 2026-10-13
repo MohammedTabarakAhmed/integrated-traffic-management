@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { BellRing, Bot, Boxes, Gauge as GaugeIcon, Globe, Home as HomeIcon, LayoutDashboard, LogOut, Radar, Server, ShieldCheck } from 'lucide-react'
+import { BellRing, Bot, Boxes, Braces, Gauge as GaugeIcon, Globe, Home as HomeIcon, LayoutDashboard, LogOut, Radar, Server, ShieldCheck } from 'lucide-react'
 import { ApiError, SignedOut } from './api'
 import { completeRedirect, load, signInCustomer, signOut } from './auth'
 import { useI18n } from './i18n'
@@ -108,6 +108,7 @@ export default function App() {
             ))}
           </div>
         ))}
+        <a className="nav-item" href="/api.html" target="_blank" rel="noreferrer"><Braces size={18} />{lang === 'ar' ? 'مستكشف الواجهات' : 'API explorer'}<span className="soon">↗</span></a>
         <div className="side-foot">
           <span className="pill ok" style={{ alignSelf: 'flex-start' }}><span className="dot live" /> local stack · gateway :9080</span>
         </div>

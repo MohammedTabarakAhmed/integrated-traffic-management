@@ -10,6 +10,7 @@ const keycloak = process.env.ITMS_KEYCLOAK ?? 'http://localhost:8180'
 
 export default defineConfig({
   plugins: [react(), mockGateway({ gateway, keycloak }), demoOps()],
+  build: { rollupOptions: { input: { main: 'index.html', api: 'api.html' } } },
   server: {
     port: 5173,
     strictPort: true,

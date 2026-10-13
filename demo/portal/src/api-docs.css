@@ -1,0 +1,17 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+
+body { margin: 0; background: #f6f7fb; font-family: 'Inter', system-ui, sans-serif; }
+.itms-bar { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding: 14px 24px;
+  background: linear-gradient(90deg, #070b16, #111a2e); color: #e8edf9; box-shadow: 0 6px 30px rgba(7, 11, 22, 0.35); }
+.itms-brand { display: flex; align-items: center; gap: 12px; color: inherit; text-decoration: none; }
+.itms-brand b { display: block; font-size: 17px; }
+.itms-brand small { color: #8b97b5; font-size: 12px; }
+.itms-mark { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; font-weight: 800; color: #050816;
+  background: linear-gradient(135deg, #22d3ee, #6366f1 55%, #a855f7); box-shadow: 0 0 24px rgba(99, 102, 241, 0.55); }
+.itms-who { margin-left: auto; font-size: 13px; padding: 6px 12px; border-radius: 999px; border: 1px solid rgba(251, 191, 36, 0.4); color: #fbbf24; }
+.itms-who.ok { border-color: rgba(52, 211, 153, 0.4); color: #34d399; }
+.swagger-ui .topbar { background: #111a2e; padding: 8px 0; }
+.swagger-ui .topbar .download-url-wrapper .select-label { color: #e8edf9; }
+.swagger-ui .topbar-wrapper img, .swagger-ui .topbar-wrapper svg { display: none; }
+.swagger-ui .topbar-wrapper .link::after { content: 'Service'; color: #e8edf9; font-weight: 700; }
+.swagger-ui .info .title { font-family: 'Inter', sans-serif; }

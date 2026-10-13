@@ -1,6 +1,8 @@
 // Operations view for the demo (Vite dev server only): probes every service port of the local stack and answers
 // /demo/health with up/down and latency, so the architecture map shows all services, including those Prometheus does
 // not scrape. Any HTTP answer (401 included) means the service is up; it only reads.
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import type { Plugin } from 'vite'
 
 export const SERVICES: [string, number, string][] = [
@@ -33,6 +35,19 @@ export function demoOps(): Plugin {
         const infra = await Promise.all(INFRA.map(async ([name, url]) => ({ name, ...(await probe(url)) })))
         res.setHeader('Content-Type', 'application/json')
         res.end(JSON.stringify({ at: new Date().toISOString(), services, infra }))
+      })
+      // OpenAPI specs for the API explorer (/api.html): read from the repository, only the services listed above.
+      server.middlewares.use('/specs/', (req, res, next) => {
+        const name = (req.url ?? '').replace(/^\//, '').replace(/\.yaml$/, '')
+        if (!SERVICES.some(([s]) => s === name)) return next()
+        try {
+          const file = resolve(__dirname, `../../services/${name}-service/src/main/resources/openapi/${name}-service.v1.yaml`)
+          res.setHeader('Content-Type', 'application/yaml; charset=utf-8')
+          res.end(readFileSync(file, 'utf8'))
+        } catch {
+          res.statusCode = 404
+          res.end()
+        }
       })
     },
   }

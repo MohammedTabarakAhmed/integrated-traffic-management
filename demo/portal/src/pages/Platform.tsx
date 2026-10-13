@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
-import { Boxes, Database, GitBranch, KeyRound, Network, Radio, ShieldCheck, Smartphone, Workflow } from 'lucide-react'
+import { Boxes, Braces, Database, GitBranch, KeyRound, Network, Radio, ShieldCheck, Smartphone, Workflow } from 'lucide-react'
 import { Card } from '../components'
 import { useI18n } from '../i18n'
 
@@ -134,7 +134,8 @@ export default function Platform() {
         ))}
       </div>
       <Card title={ar ? 'الهندسة والأمان' : 'Engineering & security built in'} icon={<ShieldCheck size={16} />} className="tools-card">
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>{TOOLS.map((t) => <span key={t} className="pill info">{t}</span>)}</div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>{TOOLS.map((t) => <span key={t} className="pill info">{t}</span>)}
+          <a className="btn primary" style={{ marginInlineStart: 'auto' }} href="/api.html" target="_blank" rel="noreferrer"><Braces size={16} /> {ar ? 'افتح مستكشف الواجهات (27 مواصفة)' : 'Open the API explorer (27 specs)'}</a></div>
       </Card>
     </>
   )

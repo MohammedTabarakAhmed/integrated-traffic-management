@@ -133,6 +133,15 @@ need "$(post "$MAKER" "$APPT/v1/appointment-resources" '{"code":"DEMO_DXB_HQ_R1"
 need "$(post "$MAKER" "$APPT/v1/appointment-service-settings" '{"serviceCode":"DEMO_EYE_TEST","slotMinutes":30,"horizonDays":30,"minLeadMinutes":60,"maxChanges":2,"noShowLimit":2,"noShowWindowDays":90,"penaltyDays":30}')" 200
 echo "   centre DEMO_DXB_HQ (08:00-20:00, 2 counters) offers DEMO_EYE_TEST in 30-minute slots"
 
+echo "4c. Back office: a review workflow with open cases in the case-officer queue (CC-060, CC-063)"
+WF=http://localhost:8088
+need "$(post "$MAKER" "$WF/v1/workflow-definitions" '{"code":"WF_DEMO_REVIEW","serviceCode":"DEMO_ADDRESS","nameNl":"مراجعة طلب","nameEn":"Application review","firstStep":"REVIEW","steps":[{"code":"REVIEW","kind":"REVIEW","nameNl":"مراجعة","nameEn":"Review","role":"CASE_OFFICER","assignment":"MANUAL","sla":"PT24H","escalationRole":"CASE_SUPERVISOR","outcomes":{"APPROVED":"END","REJECTED":"END"}}],"reason":"demo workflow"}')" 201 409
+open_cases=$(curl -sf -H "Authorization: Bearer $CHECKER" "$WF/v1/work-items?list=TEAM&limit=200" | "$PY" -c "import json,sys; print(sum(1 for i in json.load(sys.stdin)['items'] if i['status'] in ('OPEN','IN_PROGRESS','ASSIGNED')))" 2>/dev/null || echo 0)
+for n in $(seq "$((open_cases + 1))" 4); do
+  need "$(post "$MAKER" "$WF/v1/work-items" "{\"workflowCode\":\"WF_DEMO_REVIEW\",\"reference\":\"DEMO-CASE-$(date +%s)-$n\",\"serviceCode\":\"DEMO_ADDRESS\",\"region\":\"DXB\"}")" 201
+done
+echo "   WF_DEMO_REVIEW: at least 4 open cases for the case officer (dev.checker)"
+
 echo "5. Module tour set-up (configuration each module needs once; nothing is created twice)"
 FEES=http://localhost:8086; VEH=http://localhost:8095; PERMIT=http://localhost:8102; GEO=http://localhost:8103
 RENT=http://localhost:8101; XB=http://localhost:8106

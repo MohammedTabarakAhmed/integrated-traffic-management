@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Bell, BellRing, Bot, CalendarDays, Boxes, Braces, ClipboardCheck, Gauge as GaugeIcon, Globe, Home as HomeIcon, LayoutDashboard, LogOut, Radar, Server, ShieldCheck } from 'lucide-react'
+import { Bell, BellRing, Bot, Briefcase, CalendarDays, Boxes, Braces, ClipboardCheck, Gauge as GaugeIcon, Globe, Home as HomeIcon, LayoutDashboard, LogOut, Radar, Server, ShieldCheck } from 'lucide-react'
 import { ApiError, SignedOut, call } from './api'
 import { completeRedirect, load, signInCustomer, signOut } from './auth'
 import { useI18n } from './i18n'
+import BackOffice from './pages/BackOffice'
 import ControlRoom from './pages/ControlRoom'
 import Dashboard from './pages/Dashboard'
 import Analytics from './pages/Analytics'
@@ -15,7 +16,7 @@ import Receipt from './pages/Receipt'
 import Services from './pages/Services'
 import Settings from './pages/Settings'
 
-type Route = 'home' | 'dashboard' | 'services' | 'settings' | 'receipt' | 'qa' | 'control' | 'modules' | 'analytics' | 'assistant' | 'platform'
+type Route = 'home' | 'dashboard' | 'services' | 'backoffice' | 'settings' | 'receipt' | 'qa' | 'control' | 'modules' | 'analytics' | 'assistant' | 'platform'
 
 const routeOf = (): Route => ((location.hash.replace('#/', '').split('?')[0] || 'home') as Route)
 
@@ -81,6 +82,7 @@ export default function App() {
     ] },
     { sec: t.sections.staff, items: [
       { r: 'control', label: t.nav.control, icon: <Radar size={18} /> },
+      { r: 'backoffice', label: lang === 'ar' ? 'المكتب الخلفي' : 'Back office', icon: <Briefcase size={18} /> },
       { r: 'modules', label: t.nav.modules, icon: <Boxes size={18} /> },
       { r: 'analytics', label: t.nav.analytics, icon: <GaugeIcon size={18} /> },
     ] },
@@ -108,6 +110,7 @@ export default function App() {
     page = customer ? <Settings notify={(text, bad) => setToast({ text, bad })} /> : <div className="card empty" style={{ padding: 60 }}><button className="btn primary lg" onClick={() => signInCustomer({ returnTo: '#/settings', lang })}><ShieldCheck size={18} /> {t.signInNational}</button></div>
   } else if (route === 'control') page = <ControlRoom />
   else if (route === 'modules') page = <Modules />
+  else if (route === 'backoffice') page = <BackOffice notify={(text, bad) => setToast({ text, bad })} />
   else if (route === 'analytics') page = <Analytics />
   else if (route === 'assistant') page = <Assistant go={go} />
   else if (route === 'platform') page = <Platform />

@@ -43,9 +43,35 @@ export function load(k: Kind): Session | null {
     const raw = sessionStorage.getItem(storeKey(k))
     if (!raw) return null
     const s = JSON.parse(raw) as Session
-    return s.expiresAt > Date.now() + 5_000 ? s : null
+    // Still signed in while the access token is valid or a refresh token can renew it (see fresh()).
+    return s.expiresAt > Date.now() + 5_000 || s.refreshToken ? s : null
   } catch {
     return null
+  }
+}
+
+/**
+ * The session with a valid access token: Keycloak issues 5-minute access tokens, so a token about to expire is renewed
+ * with the refresh token (same client). Returns null, and forgets the session, when it can no longer be renewed.
+ */
+export async function fresh(k: Kind): Promise<Session | null> {
+  const s = load(k)
+  if (!s) return null
+  if (s.expiresAt > Date.now() + 30_000) return s
+  if (!s.refreshToken) { save(k, null); return null }
+  try {
+    const res = await fetch(`${REALM}/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ grant_type: 'refresh_token', client_id: k === 'customer' ? PORTAL : DEV_CLI, refresh_token: s.refreshToken }),
+    })
+    if (!res.ok) { save(k, null); return null }
+    const t = await res.json()
+    const next = toSession({ ...t, id_token: t.id_token ?? s.idToken, refresh_token: t.refresh_token ?? s.refreshToken })
+    save(k, next)
+    return next
+  } catch {
+    return s.expiresAt > Date.now() ? s : null
   }
 }
 

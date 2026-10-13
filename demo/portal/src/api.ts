@@ -1,6 +1,6 @@
 // The only way the app reaches ITMS: the gateway, with the caller's token. Changing calls carry an Idempotency-Key;
 // errors are RFC 9457 problem+json and come back as ApiError.
-import { load, type Kind } from './auth'
+import { fresh, type Kind } from './auth'
 
 export class ApiError extends Error {
   status: number
@@ -27,7 +27,7 @@ export async function call<T>(
   lang = 'en',
   channelOverride?: string,
 ): Promise<T> {
-  const s = load(kind)
+  const s = await fresh(kind)
   if (!s) throw new SignedOut()
   const headers: Record<string, string> = {
     Authorization: `Bearer ${s.accessToken}`,

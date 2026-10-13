@@ -4,6 +4,11 @@
 import { SwaggerUIBundle, SwaggerUIStandalonePreset } from 'swagger-ui-dist'
 import 'swagger-ui-dist/swagger-ui.css'
 import './api-docs.css'
+import { fresh } from './auth'
+
+// Access tokens last 5 minutes; keep the signed-in staff token renewed while the explorer is open.
+void fresh('staff')
+setInterval(() => { void fresh('staff') }, 60_000)
 
 const SERVICES = ['traffic-file', 'violation', 'payment', 'vehicle', 'licensing', 'examination', 'accident', 'permit', 'rental',
   'road-permit', 'marine', 'crossborder', 'search', 'reporting', 'iam', 'reference-data', 'transaction', 'hold-eligibility',

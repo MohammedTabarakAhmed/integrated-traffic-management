@@ -16,7 +16,7 @@ export type Claims = Record<string, unknown> & {
   subject_type?: string
   acr?: string
 }
-export type Kind = 'customer' | 'staff'
+export type Kind = 'customer' | 'staff' | 'checker' // checker: the second person of maker-checker (module tour)
 
 const storeKey = (k: Kind) => `itms.session.${k}`
 
@@ -109,7 +109,7 @@ export async function completeRedirect(): Promise<string | null> {
 }
 
 /** Staff sign-in for the control room (local dev accounts only). */
-export async function signInStaff(username: string, password: string): Promise<Session> {
+export async function signInStaff(username: string, password: string, kind: Kind = 'staff'): Promise<Session> {
   const res = await fetch(`${REALM}/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -117,7 +117,7 @@ export async function signInStaff(username: string, password: string): Promise<S
   })
   if (!res.ok) throw new Error(res.status === 401 ? 'Wrong user name or password' : `Sign-in failed (${res.status})`)
   const s = toSession(await res.json())
-  save('staff', s)
+  save(kind, s)
   return s
 }
 

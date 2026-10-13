@@ -17,7 +17,7 @@ export class ApiError extends Error {
 
 export class SignedOut extends Error {}
 
-const channel: Record<Kind, string> = { customer: 'PORTAL', staff: 'BACKOFFICE' }
+const channel: Record<Kind, string> = { customer: 'PORTAL', staff: 'BACKOFFICE', checker: 'BACKOFFICE' }
 
 export async function call<T>(
   kind: Kind,
@@ -25,12 +25,13 @@ export async function call<T>(
   path: string,
   body?: unknown,
   lang = 'en',
+  channelOverride?: string,
 ): Promise<T> {
   const s = load(kind)
   if (!s) throw new SignedOut()
   const headers: Record<string, string> = {
     Authorization: `Bearer ${s.accessToken}`,
-    'X-Channel': channel[kind],
+    'X-Channel': channelOverride ?? channel[kind],
     'Accept-Language': lang,
     Accept: 'application/json, application/problem+json',
   }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { BellRing, Bot, Boxes, Braces, ClipboardCheck, Gauge as GaugeIcon, Globe, Home as HomeIcon, LayoutDashboard, LogOut, Radar, Server, ShieldCheck } from 'lucide-react'
-import { ApiError, SignedOut } from './api'
+import { Bell, BellRing, Bot, Boxes, Braces, ClipboardCheck, Gauge as GaugeIcon, Globe, Home as HomeIcon, LayoutDashboard, LogOut, Radar, Server, ShieldCheck } from 'lucide-react'
+import { ApiError, SignedOut, call } from './api'
 import { completeRedirect, load, signInCustomer, signOut } from './auth'
 import { useI18n } from './i18n'
 import ControlRoom from './pages/ControlRoom'
@@ -17,6 +17,23 @@ import Settings from './pages/Settings'
 type Route = 'home' | 'dashboard' | 'settings' | 'receipt' | 'qa' | 'control' | 'modules' | 'analytics' | 'assistant' | 'platform'
 
 const routeOf = (): Route => ((location.hash.replace('#/', '').split('?')[0] || 'home') as Route)
+
+// Unread in-app messages of the signed-in citizen, refreshed every 15 s; opens the dashboard inbox.
+function InboxBell({ go }: { go: (r: string) => void }) {
+  const [n, setN] = useState(0)
+  useEffect(() => {
+    const tick = () => call<{ items: { readAt?: string | null }[] }>('customer', 'GET', '/v1/me/inbox')
+      .then((r) => setN(r.items.filter((m) => !m.readAt).length)).catch(() => {})
+    tick()
+    const id = setInterval(tick, 15000)
+    return () => clearInterval(id)
+  }, [])
+  return (
+    <button className="btn bell" onClick={() => go('dashboard')} aria-label={`${n} unread messages`}>
+      <Bell size={16} />{n > 0 && <span className="bell-n">{n > 99 ? '99+' : n}</span>}
+    </button>
+  )
+}
 
 export default function App() {
   const { t, lang, toggle } = useI18n()
@@ -124,6 +141,7 @@ export default function App() {
               <div className="sub">{route === 'dashboard' ? t.sections.citizen : current?.label}</div>
             </div>
             <div className="spacer" />
+            {customer && <InboxBell go={go} />}
             <button className="btn" onClick={toggle}><Globe size={16} /> {t.language}</button>
             {customer && (route === 'dashboard' || route === 'settings') && (
               <button className="btn ghost" onClick={() => { signOut('customer'); setCustomer(null) }}><LogOut size={16} /> {t.signOut}</button>

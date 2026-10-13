@@ -3,7 +3,7 @@ import { AlertOctagon, Bell, Camera, CarFront, CreditCard, FileText, Inbox, MapP
 import { call, money, when } from '../api'
 import { load } from '../auth'
 import Objection from './Objection'
-import { Card, Gauge, Kpi, Skeleton, StatusPill } from '../components'
+import { Card, Drawer, Gauge, Kpi, Skeleton, StatusPill, Timeline } from '../components'
 import { useI18n } from '../i18n'
 
 type Violation = {
@@ -16,6 +16,7 @@ type Account = {
   suspensions: { id: string; pointsAtOrder: number }[]
 }
 type Txn = { reference: string; serviceCode: string; module: string; status: string; createdAt: string; channel: string }
+type History = { sequence: number; previousStatus?: string | null; status: string; reason: string; note?: string | null; actor: { username?: string | null }; channel: string; changedAt: string }
 type Message = { id: string; subject?: string | null; body: string; createdAt: string; readAt?: string | null; category: string }
 type Payable = { payable: { id: string; itemType: string; itemRef: string; total: number; currency: string; status: string }; paused: boolean }
 type FileT = {
@@ -55,6 +56,20 @@ export default function Dashboard({ onError, notify }: { onError: (e: unknown) =
   const [d, setD] = useState<Data | null>(null)
   const [paying, setPaying] = useState(false)
   const [objecting, setObjecting] = useState<string | null>(null)
+  const [txn, setTxn] = useState<{ x: Txn; history: History[] | null } | null>(null)
+  const [msg, setMsg] = useState<Message | null>(null)
+
+  // Transaction detail: its status history, oldest first (CC-023).
+  const openTxn = (x: Txn) => {
+    setTxn({ x, history: null })
+    call<{ items: History[] }>('customer', 'GET', `/v1/me/transactions/${x.reference}/status-history`, undefined, lang)
+      .then((h) => setTxn({ x, history: h.items })).catch(onError)
+  }
+  // Opening a message marks it read (the unread count drops).
+  const openMsg = (m: Message) => {
+    setMsg(m)
+    if (!m.readAt) call('customer', 'POST', `/v1/me/inbox/${m.id}/reads`, undefined, lang).then(() => refresh()).catch(() => {})
+  }
 
   const refresh = useCallback(() => {
     loadMine(lang).then(setD).catch(onError)
@@ -160,7 +175,7 @@ export default function Dashboard({ onError, notify }: { onError: (e: unknown) =
           {d.txns.length === 0 ? <div className="empty">{t.noTransactions}</div> : (
             <div className="list">
               {d.txns.slice(0, 5).map((x) => (
-                <div className="row" key={x.reference}>
+                <div className="row clickable" key={x.reference} onClick={() => openTxn(x)} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && openTxn(x)}>
                   <div className="ico cyan"><ReceiptText size={17} /></div>
                   <div className="grow">
                     <div className="title">{x.serviceCode.replace(/_/g, ' ')}</div>
@@ -175,19 +190,48 @@ export default function Dashboard({ onError, notify }: { onError: (e: unknown) =
         <Card title={t.inbox} icon={<Inbox size={16} />} right={<span className="pill">{d.inbox.filter((m) => !m.readAt).length}</span>}>
           {d.inbox.length === 0 ? <div className="empty">{t.noMessages}</div> : (
             <div className="list">
-              {d.inbox.slice(0, 4).map((m) => (
-                <div className="row" key={m.id}>
+              {d.inbox.slice(0, 6).map((m) => (
+                <div className="row clickable" key={m.id} onClick={() => openMsg(m)} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && openMsg(m)}>
                   <div className="ico"><Bell size={16} /></div>
                   <div className="grow">
                     <div className="title">{m.subject ?? m.category}</div>
                     <div className="meta clamp2" style={{ display: '-webkit-box' }}>{m.body}</div>
                   </div>
+                  {!m.readAt && <span className="unread-dot" aria-label="unread" />}
                 </div>
               ))}
             </div>
           )}
         </Card>
       </div>
+      <Drawer open={!!txn} onClose={() => setTxn(null)} title={txn ? txn.x.serviceCode.replace(/_/g, ' ') : ''}>
+        {txn && (
+          <>
+            <dl className="kv" style={{ marginTop: 0 }}>
+              <dt>{t.reference}</dt><dd className="mono">{txn.x.reference}</dd>
+              <dt>{t.statusLabel}</dt><dd><StatusPill s={txn.x.status} /></dd>
+              <dt>{t.channel}</dt><dd>{txn.x.channel}</dd>
+              <dt>{t.opened}</dt><dd>{when(txn.x.createdAt, lang)}</dd>
+            </dl>
+            <h3 className="drawer-sub">{t.history}</h3>
+            {txn.history === null ? <Skeleton /> : (
+              <Timeline items={txn.history.map((h) => ({
+                title: <>{h.previousStatus ? `${t.status[h.previousStatus] ?? h.previousStatus} → ` : ''}{t.status[h.status] ?? h.status}</>,
+                meta: <><span>{h.reason}</span><span>{h.actor?.username ?? '—'}</span><span>{h.channel}</span><span>{when(h.changedAt, lang)}</span></>,
+                tone: ['APPROVED', 'COMPLETED', 'PAID', 'FULFILLED'].includes(h.status) ? 'ok' : ['REJECTED', 'CANCELLED'].includes(h.status) ? 'bad' : 'info',
+              }))} />
+            )}
+          </>
+        )}
+      </Drawer>
+      <Drawer open={!!msg} onClose={() => setMsg(null)} title={msg ? (msg.subject ?? msg.category) : ''}>
+        {msg && (
+          <>
+            <div className="meta muted" style={{ display: 'flex', gap: 10, marginBottom: 12, fontSize: 13 }}><span>{when(msg.createdAt, lang)}</span><span className="pill">{msg.category}</span></div>
+            <div className="msg-body">{msg.body}</div>
+          </>
+        )}
+      </Drawer>
     </>
   )
 }

@@ -89,17 +89,33 @@ else
   echo "   already has $existing open"
 fi
 
-echo "4. One open transaction (licence renewal) for the dashboard"
-SVC=DEMO_RENEWAL
-if ! curl -sf -o /dev/null -H "Authorization: Bearer $MAKER" "$TXN/v1/services/$SVC"; then
-  spec="{\"code\":\"$SVC\",\"name\":{\"nl\":\"تجديد رخصة القيادة\",\"en\":\"Driving licence renewal\"},\"module\":\"LICENSING\",\"customerTypes\":[\"INDIVIDUAL\"],\"channels\":[\"PORTAL\",\"APP\",\"BACKOFFICE\"],\"requiredDocuments\":[],\"sla\":\"P3D\",\"regions\":[\"*\"],\"anyRegion\":true,\"allowsConcurrentOpen\":false}"
-  res=$(post "$MAKER" "$TXN/v1/catalogue-changes" "{\"changeType\":\"CREATE_SERVICE\",\"serviceCode\":\"$SVC\",\"service\":$spec,\"reason\":\"demo service\"}")
+echo "4. Transactions for the dashboard: an open renewal, a submitted address update, a cancelled replacement"
+service() { # code module arabic english -> created once, maker then checker (CC-114)
+  curl -sf -o /dev/null -H "Authorization: Bearer $MAKER" "$TXN/v1/services/$1" && return 0
+  local spec="{\"code\":\"$1\",\"name\":{\"nl\":\"$3\",\"en\":\"$4\"},\"module\":\"$2\",\"customerTypes\":[\"INDIVIDUAL\"],\"channels\":[\"PORTAL\",\"APP\",\"BACKOFFICE\"],\"requiredDocuments\":[],\"sla\":\"P3D\",\"regions\":[\"*\"],\"anyRegion\":true,\"allowsConcurrentOpen\":false}"
+  local res; res=$(post "$MAKER" "$TXN/v1/catalogue-changes" "{\"changeType\":\"CREATE_SERVICE\",\"serviceCode\":\"$1\",\"service\":$spec,\"reason\":\"demo service\"}")
   need "$res" 201
   need "$(post "$CHECKER" "$TXN/v1/catalogue-changes/$(body_of "$res" | json_field "['id']")/approvals" "")" 200
+}
+open_txn() { # service -> "<status> <reference or empty>"
+  local res; res=$(post "$CHECKER" "$TXN/v1/transactions" "{\"serviceCode\":\"$1\",\"subject\":{\"type\":\"TRAFFIC_FILE\",\"id\":\"$FILE\"},\"applicantFileNumber\":\"$FILE\",\"homeRegion\":\"DXB\"}" PORTAL)
+  need "$res" 201 409
+  printf '%s %s' "$(status_of "$res")" "$( [[ "$(status_of "$res")" == 201 ]] && body_of "$res" | json_field "['reference']")"
+}
+service DEMO_RENEWAL LICENSING "تجديد رخصة القيادة" "Driving licence renewal"
+service DEMO_ADDRESS TRAFFIC_FILE "تحديث العنوان" "Address update"
+service DEMO_CARD LICENSING "بدل فاقد لبطاقة الرخصة" "Licence card replacement"
+read -r s ref <<<"$(open_txn DEMO_RENEWAL)"; echo "   DEMO_RENEWAL ${ref:-already open}"
+read -r s ref <<<"$(open_txn DEMO_ADDRESS)"
+if [[ "$s" == 201 ]]; then # no fee: payment is skipped (Q-004); a hold on the file answers 422 ELIGIBILITY_BLOCKED (UAT-1)
+  res=$(post "$CHECKER" "$TXN/v1/transactions/$ref/submissions" "" PORTAL); need "$res" 200 201 422
+  echo "   DEMO_ADDRESS $ref submitted: HTTP $(status_of "$res")"
 fi
-res=$(post "$CHECKER" "$TXN/v1/transactions" "{\"serviceCode\":\"$SVC\",\"subject\":{\"type\":\"TRAFFIC_FILE\",\"id\":\"$FILE\"},\"applicantFileNumber\":\"$FILE\",\"homeRegion\":\"DXB\"}" PORTAL)
-need "$res" 201 409
-echo "   $SVC for $FILE ($( [[ "$(status_of "$res")" == 201 ]] && body_of "$res" | json_field "['reference']" || echo 'already open'))"
+read -r s ref <<<"$(open_txn DEMO_CARD)"
+if [[ "$s" == 201 ]]; then
+  need "$(post "$CHECKER" "$TXN/v1/transactions/$ref/cancellations" '{"reason":"customer found the card"}' PORTAL)" 200
+  echo "   DEMO_CARD $ref cancelled"
+fi
 
 echo "5. Module tour set-up (configuration each module needs once; nothing is created twice)"
 FEES=http://localhost:8086; VEH=http://localhost:8095; PERMIT=http://localhost:8102; GEO=http://localhost:8103

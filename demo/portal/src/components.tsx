@@ -95,3 +95,33 @@ export function CountUp({ to, ms = 900 }: { to: number; ms?: number }) {
   }, [to, ms])
   return <>{v.toLocaleString()}</>
 }
+
+/** Slide-in panel for details (closes on Escape or the backdrop). */
+export function Drawer({ open, onClose, title, children }: { open: boolean; onClose: () => void; title: ReactNode; children: ReactNode }) {
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    addEventListener('keydown', onKey)
+    return () => removeEventListener('keydown', onKey)
+  }, [open, onClose])
+  if (!open) return null
+  return (
+    <div className="drawer-back" onClick={onClose}>
+      <aside className="drawer" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        <div className="drawer-head"><h2>{title}</h2><button className="btn ghost" onClick={onClose} aria-label="Close">✕</button></div>
+        <div className="drawer-body">{children}</div>
+      </aside>
+    </div>
+  )
+}
+
+/** Vertical timeline of status changes or history entries. */
+export function Timeline({ items }: { items: { title: ReactNode; meta?: ReactNode; tone?: 'ok' | 'warn' | 'bad' | 'info' }[] }) {
+  return (
+    <ol className="vtl">
+      {items.map((it, i) => (
+        <li key={i} className={it.tone ?? 'info'}><span className="vtl-dot" /><div><div className="title">{it.title}</div>{it.meta && <div className="meta">{it.meta}</div>}</div></li>
+      ))}
+    </ol>
+  )
+}

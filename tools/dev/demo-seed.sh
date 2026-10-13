@@ -3,7 +3,7 @@
 # Gives the demo customer 784199012345671 (identity-register mock, signs in through the mock national digital ID) a
 # traffic file, three violations (10 black points, so the control room can take them to 24 live), one open
 # transaction and, through the violation events, inbox messages. Safe to run again: it adds nothing twice.
-# Run after tools/dev/up.sh: ITMS_LOCAL_PROFILE=lite bash tools/dev/demo-seed.sh
+# Run after tools/dev/up.sh: ITMS_LOCAL_PROFILE=lite bash tools/dev/demo-seed.sh [--reset-otp]
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 set -a; source infra/local/.env; set +a
@@ -30,6 +30,18 @@ need() { # result allowed-status... ; stops with the answer otherwise
   for ok in "$@"; do [[ "$s" == "$ok" ]] && return 0; done
   echo "FAIL: HTTP $s: $(body_of "$1")"; exit 1
 }
+
+if [[ "${1:-}" == "--reset-otp" ]]; then # the presenter enrols their own authenticator at the next step-up (SEC-002)
+  KC=(env MSYS_NO_PATHCONV=1 docker exec itms-keycloak-1 /opt/keycloak/bin/kcadm.sh)
+  "${KC[@]}" config credentials --server http://localhost:8080 --realm master \
+    --user "$KC_ADMIN_USER" --password "$KC_ADMIN_PASSWORD" >/dev/null
+  uid=$("${KC[@]}" get users -r national-id-mock -q "username=$NATIONAL_ID" -q exact=true --fields id --format csv --noquotes | tr -d '\r')
+  for cid in $("${KC[@]}" get "users/$uid/credentials" -r national-id-mock --fields id,type --format csv --noquotes \
+      | tr -d '\r' | awk -F, '$2 == "otp" {print $1}'); do
+    "${KC[@]}" delete "users/$uid/credentials/$cid" -r national-id-mock
+  done
+  echo "0. One-time password authenticator of $NATIONAL_ID removed: the next step-up enrols a new one"
+fi
 
 MAKER=$(token dev.maker "$DEV_MAKER_PASSWORD")
 CHECKER=$(token dev.checker "$DEV_CHECKER_PASSWORD")

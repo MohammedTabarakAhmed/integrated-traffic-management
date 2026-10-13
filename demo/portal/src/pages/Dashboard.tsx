@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { AlertOctagon, Bell, Camera, CarFront, CreditCard, FileText, Inbox, MapPin, ReceiptText, Wallet } from 'lucide-react'
 import { call, money, when } from '../api'
 import { load } from '../auth'
+import Objection from './Objection'
 import { Card, Gauge, Kpi, Skeleton, StatusPill } from '../components'
 import { useI18n } from '../i18n'
 
@@ -48,10 +49,11 @@ const fineName = (code: string, lang: string) => {
   return n ? n[lang === 'ar' ? 1 : 0] : code.replace(/_/g, ' ')
 }
 
-export default function Dashboard({ onError }: { onError: (e: unknown) => void }) {
+export default function Dashboard({ onError, notify }: { onError: (e: unknown) => void; notify: (text: string) => void }) {
   const { t, lang } = useI18n()
   const [d, setD] = useState<Data | null>(null)
   const [paying, setPaying] = useState(false)
+  const [objecting, setObjecting] = useState<string | null>(null)
 
   const refresh = useCallback(() => {
     loadMine(lang).then(setD).catch(onError)
@@ -72,6 +74,7 @@ export default function Dashboard({ onError }: { onError: (e: unknown) => void }
 
   const open = d.violations.filter((v) => v.status === 'OPEN')
   const due = d.payables.filter((p) => p.payable.status === 'OPEN' && !p.paused)
+  const paused = new Set(d.payables.filter((p) => p.paused).map((p) => p.payable.itemRef))
   const dueTotal = due.reduce((s, p) => s + p.payable.total, 0)
   const currency = due[0]?.payable.currency ?? 'AED'
   const name = d.file.identity?.name?.[lang === 'ar' ? 'nl' : 'en'] ?? d.file.identity?.name?.en
@@ -94,6 +97,10 @@ export default function Dashboard({ onError }: { onError: (e: unknown) => void }
 
   return (
     <>
+      {objecting && (
+        <Objection number={objecting} onClose={() => setObjecting(null)}
+          onDone={(msg) => { setObjecting(null); notify(msg); refresh() }} />
+      )}
       {susp && (
         <div className="banner" role="alert">
           <AlertOctagon color="var(--red)" />
@@ -138,7 +145,10 @@ export default function Dashboard({ onError }: { onError: (e: unknown) => void }
                     </div>
                   </div>
                   <div className="amount">{money(v.fineMinor, currency, lang)}</div>
-                  <StatusPill s={v.status} />
+                  {paused.has(v.number) ? <span className="pill info">{t.underObjection}</span> : <StatusPill s={v.status} />}
+                  {v.status === 'OPEN' && !paused.has(v.number) && (
+                    <button className="btn ghost" style={{ padding: '6px 10px' }} onClick={() => setObjecting(v.number)}>{t.object}</button>
+                  )}
                 </div>
               ))}
             </div>

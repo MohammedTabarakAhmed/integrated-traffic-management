@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Bot, Boxes, Gauge as GaugeIcon, Globe, Home as HomeIcon, LayoutDashboard, LogOut, Radar, Server, ShieldCheck } from 'lucide-react'
+import { BellRing, Bot, Boxes, Gauge as GaugeIcon, Globe, Home as HomeIcon, LayoutDashboard, LogOut, Radar, Server, ShieldCheck } from 'lucide-react'
 import { ApiError, SignedOut } from './api'
 import { completeRedirect, load, signInCustomer, signOut } from './auth'
 import { useI18n } from './i18n'
@@ -7,8 +7,9 @@ import ControlRoom from './pages/ControlRoom'
 import Dashboard from './pages/Dashboard'
 import Home from './pages/Home'
 import Receipt from './pages/Receipt'
+import Settings from './pages/Settings'
 
-type Route = 'home' | 'dashboard' | 'receipt' | 'control' | 'modules' | 'analytics' | 'assistant' | 'platform'
+type Route = 'home' | 'dashboard' | 'settings' | 'receipt' | 'control' | 'modules' | 'analytics' | 'assistant' | 'platform'
 
 const routeOf = (): Route => ((location.hash.replace('#/', '').split('?')[0] || 'home') as Route)
 
@@ -51,6 +52,7 @@ export default function App() {
     { sec: t.sections.citizen, items: [
       { r: 'home', label: t.nav.home, icon: <HomeIcon size={18} /> },
       { r: 'dashboard', label: t.nav.dashboard, icon: <LayoutDashboard size={18} /> },
+      { r: 'settings', label: t.nav.settings, icon: <BellRing size={18} /> },
       { r: 'assistant', label: t.nav.assistant, icon: <Bot size={18} />, soon: true },
     ] },
     { sec: t.sections.staff, items: [
@@ -67,7 +69,7 @@ export default function App() {
   let page: React.ReactNode
   if (route === 'home') page = <Home go={go} onCustomer={customerSignIn} />
   else if (route === 'dashboard') {
-    page = customer ? <Dashboard onError={onError} /> : (
+    page = customer ? <Dashboard onError={onError} notify={(text) => setToast({ text })} /> : (
       <div className="card" style={{ maxWidth: 520, margin: '8vh auto', textAlign: 'center', padding: 36 }}>
         <div className="logo-mark" style={{ margin: '0 auto 18px', width: 56, height: 56 }}><ShieldCheck /></div>
         <h2 style={{ marginTop: 0 }}>{t.signInNational}</h2>
@@ -75,6 +77,8 @@ export default function App() {
         <button className="btn primary lg" onClick={customerSignIn}><ShieldCheck size={18} /> {t.signInNational}</button>
       </div>
     )
+  } else if (route === 'settings') {
+    page = customer ? <Settings notify={(text, bad) => setToast({ text, bad })} /> : <div className="card empty" style={{ padding: 60 }}><button className="btn primary lg" onClick={() => signInCustomer({ returnTo: '#/settings', lang })}><ShieldCheck size={18} /> {t.signInNational}</button></div>
   } else if (route === 'control') page = <ControlRoom />
   else if (route === 'receipt') page = <Receipt go={go} />
   else page = <div className="card empty" style={{ padding: 60 }}>{t.comingSoon}</div>
@@ -109,7 +113,7 @@ export default function App() {
             </div>
             <div className="spacer" />
             <button className="btn" onClick={toggle}><Globe size={16} /> {t.language}</button>
-            {customer && route === 'dashboard' && (
+            {customer && (route === 'dashboard' || route === 'settings') && (
               <button className="btn ghost" onClick={() => { signOut('customer'); setCustomer(null) }}><LogOut size={16} /> {t.signOut}</button>
             )}
           </div>

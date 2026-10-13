@@ -45,9 +45,10 @@ await step('Overview loads with the platform figures', async () => {
 })
 
 await step('Arabic switch flips the layout to RTL', async () => {
-  await page.click('.topbar .btn'); await page.waitForTimeout(400)
+  const langBtn = page.locator('.topbar .btn', { hasText: /English|العربية/ })
+  await langBtn.click(); await page.waitForTimeout(400)
   const dir = await page.evaluate(() => document.documentElement.dir)
-  await page.click('.topbar .btn')
+  await langBtn.click()
   expect(dir === 'rtl', `dir=${dir}`); return 'dir=rtl, then back to ltr'
 })
 

@@ -331,6 +331,8 @@ grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker TRANSACTION_OFFICER
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker HOLD_OFFICER
 # Hold overrides for one transaction (CC-034; ADR-035): dev.maker is the supervisor, so it is not the placer.
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker HOLD_SUPERVISOR
+# Counter eligibility check (CC-032): the demo control room asks whether a service is blocked (demo D2.3).
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker ELIGIBILITY_CHECKER
 # Traffic files (DL-001, DL-005; ADR-041): dev.checker opens and updates files; dev.maker sees sensitive data.
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker TRAFFIC_FILE_OFFICER
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker TRAFFIC_FILE_SENSITIVE_READER

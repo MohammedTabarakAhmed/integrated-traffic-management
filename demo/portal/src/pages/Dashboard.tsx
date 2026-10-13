@@ -12,7 +12,8 @@ type Violation = {
 }
 type Account = {
   fileNumber: string; activePoints: number; threshold: number
-  activeSuspension?: { from: string; until: string; ordinal: number } | null
+  activeSuspension?: { id: string; from: string; until: string; ordinal: number } | null
+  suspensions: { id: string; pointsAtOrder: number }[]
 }
 type Txn = { reference: string; serviceCode: string; module: string; status: string; createdAt: string; channel: string }
 type Message = { id: string; subject?: string | null; body: string; createdAt: string; readAt?: string | null; category: string }
@@ -126,7 +127,8 @@ export default function Dashboard({ onError, notify }: { onError: (e: unknown) =
       </div>
       <div className="grid g-3">
         <Card title={t.points} icon={<CarFront size={16} />} right={<span className="pill info"><span className="dot live" /> live</span>}>
-          <Gauge value={d.account.activePoints} max={d.account.threshold} label={`${t.pointsOf} ${d.account.threshold}`} />
+          <Gauge value={susp ? d.account.suspensions.find((x) => x.id === susp.id)?.pointsAtOrder ?? d.account.activePoints : d.account.activePoints}
+            max={d.account.threshold} label={`${t.pointsOf} ${d.account.threshold}`} />
           <p className="muted" style={{ textAlign: 'center', fontSize: 13, margin: '6px 0 0' }}>{t.pointsHint}</p>
         </Card>
         <Card className="span-2" title={t.violations} icon={<Camera size={16} />} right={<span className="pill">{d.violations.length}</span>}>

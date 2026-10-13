@@ -539,3 +539,10 @@ html[lang='ar'] .tbl th { letter-spacing: 0; }
 .row.sel { background: rgba(34, 211, 238, 0.08); }
 .quote-total { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; padding: 14px; border-radius: 12px; border: 1px dashed var(--line-strong); }
 .quote-total b { font-size: 26px; }
+
+/* ---------- sidebar fits laptop screens (polish) ---------- */
+.side { gap: 2px; overflow-y: auto; scrollbar-width: thin; }
+.logo { padding-bottom: 12px; }
+.nav-sec { padding: 10px 10px 4px; }
+.nav-item { padding: 8px 12px; }
+.side-foot { padding-top: 8px; }

@@ -77,6 +77,19 @@ await step('Pay all → checkout → receipt → duplicate callback (UAT-4)', as
   expect(dup?.includes('duplicate: true'), 'no duplicate answer'); return `receipt ${receipt}, retry → duplicate`
 })
 
+await step('My services: instalment planner and free appointment slots', async () => {
+  await go('services'); await page.waitForTimeout(3000)
+  const slots = await page.locator('.slot').count(); const plans = await page.locator('.plan').count()
+  expect(slots > 0, 'no free slots (run demo-seed.sh)'); return `${slots} slots, ${plans} plan(s)`
+})
+
+await step('Transaction drawer shows its status history', async () => {
+  await go('dashboard'); await page.waitForTimeout(2500)
+  await page.locator('.row.clickable').filter({ has: page.locator('.ico.cyan') }).first().click(); await page.waitForTimeout(1500)
+  const n = await page.locator('.vtl li').count(); await page.keyboard.press('Escape')
+  expect(n > 0, 'empty timeline'); return `${n} status entries`
+})
+
 await step('Control room records a radar violation', async () => {
   await go('control')
   if (await page.locator('input[type=password]').count()) { await page.fill('input[type=password]', env.DEV_MAKER_PASSWORD); await page.click('form button.primary') }
@@ -101,6 +114,27 @@ await step('Module tour: every story runs', async () => {
   expect(!out.includes('x'), `failed stories: ${out.join('')}`); return `${out.length} stories ${out.join('')}`
 })
 
+await step('Back office: objections, work queue and holds load', async () => {
+  await go('backoffice'); await page.waitForTimeout(3500)
+  const counts = await page.locator('.seg .pill').allTextContents()
+  expect(counts.length >= 3, 'tabs missing'); return `objections ${counts[0]}, open cases ${counts[1]}, active holds ${counts[2]}`
+})
+
+await step('Administration: fee quote computed', async () => {
+  await go('admin'); await page.waitForTimeout(3000)
+  await page.click('.seg button:nth-child(3)'); await page.click('text=Calculate'); await page.waitForTimeout(1500)
+  const total = await page.locator('.quote-total b').textContent().catch(() => '')
+  expect(/\d/.test(total ?? ''), 'no quote'); return `VEH_FIRST_REG ${total}`
+})
+
+await step('Reports: run shows a table', async () => {
+  await go('reports'); await page.waitForTimeout(2500)
+  await page.click('button.btn.primary:has-text("Run")'); await page.waitForTimeout(2500)
+  const rows = await page.locator('.tbl tbody tr').count()
+  expect(rows > 0, 'no rows'); return `${rows} rows`
+})
+
+await go('modules'); await page.waitForTimeout(2500)
 await step('Federated search finds the demo file', async () => {
   await page.fill('.searchbar input', NATIONAL_ID); await page.click('.searchbar .btn')
   await page.waitForSelector('.searchbar + .card', { timeout: 20000 })

@@ -61,6 +61,21 @@ const UAT: [string, string, string, string, string, string][] = [
   ['UAT-5', 'Partner-state violation handled here', 'Modules › Cross-border › Receive a partner violation', 'Message received and mapped; exchange log shows it', 'modules', 'smoke 46'],
 ]
 
+// Feature checks for testers: [feature, where to click, expected result, route, requirement ids]
+const FEATURES: [string, string, string, string, string][] = [
+  ['Transaction status timeline', 'My dashboard › click a transaction', 'Drawer with every status change, actor and channel', 'dashboard', 'CC-023'],
+  ['Inbox read / unread', 'My dashboard › click an unread message', 'Message opens; the bell count drops by one', 'dashboard', 'CC-073'],
+  ['Instalment plan', 'My services › tick the AED 6,000 fine › Create plan', 'Plan with a monthly schedule; under AED 5,000 is refused', 'services', 'VF-071'],
+  ['Appointment', 'My services › pick a day and slot › Change › Cancel', 'Booked; a third change is refused; cancelled', 'services', 'CC-090 · CC-091'],
+  ['Objection decision', 'Portal objection (within 1 min) › Back office › Objections', 'Accept or reject; a reduction above the approval limit is refused', 'backoffice', 'VF-050 · VF-051'],
+  ['Case work queue', 'Back office › Work queue › Claim › Approve', 'Case completed; its history shows each step', 'backoffice', 'CC-060 · CC-063'],
+  ['Lift a hold', 'Back office › Holds › Lift hold', 'Hold LIFTED; control room renewal check turns ALLOWED', 'backoffice', 'CC-030 · CC-032'],
+  ['Record history', 'Modules › search a plate or violation › click the result', 'Audit timeline from the central hash chain', 'modules', 'CC-121'],
+  ['Maker-checker', 'Administration › Maker-checker › Propose › Approve as maker', 'Maker refused; Approve as checker succeeds', 'admin', 'CC-020 · CC-114'],
+  ['Fee quote', 'Administration › Fee calculator › Calculate', 'First registration: AED 400 with its fee line', 'admin', 'CC-040'],
+  ['Report CSV', 'Reports › Run › CSV', 'Chart and table; a bilingual CSV file downloads', 'reports', 'RPT-001 · RPT-002'],
+]
+
 const FUTURE: [string, string, string][] = [
   ['12', 'Data migration from legacy systems: mapping, reconciliation, rollback (service drafted, not yet in the stack)', 'drafted'],
   ['13', 'AI agents behind the same APIs: model registry, review queue, drift and bias tests (rule-based assistant preview today)', 'preview'],
@@ -132,7 +147,7 @@ export default function Qa({ go }: { go: (r: string) => void }) {
         </div>
       </Card>
 
-      <div className="grid g-2 qa-gap">
+      <div className="grid g-2 qa-gap" style={{ gridAutoFlow: 'row dense' }}>
         <Card title={ar ? 'قائمة اختبارات القبول' : 'UAT checklist'} icon={<ClipboardCheck size={16} />}>
           <div className="list">
             {UAT.map(([id, what, how, expect, route, auto]) => (
@@ -144,6 +159,14 @@ export default function Qa({ go }: { go: (r: string) => void }) {
               </div>
             ))}
           </div>
+        </Card>
+        <Card title={ar ? 'دليل اختبار الميزات' : 'Feature test guide'} icon={<ClipboardCheck size={16} />} className="span-2">
+          <div className="table-wrap"><table className="tbl">
+            <thead><tr><th>{ar ? 'الميزة' : 'Feature'}</th><th>{ar ? 'الخطوات' : 'Steps'}</th><th>{ar ? 'النتيجة المتوقعة' : 'Expected'}</th><th>IDs</th><th /></tr></thead>
+            <tbody>{FEATURES.map(([f, how, exp, route, ids]) => (
+              <tr key={f}><td><b>{f}</b></td><td className="muted">{how}</td><td>{exp}</td><td className="mono" style={{ fontSize: 11.5, whiteSpace: 'nowrap' }}>{ids}</td>
+                <td><button className="btn ghost" onClick={() => go(route)}>{ar ? 'اختبر' : 'Test'}</button></td></tr>))}</tbody>
+          </table></div>
         </Card>
         <Card title={ar ? 'قادم في المستقبل' : 'Coming in future'} icon={<Rocket size={16} />}>
           <div className="list">

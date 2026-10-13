@@ -132,7 +132,7 @@ export default function Dashboard({ onError, notify }: { onError: (e: unknown) =
         <Kpi tone="green" icon={<ReceiptText size={18} />} value={d.txns.length} label={t.transactions} />
       </div>
       <div className="grid g-3">
-        <Card title={t.points} icon={<CarFront size={16} />} right={<span className="pill info"><span className="dot live" /> live</span>}>
+        <Card title={t.points} icon={<CarFront size={16} />} right={<span className="pill info"><span className="dot live" /> {lang === 'ar' ? 'مباشر' : 'live'}</span>}>
           <Gauge value={susp ? d.account.suspensions.find((x) => x.id === susp.id)?.pointsAtOrder ?? d.account.activePoints : d.account.activePoints}
             max={d.account.threshold} label={`${t.pointsOf} ${d.account.threshold}`} />
           <p className="muted" style={{ textAlign: 'center', fontSize: 13, margin: '6px 0 0' }}>{t.pointsHint}</p>
@@ -149,7 +149,7 @@ export default function Dashboard({ onError, notify }: { onError: (e: unknown) =
                       <span className="mono">{v.number}</span>
                       <span><MapPin size={12} /> {v.location}</span>
                       <span>{when(v.occurredAt, lang)}</span>
-                      {v.blackPoints > 0 && <span style={{ color: 'var(--amber)' }}>+{v.blackPoints} pts</span>}
+                      {v.blackPoints > 0 && <span style={{ color: 'var(--amber)' }}>+{v.blackPoints} {lang === 'ar' ? 'نقاط' : 'points'}</span>}
                     </div>
                   </div>
                   <div className="amount">{money(v.fineMinor, currency, lang)}</div>

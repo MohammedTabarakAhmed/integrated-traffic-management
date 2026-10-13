@@ -117,6 +117,13 @@ export default function App() {
   const [route, setRoute] = useState<Route>(routeOf)
   const [customer, setCustomer] = useState(() => load('customer'))
   const [toast, setToast] = useState<{ text: string; bad?: boolean } | null>(null)
+  const [firstName, setFirstName] = useState<{ en?: string | null; nl?: string | null } | null>(null)
+  // The citizen's first name for the greeting (from their own traffic file).
+  useEffect(() => {
+    if (!customer) { setFirstName(null); return }
+    call<{ identity?: { name?: { givenEn?: string | null; givenNl?: string | null } } | null }>('customer', 'GET', '/v1/me/traffic-file')
+      .then((f) => setFirstName({ en: f.identity?.name?.givenEn, nl: f.identity?.name?.givenNl })).catch(() => {})
+  }, [customer])
 
   useEffect(() => {
     completeRedirect()
@@ -226,7 +233,7 @@ export default function App() {
         {route !== 'home' && (
           <div className="topbar">
             <div>
-              <h1>{route === 'dashboard' && customer ? `${t.hello}` : current?.label}</h1>
+              <h1>{route === 'dashboard' && customer ? `${t.hello}${(lang === 'ar' ? firstName?.nl : firstName?.en) ? `${lang === 'ar' ? '، ' : ', '}${lang === 'ar' ? firstName?.nl : firstName?.en}` : ''}` : current?.label}</h1>
               <div className="sub">{ABOUT[route]?.[lang === 'ar' ? 1 : 0] ?? ''}</div>
             </div>
             <div className="spacer" />

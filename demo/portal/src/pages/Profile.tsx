@@ -39,7 +39,7 @@ export default function Profile({ go }: { go: (r: string) => void }) {
           <div><b style={{ fontSize: 18 }}>{full || (ar ? 'متعامل' : 'Citizen')}</b><div className="muted" style={{ fontSize: 13 }}>{ar ? 'رقم الهوية' : 'National ID'} {f.identity?.nationalIdNo ?? '•••• 5671'}</div></div>
         </div>
         <div className="pf-grid">
-          <Item icon={<IdCard size={15} />} label={ar ? 'الجنسية' : 'Nationality'}>{f.identity?.nationality ?? none}</Item>
+          <Item icon={<IdCard size={15} />} label={ar ? 'الجنسية' : 'Nationality'}>{f.identity?.nationality ? nameOf(f.identity.nationality, lang) : none}</Item>
           <Item icon={<CalendarDays size={15} />} label={ar ? 'تاريخ الميلاد' : 'Date of birth'}>{f.identity?.birthDate ?? none}</Item>
           <Item icon={<UserRound size={15} />} label={ar ? 'الجنس' : 'Gender'}>{f.identity?.gender ? nameOf(f.identity.gender, lang) : none}</Item>
           <Item icon={<FileText size={15} />} label={ar ? 'مصدر البيانات' : 'Identity from'}>{f.identitySource === 'REGISTER' ? (ar ? 'سجل الهوية الوطني' : 'National identity register') : (ar ? 'وثيقة' : 'A document')}</Item>

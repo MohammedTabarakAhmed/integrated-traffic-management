@@ -30,6 +30,9 @@ const NAMES: Record<string, Pair> = {
   TRAFFIC_FILE: ['Traffic file', 'الملف المروري'],
   DEMO_DXB_HQ: ['Dubai main centre', 'مركز دبي الرئيسي'],
   // regions and file categories
+  ARE: ['United Arab Emirates', 'الإمارات العربية المتحدة'],
+  OMN: ['Oman', 'عُمان'],
+  SAU: ['Saudi Arabia', 'السعودية'],
   DXB: ['Dubai', 'دبي'],
   AUH: ['Abu Dhabi', 'أبوظبي'],
   SHJ: ['Sharjah', 'الشارقة'],

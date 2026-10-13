@@ -317,3 +317,23 @@ template {
   destination = "/run/db-credentials/examination-service/password"
   perms       = "0444"
 }
+template {
+  contents    = "{{ with secret \"database/creds/migration-service\" }}{{ .Data.username }}{{ end }}"
+  destination = "/run/db-credentials/migration-service/username"
+  perms       = "0444"
+}
+template {
+  contents    = "{{ with secret \"database/creds/migration-service\" }}{{ .Data.password }}{{ end }}"
+  destination = "/run/db-credentials/migration-service/password"
+  perms       = "0444"
+}
+template {
+  contents    = "{{ with secret \"database/creds/ai-service\" }}{{ .Data.username }}{{ end }}"
+  destination = "/run/db-credentials/ai-service/username"
+  perms       = "0444"
+}
+template {
+  contents    = "{{ with secret \"database/creds/ai-service\" }}{{ .Data.password }}{{ end }}"
+  destination = "/run/db-credentials/ai-service/password"
+  perms       = "0444"
+}

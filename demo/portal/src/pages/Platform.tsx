@@ -106,7 +106,7 @@ export default function Platform() {
               <div key={n} className={`rm ${st}`}>
                 <span className="rm-n">{n}</span>
                 <span className="rm-t">{ar ? a : en}</span>
-                <span className={`pill ${st === 'done' ? 'ok' : st === 'partial' ? 'info' : ''}`}>{st === 'done' ? (ar ? 'مبني' : 'built') : st === 'partial' ? (ar ? 'جزئي' : 'partial') : (ar ? 'التالي' : 'next')}</span>
+                <span className={`pill ${st === 'done' ? 'ok' : st === 'partial' ? 'info' : 'future'}`}>{st === 'done' ? (ar ? 'مبني' : 'built') : st === 'partial' ? (ar ? 'جزئي' : 'partial') : (ar ? 'قادم' : 'coming')}</span>
               </div>
             ))}
           </div>

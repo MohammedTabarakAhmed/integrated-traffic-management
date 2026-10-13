@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { BellRing, Bot, Boxes, Braces, Gauge as GaugeIcon, Globe, Home as HomeIcon, LayoutDashboard, LogOut, Radar, Server, ShieldCheck } from 'lucide-react'
+import { BellRing, Bot, Boxes, Braces, ClipboardCheck, Gauge as GaugeIcon, Globe, Home as HomeIcon, LayoutDashboard, LogOut, Radar, Server, ShieldCheck } from 'lucide-react'
 import { ApiError, SignedOut } from './api'
 import { completeRedirect, load, signInCustomer, signOut } from './auth'
 import { useI18n } from './i18n'
@@ -10,10 +10,11 @@ import Assistant from './pages/Assistant'
 import Home from './pages/Home'
 import Modules from './pages/Modules'
 import Platform from './pages/Platform'
+import Qa from './pages/Qa'
 import Receipt from './pages/Receipt'
 import Settings from './pages/Settings'
 
-type Route = 'home' | 'dashboard' | 'settings' | 'receipt' | 'control' | 'modules' | 'analytics' | 'assistant' | 'platform'
+type Route = 'home' | 'dashboard' | 'settings' | 'receipt' | 'qa' | 'control' | 'modules' | 'analytics' | 'assistant' | 'platform'
 
 const routeOf = (): Route => ((location.hash.replace('#/', '').split('?')[0] || 'home') as Route)
 
@@ -66,6 +67,7 @@ export default function App() {
     ] },
     { sec: t.sections.system, items: [
       { r: 'platform', label: t.nav.platform, icon: <Server size={18} /> },
+      { r: 'qa', label: lang === 'ar' ? 'الجودة والأمان' : 'QA & security', icon: <ClipboardCheck size={18} /> },
     ] },
   ]
   const current = nav.flatMap((s) => s.items).find((i) => i.r === route) ?? (route === 'receipt' ? { label: t.receipt } : undefined)
@@ -88,6 +90,7 @@ export default function App() {
   else if (route === 'analytics') page = <Analytics />
   else if (route === 'assistant') page = <Assistant go={go} />
   else if (route === 'platform') page = <Platform />
+  else if (route === 'qa') page = <Qa go={go} />
   else if (route === 'receipt') page = <Receipt go={go} />
   else page = <div className="card empty" style={{ padding: 60 }}>{t.comingSoon}</div>
 

@@ -295,6 +295,11 @@ export default function Modules() {
               <span className="inc">{t.inc}</span>{t.icon}<span className="grow">{ar ? t.ar : t.en}</span>{t.uat && <span className="pill ok">{t.uat}</span>}<ChevronRight size={14} className="chev" />
             </button>
           ))}
+          {[['12', 'Data migration', 'ترحيل البيانات'], ['13', 'AI agents', 'وكلاء الذكاء الاصطناعي'], ['14', 'Hardening & acceptance', 'التحصين والقبول']].map(([n, en, a]) => (
+            <div key={n} className="tour-tab future" aria-disabled="true" title={ar ? 'قادم في المستقبل' : 'Coming in future'}>
+              <span className="inc">{n}</span><span className="grow">{ar ? a : en}</span><span className="pill future">{ar ? 'قادم' : 'coming'}</span>
+            </div>
+          ))}
           <div className="who">
             <span className={`pill ${maker ? 'ok' : ''}`}><KeyRound size={12} /> dev.maker</span>
             <span className={`pill ${checker ? 'ok' : ''}`}><UserCheck size={12} /> dev.checker</span>

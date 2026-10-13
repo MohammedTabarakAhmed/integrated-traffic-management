@@ -440,3 +440,25 @@ html[lang='ar'] .arch-group-title { letter-spacing: 0; }
 .governance h3 { margin: 0 0 4px; font-size: 14px; color: var(--muted); display: flex; gap: 8px; align-items: center; }
 .governance .kv { grid-template-columns: auto 1fr; font-size: 13px; }
 @media (max-width: 1100px) { .assistant { grid-template-columns: 1fr; } .chat { height: 70vh; } }
+
+/* ---------- QA page, future markers ---------- */
+.pill.future { color: #c4b5fd; border-color: rgba(167, 139, 250, 0.45); background: rgba(139, 92, 246, 0.1); }
+.qa-gap { margin-top: 18px; }
+.qa-table { display: flex; flex-direction: column; }
+.qa-row { display: grid; grid-template-columns: minmax(0, 2.2fr) 150px minmax(0, 2fr) 44px; gap: 12px; align-items: center; padding: 10px 4px; border-top: 1px solid var(--line); }
+.qa-row.head { border-top: 0; color: var(--dim); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
+html[lang='ar'] .qa-row.head { letter-spacing: 0; }
+.qa-row > span:first-child { display: flex; flex-direction: column; gap: 2px; }
+.qa-row small { font-size: 11.5px; }
+.qa-res { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.qa-res.ok { color: var(--green); }
+.qa-res.bad { color: var(--red); }
+.qa-res small { color: var(--muted); }
+.flow { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 14px; }
+.flow-step { position: relative; display: flex; flex-direction: column; gap: 6px; padding: 14px; border-radius: 14px; border: 1px solid var(--line); background: rgba(7, 11, 22, 0.4); }
+.flow-step small { color: var(--muted); font-size: 12px; line-height: 1.45; }
+.flow-ico { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; color: var(--cyan); background: rgba(34, 211, 238, 0.1); border: 1px solid rgba(34, 211, 238, 0.25); }
+.flow-arrow { position: absolute; inset-inline-end: -15px; top: 22px; color: var(--cyan); z-index: 1; }
+html[dir='rtl'] .flow-arrow { transform: scaleX(-1); }
+.tour-tab.future { opacity: 0.6; cursor: default; border-style: dashed; }
+@media (max-width: 1100px) { .flow { grid-template-columns: repeat(2, 1fr); } .flow-arrow { display: none; } .qa-row { grid-template-columns: 1fr; } .qa-row.head { display: none; } }

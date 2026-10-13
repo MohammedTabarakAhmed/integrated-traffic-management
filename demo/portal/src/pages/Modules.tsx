@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Car, CheckCircle2, ChevronRight, CircleDashed, Code2, Globe2, GraduationCap, KeyRound, Loader2, Route as RouteIcon, Search, ShieldCheck, Siren, UserCheck, Users, XCircle } from 'lucide-react'
-import { ApiError, call, money } from '../api'
+import { ApiError, call, money, when } from '../api'
+import { Drawer, Skeleton, Timeline } from '../components'
 import { load, signInStaff, type Kind } from '../auth'
 import { useI18n } from '../i18n'
 
@@ -20,6 +21,10 @@ type Action = { en: string; ar: string; tone?: 'primary' | 'bad'; run: (x: Ctx) 
 type Tour = { id: string; inc: string; icon: ReactNode; en: string; ar: string; uat?: string; ids: string; textEn: string; textAr: string; actions: Action[] }
 
 class Stopped extends Error {}
+type Hit = { type: string; id: string; reference: string; region?: string; fields: Record<string, unknown> }
+type AuditRow = { seq: number; occurredAt: string; service: string; action: string; actorId: string; actorUsername?: string | null; channel: string; hash: string }
+// Search result type -> audit entity type (the record's history lives in the central audit chain).
+const AUDIT_TYPE: Record<string, string> = { VIOLATION: 'Violation', VEHICLE: 'Vehicle', TRAFFIC_FILE: 'TrafficFile', ACCIDENT: 'Accident', LICENCE: 'Licence' }
 const rnd = () => String(Date.now()).slice(-7)
 const iso = (ms: number) => new Date(Date.now() + ms).toISOString().replace(/\.\d+Z$/, 'Z')
 const HOUR = 3_600_000
@@ -202,7 +207,20 @@ export default function Modules() {
   const [running, setRunning] = useState(false)
   const [json, setJson] = useState<unknown>(null)
   const [q, setQ] = useState('')
-  const [hits, setHits] = useState<{ items: { type: string; reference: string; region?: string; fields: Record<string, unknown> }[]; sources: { name: string; status: string }[] } | null>(null)
+  const [hits, setHits] = useState<{ items: Hit[]; sources: { name: string; status: string }[] } | null>(null)
+  const [record, setRecord] = useState<{ hit: Hit; rows: AuditRow[] | null } | null>(null)
+
+  // Record history (CC-121): the audit timeline of a search result, read from the central hash chain as the auditor.
+  const openRecord = async (h: Hit) => {
+    setRecord({ hit: h, rows: null })
+    const type = AUDIT_TYPE[h.type]
+    const tryId = (id: string) => call<{ items: AuditRow[] }>('checker', 'GET', `/v1/timelines/${type}/${encodeURIComponent(id)}`, undefined, lang).then((r) => r.items)
+    try {
+      let rows = type ? await tryId(h.id) : []
+      if (type && rows.length === 0 && h.reference !== h.id) rows = await tryId(h.reference)
+      setRecord({ hit: h, rows })
+    } catch { setRecord({ hit: h, rows: [] }) }
+  }
 
   // Both dev accounts sign in quietly from .env.local (local stack only).
   useEffect(() => {
@@ -282,7 +300,7 @@ export default function Modules() {
           </div>
           {hits.items.length === 0 ? <div className="empty">{ar ? 'لا نتائج' : 'No results'}</div> : (
             <div className="list">{hits.items.slice(0, 8).map((h) => (
-              <div className="row" key={h.type + h.reference}><span className="pill info">{h.type}</span>
+              <div className="row clickable" key={h.type + h.reference} onClick={() => openRecord(h)} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && openRecord(h)}><span className="pill info">{h.type}</span>
                 <div className="grow"><div className="title mono">{h.reference}</div>
                   <div className="meta">{Object.entries(h.fields).slice(0, 4).map(([k, v]) => <span key={k}>{k}: {String(v)}</span>)}</div></div></div>))}</div>
           )}
@@ -338,6 +356,23 @@ export default function Modules() {
           )}
         </section>
       </div>
+      <Drawer open={!!record} onClose={() => setRecord(null)} title={record ? `${record.hit.type} · ${record.hit.reference}` : ''}>
+        {record && (
+          <>
+            <dl className="kv" style={{ marginTop: 0 }}>
+              {Object.entries(record.hit.fields).slice(0, 8).map(([k, v]) => <Fragment key={k}><dt>{k}</dt><dd>{String(v)}</dd></Fragment>)}
+            </dl>
+            <h3 className="drawer-sub">{ar ? 'سجل التدقيق (السلسلة المركزية)' : 'Audit history (central hash chain) · CC-121'}</h3>
+            {record.rows === null ? <Skeleton /> : record.rows.length === 0 ? <div className="empty">{ar ? 'لا سجل لهذا النوع بعد' : 'No history recorded for this record type yet'}</div> : (
+              <Timeline items={record.rows.map((r) => ({
+                title: r.action.replace(/_/g, ' ').toLowerCase().replace(/^./, (c) => c.toUpperCase()),
+                meta: <><span>{r.service.replace('-service', '')}</span><span>{r.actorUsername ?? r.actorId}</span><span>{r.channel}</span><span>{when(r.occurredAt, lang)}</span><span className="mono">#{r.seq} {r.hash.slice(0, 8)}…</span></>,
+                tone: /CANCEL|REJECT|HOLD_PLACED|SUSPEN/.test(r.action) ? 'bad' as const : /PAID|LIFTED|CONFIRMED|APPROVED|REGISTERED/.test(r.action) ? 'ok' as const : 'info' as const,
+              }))} />
+            )}
+          </>
+        )}
+      </Drawer>
     </>
   )
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Bell, BellRing, Bot, Briefcase, CalendarDays, SlidersHorizontal, Boxes, Braces, ClipboardCheck, Gauge as GaugeIcon, Globe, Home as HomeIcon, LayoutDashboard, LogOut, Radar, Server, ShieldCheck } from 'lucide-react'
+import { Bell, BellRing, Bot, Briefcase, CalendarDays, FileBarChart, SlidersHorizontal, Boxes, Braces, ClipboardCheck, Gauge as GaugeIcon, Globe, Home as HomeIcon, LayoutDashboard, LogOut, Radar, Server, ShieldCheck } from 'lucide-react'
 import { ApiError, SignedOut, call } from './api'
 import { completeRedirect, load, signInCustomer, signOut } from './auth'
 import { useI18n } from './i18n'
@@ -14,10 +14,11 @@ import Modules from './pages/Modules'
 import Platform from './pages/Platform'
 import Qa from './pages/Qa'
 import Receipt from './pages/Receipt'
+import Reports from './pages/Reports'
 import Services from './pages/Services'
 import Settings from './pages/Settings'
 
-type Route = 'home' | 'dashboard' | 'services' | 'backoffice' | 'admin' | 'settings' | 'receipt' | 'qa' | 'control' | 'modules' | 'analytics' | 'assistant' | 'platform'
+type Route = 'home' | 'dashboard' | 'services' | 'backoffice' | 'admin' | 'reports' | 'settings' | 'receipt' | 'qa' | 'control' | 'modules' | 'analytics' | 'assistant' | 'platform'
 
 const routeOf = (): Route => ((location.hash.replace('#/', '').split('?')[0] || 'home') as Route)
 
@@ -86,6 +87,7 @@ export default function App() {
       { r: 'backoffice', label: lang === 'ar' ? 'المكتب الخلفي' : 'Back office', icon: <Briefcase size={18} /> },
       { r: 'modules', label: t.nav.modules, icon: <Boxes size={18} /> },
       { r: 'analytics', label: t.nav.analytics, icon: <GaugeIcon size={18} /> },
+      { r: 'reports', label: lang === 'ar' ? 'التقارير' : 'Reports', icon: <FileBarChart size={18} /> },
     ] },
     { sec: t.sections.system, items: [
       { r: 'admin', label: lang === 'ar' ? 'الإدارة' : 'Administration', icon: <SlidersHorizontal size={18} /> },
@@ -112,6 +114,7 @@ export default function App() {
     page = customer ? <Settings notify={(text, bad) => setToast({ text, bad })} /> : <div className="card empty" style={{ padding: 60 }}><button className="btn primary lg" onClick={() => signInCustomer({ returnTo: '#/settings', lang })}><ShieldCheck size={18} /> {t.signInNational}</button></div>
   } else if (route === 'control') page = <ControlRoom />
   else if (route === 'modules') page = <Modules />
+  else if (route === 'reports') page = <Reports notify={(text, bad) => setToast({ text, bad })} />
   else if (route === 'admin') page = <Admin notify={(text, bad) => setToast({ text, bad })} />
   else if (route === 'backoffice') page = <BackOffice notify={(text, bad) => setToast({ text, bad })} />
   else if (route === 'analytics') page = <Analytics />

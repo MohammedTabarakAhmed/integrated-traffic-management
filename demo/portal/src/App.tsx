@@ -6,10 +6,11 @@ import { useI18n } from './i18n'
 import ControlRoom from './pages/ControlRoom'
 import Dashboard from './pages/Dashboard'
 import Home from './pages/Home'
+import Receipt from './pages/Receipt'
 
-type Route = 'home' | 'dashboard' | 'control' | 'modules' | 'analytics' | 'assistant' | 'platform'
+type Route = 'home' | 'dashboard' | 'receipt' | 'control' | 'modules' | 'analytics' | 'assistant' | 'platform'
 
-const routeOf = (): Route => ((location.hash.replace('#/', '') || 'home') as Route)
+const routeOf = (): Route => ((location.hash.replace('#/', '').split('?')[0] || 'home') as Route)
 
 export default function App() {
   const { t, lang, toggle } = useI18n()
@@ -61,7 +62,7 @@ export default function App() {
       { r: 'platform', label: t.nav.platform, icon: <Server size={18} />, soon: true },
     ] },
   ]
-  const current = nav.flatMap((s) => s.items).find((i) => i.r === route)
+  const current = nav.flatMap((s) => s.items).find((i) => i.r === route) ?? (route === 'receipt' ? { label: t.receipt } : undefined)
 
   let page: React.ReactNode
   if (route === 'home') page = <Home go={go} onCustomer={customerSignIn} />
@@ -75,6 +76,7 @@ export default function App() {
       </div>
     )
   } else if (route === 'control') page = <ControlRoom />
+  else if (route === 'receipt') page = <Receipt go={go} />
   else page = <div className="card empty" style={{ padding: 60 }}>{t.comingSoon}</div>
 
   return (

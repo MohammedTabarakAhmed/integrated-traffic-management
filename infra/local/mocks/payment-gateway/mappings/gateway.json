@@ -7,7 +7,7 @@
         "headers": { "Content-Type": "application/json" },
         "jsonBody": {
           "sessionId": "{{randomValue type='UUID'}}",
-          "redirectUrl": "http://localhost:8098/pay/{{jsonPath request.body '$.merchantRef'}}"
+          "redirectUrl": "http://localhost:5173/mock-gateway/pay/{{jsonPath request.body '$.merchantRef'}}?amount={{jsonPath request.body '$.amountMinor'}}&currency={{jsonPath request.body '$.currency'}}&return={{urlEncode (jsonPath request.body '$.returnUrl')}}"
         },
         "transformers": ["response-template"]
       }

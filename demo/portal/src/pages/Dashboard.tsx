@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
-import { AlertOctagon, Bell, Camera, CarFront, FileText, Inbox, MapPin, ReceiptText, Wallet } from 'lucide-react'
+import { AlertOctagon, Bell, Camera, CarFront, CreditCard, FileText, Inbox, MapPin, ReceiptText, Wallet } from 'lucide-react'
 import { call, money, when } from '../api'
+import { load } from '../auth'
 import { Card, Gauge, Kpi, Skeleton, StatusPill } from '../components'
 import { useI18n } from '../i18n'
 
@@ -50,6 +51,7 @@ const fineName = (code: string, lang: string) => {
 export default function Dashboard({ onError }: { onError: (e: unknown) => void }) {
   const { t, lang } = useI18n()
   const [d, setD] = useState<Data | null>(null)
+  const [paying, setPaying] = useState(false)
 
   const refresh = useCallback(() => {
     loadMine(lang).then(setD).catch(onError)
@@ -74,6 +76,21 @@ export default function Dashboard({ onError }: { onError: (e: unknown) => void }
   const currency = due[0]?.payable.currency ?? 'AED'
   const name = d.file.identity?.name?.[lang === 'ar' ? 'nl' : 'en'] ?? d.file.identity?.name?.en
   const susp = d.account.activeSuspension
+  const holder = name ?? `ID •••• ${String(load('customer')?.claims.national_id ?? '').slice(-4)}`
+
+  // Pay all: one basket of the open items, then the gateway's hosted checkout (FN-001, CC-047).
+  const payAll = async () => {
+    setPaying(true)
+    try {
+      const basket = await call<{ id: string }>('customer', 'POST', '/v1/me/baskets', { payableIds: due.map((p) => p.payable.id) }, lang)
+      const started = await call<{ redirectUrl: string | null }>('customer', 'POST', `/v1/baskets/${basket.id}/payments`,
+        { method: 'GATEWAY_CARD', returnUrl: `${location.origin}/#/receipt` }, lang)
+      if (started.redirectUrl) location.assign(started.redirectUrl)
+    } catch (e) {
+      onError(e)
+      setPaying(false)
+    }
+  }
 
   return (
     <>
@@ -86,9 +103,18 @@ export default function Dashboard({ onError }: { onError: (e: unknown) => void }
         </div>
       )}
       <div className="grid g-4" style={{ marginBottom: 18 }}>
-        <Kpi icon={<FileText size={18} />} value={<span className="mono">{d.file.fileNumber}</span>} label={`${t.file} · ${name ?? ''}`} />
+        <Kpi icon={<FileText size={18} />} value={<span className="mono">{d.file.fileNumber}</span>} label={`${t.file} · ${holder}`} />
         <Kpi tone="amber" icon={<Camera size={18} />} value={open.length} label={t.openFines} />
-        <Kpi tone="violet" icon={<Wallet size={18} />} value={money(dueTotal, currency, lang)} label={t.totalDue} />
+        <section className="card kpi violet">
+          <div style={{ display: 'flex', alignItems: 'flex-start' }}>
+            <div className="icon"><Wallet size={18} /></div>
+            <button className="btn primary" style={{ marginInlineStart: 'auto', padding: '8px 12px' }} onClick={payAll} disabled={paying || due.length === 0}>
+              <CreditCard size={16} /> {paying ? t.paying : due.length ? t.payAll : t.nothingDue}
+            </button>
+          </div>
+          <div className="v">{money(dueTotal, currency, lang)}</div>
+          <div className="l">{t.totalDue}</div>
+        </section>
         <Kpi tone="green" icon={<ReceiptText size={18} />} value={d.txns.length} label={t.transactions} />
       </div>
       <div className="grid g-3">
@@ -111,7 +137,7 @@ export default function Dashboard({ onError }: { onError: (e: unknown) => void }
                       {v.blackPoints > 0 && <span style={{ color: 'var(--amber)' }}>+{v.blackPoints} pts</span>}
                     </div>
                   </div>
-                  <div className="amount">{money(v.fineMinor, 'AED', lang)}</div>
+                  <div className="amount">{money(v.fineMinor, currency, lang)}</div>
                   <StatusPill s={v.status} />
                 </div>
               ))}
@@ -142,7 +168,7 @@ export default function Dashboard({ onError }: { onError: (e: unknown) => void }
                   <div className="ico"><Bell size={16} /></div>
                   <div className="grow">
                     <div className="title">{m.subject ?? m.category}</div>
-                    <div className="meta" style={{ display: 'block' }}>{m.body.slice(0, 90)}</div>
+                    <div className="meta clamp2" style={{ display: '-webkit-box' }}>{m.body}</div>
                   </div>
                 </div>
               ))}

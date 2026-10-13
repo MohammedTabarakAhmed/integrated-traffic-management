@@ -56,8 +56,10 @@ export async function call<T>(
   return json as T
 }
 
+// The local stack bills in XTS, the ISO 4217 test code (the real currency is Authority configuration); shown as AED.
 export const money = (minor: number, currency = 'AED', lang = 'en') =>
-  new Intl.NumberFormat(lang === 'ar' ? 'ar-AE' : 'en-AE', { style: 'currency', currency }).format(minor / 100)
+  new Intl.NumberFormat(lang === 'ar' ? 'ar-AE' : 'en-AE', { style: 'currency', currency: currency === 'XTS' ? 'AED' : currency })
+    .format(minor / 100)
 
 export const when = (iso: string, lang = 'en') =>
   new Intl.DateTimeFormat(lang === 'ar' ? 'ar-AE' : 'en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(

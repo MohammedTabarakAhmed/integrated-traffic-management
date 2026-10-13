@@ -54,19 +54,27 @@ catalogue DEMO_PARK 20000 0 "الوقوف في مكان غير مخصص" "Parkin
 catalogue DEMO_REDLIGHT 300000 12 "تجاوز الإشارة الضوئية الحمراء" "Running a red light"
 echo "   DEMO_SPEED (4 points), DEMO_PHONE (6), DEMO_PARK (0), DEMO_REDLIGHT (12, for the control room)"
 
-echo "3. Three violations of the demo customer"
-existing=$(curl -sf -H "Authorization: Bearer $MAKER" "$VIO/v1/violations?fileNumber=$FILE&limit=500" | json_field "['items'].__len__()")
+echo "3. Three open violations of the demo customer (re-armed after a demo payment)"
+existing=$(curl -sf -H "Authorization: Bearer $MAKER" "$VIO/v1/violations?fileNumber=$FILE&status=OPEN&limit=500" | json_field "['items'].__len__()")
 if [[ "$existing" -lt 3 ]]; then
   record() { # code minutes-ago location plate
     local at; at=$("$PY" -c "import datetime,sys; print((datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(minutes=int(sys.argv[1]))).strftime('%Y-%m-%dT%H:%M:%SZ'))" "$2")
     need "$(post "$MAKER" "$VIO/v1/violations" "{\"catalogueCode\":\"$1\",\"occurredAt\":\"$at\",\"region\":\"DXB\",\"location\":\"$3\",\"plate\":\"$4\",\"ownerFileNumber\":\"$FILE\",\"driverFileNumber\":\"$FILE\",\"source\":\"OFFICER\"}" FIELD)" 201
   }
-  record DEMO_SPEED 25 "Sheikh Zayed Road, km 24" "A 12345"
-  record DEMO_PHONE 15 "Al Khail Road, exit 41" "A 12345"
-  record DEMO_PARK 5 "Dubai Mall, P2" "A 12345"
-  echo "   recorded 3 (points are added when the objection window lapses: locally one minute)"
+  ever=$(curl -sf -H "Authorization: Bearer $MAKER" "$VIO/v1/violations?fileNumber=$FILE&limit=500" | json_field "['items'].__len__()")
+  if [[ "$ever" -eq 0 ]]; then
+    record DEMO_SPEED 25 "Sheikh Zayed Road, km 24" "A 12345"
+    record DEMO_PHONE 15 "Al Khail Road, exit 41" "A 12345"
+    record DEMO_PARK 5 "Dubai Mall, P2" "A 12345"
+    echo "   recorded 3 (10 points, added when the objection window lapses: locally one minute)"
+  else # after a demo payment: new fines without points, so the control room still starts below 24
+    record DEMO_PARK 20 "Dubai Mall, P2" "A 12345"
+    record DEMO_PARK 10 "City Walk, B1" "A 12345"
+    record DEMO_PARK 3 "JBR, The Walk" "A 12345"
+    echo "   re-armed with 3 parking fines (no points)"
+  fi
 else
-  echo "   already has $existing"
+  echo "   already has $existing open"
 fi
 
 echo "4. One open transaction (licence renewal) for the dashboard"

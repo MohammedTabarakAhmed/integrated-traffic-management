@@ -56,6 +56,19 @@ const en = {
   heroCta: 'Open my dashboard',
   staffCta: 'Open the control room',
   comingSoon: 'Coming up in the next demo step.',
+  payAll: 'Pay all fines',
+  paying: 'Opening secure checkout…',
+  nothingDue: 'Nothing to pay',
+  paid: 'Payment confirmed',
+  receipt: 'Receipt',
+  amount: 'Amount',
+  gatewayRef: 'Gateway reference',
+  paymentId: 'Payment',
+  back: 'Back to my dashboard',
+  retryCallback: 'Simulate the gateway retrying its callback',
+  duplicateOk: 'Duplicate detected: same receipt returned, no second receipt and no second event (UAT-4).',
+  paidNote: 'The fines turn PAID as soon as payment-service publishes itms.payment.confirmed.',
+  holder: 'Holder',
 }
 
 type Dict = typeof en
@@ -114,6 +127,19 @@ const ar: Dict = {
   heroCta: 'افتح لوحتي',
   staffCta: 'افتح غرفة التحكم',
   comingSoon: 'ضمن خطوة العرض التالية.',
+  payAll: 'ادفع كل الغرامات',
+  paying: 'جارٍ فتح صفحة الدفع الآمن…',
+  nothingDue: 'لا مستحقات',
+  paid: 'تم تأكيد الدفع',
+  receipt: 'الإيصال',
+  amount: 'المبلغ',
+  gatewayRef: 'مرجع بوابة الدفع',
+  paymentId: 'الدفعة',
+  back: 'العودة إلى لوحتي',
+  retryCallback: 'محاكاة إعادة بوابة الدفع لإشعار التأكيد',
+  duplicateOk: 'تم اكتشاف التكرار: نفس الإيصال، بلا إيصال ثانٍ ولا حدث ثانٍ (UAT-4).',
+  paidNote: 'تصبح الغرامات مدفوعة فور نشر خدمة الدفع لحدث itms.payment.confirmed.',
+  holder: 'صاحب الملف',
 }
 
 const dicts = { en, ar }

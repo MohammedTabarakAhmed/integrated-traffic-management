@@ -2,7 +2,6 @@ package gov.itms.marine.application;
 
 import java.time.Instant;
 import java.util.Optional;
-import java.util.UUID;
 
 public final class Ports {
     private Ports() { }

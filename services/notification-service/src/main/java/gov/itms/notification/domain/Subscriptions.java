@@ -1,7 +1,6 @@
 package gov.itms.notification.domain;
 
 import java.time.LocalDate;
-import java.util.List;
 import java.util.regex.Pattern;
 
 /** Event subscriptions (CC-071) and expiry watches (CC-072). */

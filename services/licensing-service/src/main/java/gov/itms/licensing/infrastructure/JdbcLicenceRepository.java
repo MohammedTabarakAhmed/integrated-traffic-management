@@ -534,7 +534,6 @@ class JdbcLicenceRepository implements LicenceRepository {
                 rs.getTimestamp("issued_at").toInstant());
     }
 
-    @SuppressWarnings("unchecked")
     private LicenceRequest mapRequest(ResultSet rs, int n) throws SQLException {
         Map<String, String> payload = new LinkedHashMap<>();
         json.readTree(rs.getString("payload")).properties().forEach(e -> payload.put(e.getKey(),

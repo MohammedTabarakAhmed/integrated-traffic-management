@@ -1,8 +1,6 @@
 package gov.itms.violation.infrastructure;
 
 import gov.itms.violation.application.Ports;
-import gov.itms.violation.application.Ports.CrossborderLinks.Direction;
-import gov.itms.violation.application.Ports.CrossborderLinks.Link;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;

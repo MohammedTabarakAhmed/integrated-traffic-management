@@ -14,7 +14,6 @@ import gov.itms.vehicle.domain.Registration;
 import gov.itms.vehicle.domain.Vehicle;
 import gov.itms.vehicle.domain.VehicleTest;
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;

@@ -8,7 +8,6 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import org.springframework.transaction.annotation.Transactional;
 
 /** Paper violation book issuance, field entry and reconciliation (VF-013). */

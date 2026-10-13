@@ -1,7 +1,6 @@
 package gov.itms.licensing.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import gov.itms.licensing.domain.Actor;
 import gov.itms.licensing.domain.Channel;

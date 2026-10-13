@@ -45,8 +45,15 @@ function Plate({ number }: { number: string }) {
   )
 }
 
+const LABELS: Record<string, string> = {
+  VIN: 'رقم الهيكل', Status: 'الحالة', 'Valid until': 'صالح حتى', File: 'الملف', Class: 'الفئة', Report: 'التقرير', 'Party 2': 'الطرف 2',
+  Permit: 'التصريح', 'Valid to': 'صالح حتى', Contract: 'العقد', Violation: 'المخالفة', Owner: 'المالك', Responsible: 'المسؤول',
+  Route: 'المسار', Hull: 'رقم البدن', 'Home port': 'ميناء التسجيل',
+}
+
 function Kv({ rows }: { rows: [string, ReactNode][] }) {
-  return <dl className="kv" style={{ margin: '12px 0 0' }}>{rows.map(([k, v]) => <Fragment key={k}><dt>{k}</dt><dd>{v}</dd></Fragment>)}</dl>
+  const { lang } = useI18n()
+  return <dl className="kv" style={{ margin: '12px 0 0' }}>{rows.map(([k, v]) => <Fragment key={k}><dt>{lang === 'ar' ? LABELS[k] ?? k : k}</dt><dd>{v}</dd></Fragment>)}</dl>
 }
 
 // ---------- the stories ----------

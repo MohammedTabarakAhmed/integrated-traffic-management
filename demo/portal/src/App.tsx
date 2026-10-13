@@ -5,8 +5,10 @@ import { completeRedirect, load, signInCustomer, signOut } from './auth'
 import { useI18n } from './i18n'
 import ControlRoom from './pages/ControlRoom'
 import Dashboard from './pages/Dashboard'
+import Analytics from './pages/Analytics'
 import Home from './pages/Home'
 import Modules from './pages/Modules'
+import Platform from './pages/Platform'
 import Receipt from './pages/Receipt'
 import Settings from './pages/Settings'
 
@@ -59,10 +61,10 @@ export default function App() {
     { sec: t.sections.staff, items: [
       { r: 'control', label: t.nav.control, icon: <Radar size={18} /> },
       { r: 'modules', label: t.nav.modules, icon: <Boxes size={18} /> },
-      { r: 'analytics', label: t.nav.analytics, icon: <GaugeIcon size={18} />, soon: true },
+      { r: 'analytics', label: t.nav.analytics, icon: <GaugeIcon size={18} /> },
     ] },
     { sec: t.sections.system, items: [
-      { r: 'platform', label: t.nav.platform, icon: <Server size={18} />, soon: true },
+      { r: 'platform', label: t.nav.platform, icon: <Server size={18} /> },
     ] },
   ]
   const current = nav.flatMap((s) => s.items).find((i) => i.r === route) ?? (route === 'receipt' ? { label: t.receipt } : undefined)
@@ -82,6 +84,8 @@ export default function App() {
     page = customer ? <Settings notify={(text, bad) => setToast({ text, bad })} /> : <div className="card empty" style={{ padding: 60 }}><button className="btn primary lg" onClick={() => signInCustomer({ returnTo: '#/settings', lang })}><ShieldCheck size={18} /> {t.signInNational}</button></div>
   } else if (route === 'control') page = <ControlRoom />
   else if (route === 'modules') page = <Modules />
+  else if (route === 'analytics') page = <Analytics />
+  else if (route === 'platform') page = <Platform />
   else if (route === 'receipt') page = <Receipt go={go} />
   else page = <div className="card empty" style={{ padding: 60 }}>{t.comingSoon}</div>
 

@@ -4,6 +4,7 @@ import { ApiError, call } from '../api'
 import { load, signInStaff } from '../auth'
 import { Card, Gauge, StatusPill } from '../components'
 import { useI18n } from '../i18n'
+import { nameOf } from '../names'
 
 const DEMO_NATIONAL_ID = '784199012345671'
 const RENEWAL = 'DEMO_RENEWAL'
@@ -125,7 +126,7 @@ export default function ControlRoom() {
           if (s.holdId) {
             call<Hold>('staff', 'GET', `/v1/holds/${s.holdId}`).then((h) => {
               setHold(h)
-              if (!first) log(`Hold ${h.holdType} placed on the traffic file`, `تم وضع حجز ${h.holdType} على الملف المروري`, 'bad')
+              if (!first) log(`${nameOf(h.holdType, 'en')} hold placed on the traffic file`, `تم وضع حجز ${nameOf(h.holdType, 'ar')} على الملف المروري`, 'bad')
               void check(file)
             }).catch(() => {})
           }
@@ -166,7 +167,7 @@ export default function ControlRoom() {
         <div className="banner" role="alert">
           <Siren color="var(--red)" />
           <div><b>UAT-1 · {ar ? 'إيقاف الرخصة' : 'Licence suspended'} #{susp.ordinal}</b>
-            <span className="muted"> · {susp.from} → {susp.until}{hold ? ` · ${ar ? 'حجز' : 'hold'} ${hold.holdType}` : ''}</span></div>
+            <span className="muted"> · {susp.from} → {susp.until}{hold ? ` · ${ar ? 'حجز' : 'hold'}: ${nameOf(hold.holdType, lang)}` : ''}</span></div>
         </div>
       )}
       <div className="grid g-3">
@@ -213,8 +214,8 @@ export default function ControlRoom() {
                 </div>
                 <div className="row">
                   <div className="ico red"><ShieldX size={16} /></div>
-                  <div className="grow"><div className="title">{hold.holdType}</div>
-                    <div className="meta"><span>{hold.module}</span><span>{hold.startDate}{hold.endDate ? ` → ${hold.endDate}` : ''}</span>
+                  <div className="grow"><div className="title">{nameOf(hold.holdType, lang)}</div>
+                    <div className="meta"><span>{nameOf(hold.module, lang)}</span><span>{hold.startDate}{hold.endDate ? ` → ${hold.endDate}` : ''}</span>
                       <span>{ar ? 'يحظر' : 'blocks'}: {hold.blockedServices.includes('*') ? (ar ? 'كل الخدمات' : 'all services') : hold.blockedServices.join(', ')}</span></div></div>
                   <StatusPill s={hold.status} />
                 </div>

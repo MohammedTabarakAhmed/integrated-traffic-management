@@ -5,6 +5,7 @@ import { load } from '../auth'
 import Objection from './Objection'
 import { Card, Drawer, Gauge, Kpi, Skeleton, StatusPill, Timeline } from '../components'
 import { useI18n } from '../i18n'
+import { nameOf } from '../names'
 
 type Violation = {
   number: string; catalogueCode: string; occurredAt: string; region: string; location: string; plate?: string | null
@@ -40,16 +41,6 @@ export async function loadMine(lang: string): Promise<Data> {
   return { file, violations: v.items, account, txns: txns.items, inbox: inbox.items, payables: payables.items }
 }
 
-const fineName = (code: string, lang: string) => {
-  const names: Record<string, [string, string]> = {
-    DEMO_SPEED: ['Speeding', 'تجاوز السرعة'],
-    DEMO_PHONE: ['Phone while driving', 'استخدام الهاتف أثناء القيادة'],
-    DEMO_PARK: ['Prohibited parking', 'وقوف في مكان غير مخصص'],
-    DEMO_REDLIGHT: ['Red light', 'تجاوز الإشارة الحمراء'],
-  }
-  const n = names[code]
-  return n ? n[lang === 'ar' ? 1 : 0] : code.replace(/_/g, ' ')
-}
 
 export default function Dashboard({ onError, notify }: { onError: (e: unknown) => void; notify: (text: string) => void }) {
   const { t, lang } = useI18n()
@@ -153,7 +144,7 @@ export default function Dashboard({ onError, notify }: { onError: (e: unknown) =
                 <div className="row" key={v.number}>
                   <div className={`ico ${v.status === 'PAID' ? 'green' : 'red'}`}><Camera size={17} /></div>
                   <div className="grow">
-                    <div className="title">{fineName(v.catalogueCode, lang)}</div>
+                    <div className="title">{nameOf(v.catalogueCode, lang)}</div>
                     <div className="meta">
                       <span className="mono">{v.number}</span>
                       <span><MapPin size={12} /> {v.location}</span>
@@ -178,8 +169,8 @@ export default function Dashboard({ onError, notify }: { onError: (e: unknown) =
                 <div className="row clickable" key={x.reference} onClick={() => openTxn(x)} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && openTxn(x)}>
                   <div className="ico cyan"><ReceiptText size={17} /></div>
                   <div className="grow">
-                    <div className="title">{x.serviceCode.replace(/_/g, ' ')}</div>
-                    <div className="meta"><span className="mono">{x.reference}</span><span>{x.module}</span><span>{when(x.createdAt, lang)}</span></div>
+                    <div className="title">{nameOf(x.serviceCode, lang)}</div>
+                    <div className="meta"><span className="mono">{x.reference}</span><span>{nameOf(x.module, lang)}</span><span>{when(x.createdAt, lang)}</span></div>
                   </div>
                   <StatusPill s={x.status} />
                 </div>
@@ -204,7 +195,7 @@ export default function Dashboard({ onError, notify }: { onError: (e: unknown) =
           )}
         </Card>
       </div>
-      <Drawer open={!!txn} onClose={() => setTxn(null)} title={txn ? txn.x.serviceCode.replace(/_/g, ' ') : ''}>
+      <Drawer open={!!txn} onClose={() => setTxn(null)} title={txn ? nameOf(txn.x.serviceCode, lang) : ''}>
         {txn && (
           <>
             <dl className="kv" style={{ marginTop: 0 }}>

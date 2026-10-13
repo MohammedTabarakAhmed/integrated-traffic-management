@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { useI18n } from './i18n'
+import { sentence } from './names'
 
 /** Semicircle points gauge; turns red near the threshold. */
 export function Gauge({ value, max, label }: { value: number; max: number; label: string }) {
@@ -72,7 +73,7 @@ export function StatusPill({ s }: { s: string }) {
   const tone = ['PAID', 'COMPLETED', 'ACTIVE', 'DELIVERED', 'SENT', 'BOOKED', 'ATTENDED', 'ISSUED', 'APPROVED'].includes(s)
     ? 'ok' : ['OPEN', 'PENDING', 'SUBMITTED', 'IN_PROGRESS', 'PENDING_APPROVAL'].includes(s)
       ? 'warn' : ['CANCELLED', 'REJECTED', 'FAILED'].includes(s) ? 'bad' : 'info'
-  return <span className={`pill ${tone}`}>{t.status[s] ?? s.replace(/_/g, ' ').toLowerCase()}</span>
+  return <span className={`pill ${tone}`}>{t.status[s] ?? sentence(s)}</span>
 }
 
 export function Skeleton({ lines = 3 }: { lines?: number }) {

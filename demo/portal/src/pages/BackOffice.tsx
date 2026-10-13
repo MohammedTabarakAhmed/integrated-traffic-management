@@ -4,6 +4,7 @@ import { ApiError, call, money, when } from '../api'
 import { load, signInStaff } from '../auth'
 import { Card, Drawer, Skeleton, StatusPill, Timeline } from '../components'
 import { useI18n } from '../i18n'
+import { nameOf } from '../names'
 
 // Back office (demo D4.4), as dev.checker: decide customer objections (VF-051, VF-052), work the case-officer queue
 // (CC-060, CC-063) and lift a hold with a reason (CC-030). Every decision is audited by the services.
@@ -93,7 +94,7 @@ export default function BackOffice({ notify }: { notify: (t: string, bad?: boole
                 <div className="ico cyan"><Gavel size={16} /></div>
                 <div className="grow">
                   <div className="title mono">{o.violationNumber}</div>
-                  <div className="meta"><span>{o.reasonCode}</span><span>{when(o.submittedAt, lang)}</span></div>
+                  <div className="meta"><span>{nameOf(o.reasonCode, lang)}</span><span>{when(o.submittedAt, lang)}</span></div>
                   <div className="quote">“{o.explanation}”</div>
                   <div className="actions">
                     <button className="btn" disabled={busy === o.id} onClick={() => decide(o, 'ACCEPT')}><CheckCircle2 size={15} /> {ar ? 'قبول (إلغاء الغرامة)' : 'Accept (cancel fine)'}</button>
@@ -116,7 +117,7 @@ export default function BackOffice({ notify }: { notify: (t: string, bad?: boole
                 <div className={`ico ${i.overdue ? 'red' : 'cyan'}`}><Briefcase size={16} /></div>
                 <div className="grow">
                   <div className="title mono">{i.reference}</div>
-                  <div className="meta"><span>{i.serviceCode}</span><span>{i.stepCode}</span>{i.dueAt && <span>SLA {when(i.dueAt, lang)}</span>}<span>{i.assignee ?? (ar ? 'غير مسند' : 'unassigned')}</span></div>
+                  <div className="meta"><span>{nameOf(i.serviceCode, lang)}</span><span>{nameOf(i.stepCode, lang)}</span>{i.dueAt && <span>SLA {when(i.dueAt, lang)}</span>}<span>{i.assignee ?? (ar ? 'غير مسند' : 'unassigned')}</span></div>
                 </div>
                 <StatusPill s={i.status} />
                 {i.status === 'OPEN' && !i.assignee && <button className="btn" disabled={busy === i.id} onClick={() => claim(i)}>{ar ? 'استلام' : 'Claim'}</button>}
@@ -135,8 +136,8 @@ export default function BackOffice({ notify }: { notify: (t: string, bad?: boole
             <div className="list">{holds.map((h) => (
               <div className="row" key={h.id}>
                 <div className={`ico ${h.status === 'ACTIVE' ? 'red' : 'green'}`}>{h.status === 'ACTIVE' ? <Lock size={16} /> : <LockOpen size={16} />}</div>
-                <div className="grow"><div className="title">{h.holdType}</div>
-                  <div className="meta"><span>{h.module}</span><span>{h.startDate}{h.endDate ? ` → ${h.endDate}` : ''}</span><span>{h.liftReason ?? h.reason}</span></div></div>
+                <div className="grow"><div className="title">{nameOf(h.holdType, lang)}</div>
+                  <div className="meta"><span>{nameOf(h.module, lang)}</span><span>{h.startDate}{h.endDate ? ` → ${h.endDate}` : ''}</span><span>{h.liftReason ?? h.reason}</span></div></div>
                 <StatusPill s={h.status} />
                 {h.status === 'ACTIVE' && <button className="btn" disabled={busy === h.id} onClick={() => lift(h)}><LockOpen size={15} /> {ar ? 'رفع الحجز' : 'Lift hold'}</button>}
               </div>))}</div>

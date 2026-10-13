@@ -4,6 +4,7 @@ import { ApiError, call, money, when } from '../api'
 import { load } from '../auth'
 import { Card, Skeleton, StatusPill } from '../components'
 import { useI18n } from '../i18n'
+import { nameOf } from '../names'
 
 // My services (demo D4.2, D4.3): pay open fines in monthly instalments (VF-071) and book a service-centre appointment
 // (CC-090..CC-092), both over the customer's own APIs.
@@ -61,7 +62,7 @@ function Instalments({ notify }: { notify: (t: string, bad?: boolean) => void })
           {eligible.map((v) => (
             <label key={v.number} className="row clickable" style={{ cursor: 'pointer' }}>
               <input type="checkbox" checked={pick.has(v.number)} onChange={() => setPick((s) => { const n = new Set(s); if (n.has(v.number)) n.delete(v.number); else n.add(v.number); return n })} />
-              <div className="grow"><div className="title">{v.catalogueCode.replace(/^DEMO_/, '').replace(/_/g, ' ')}</div><div className="meta"><span className="mono">{v.number}</span><span>{v.location}</span></div></div>
+              <div className="grow"><div className="title">{nameOf(v.catalogueCode, lang)}</div><div className="meta"><span className="mono">{v.number}</span><span>{v.location}</span></div></div>
               <b>{money(v.fineMinor, 'AED', lang)}</b>
             </label>
           ))}
@@ -145,7 +146,7 @@ function Appointments({ notify }: { notify: (t: string, bad?: boolean) => void }
         <div className="list">{bookings.slice(0, 5).map((b) => (
           <div className="row" key={b.id}>
             <div className={`ico ${b.status === 'BOOKED' ? 'cyan' : ''}`}>{b.status === 'BOOKED' ? <CalendarCheck size={16} /> : <CalendarX size={16} />}</div>
-            <div className="grow"><div className="title">{when(b.start, lang)}</div><div className="meta"><span>{b.centreCode}</span><span>{ar ? 'تغييرات' : 'changes'} {b.changes}/2</span></div></div>
+            <div className="grow"><div className="title">{when(b.start, lang)}</div><div className="meta"><span>{nameOf(b.centreCode, lang)}</span><span>{ar ? 'تغييرات' : 'changes'} {b.changes}/2</span></div></div>
             <StatusPill s={b.status} />
             {b.status === 'BOOKED' && <>
               <button className="btn ghost" onClick={() => setMoving(b)}>{ar ? 'تغيير' : 'Change'}</button>

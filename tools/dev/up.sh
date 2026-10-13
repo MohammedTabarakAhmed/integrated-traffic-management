@@ -83,6 +83,10 @@ wanted = {
     "REPORTING_DB_USER": lambda: "reporting",
     "REPORTING_DB_PASSWORD": lambda: secrets.token_urlsafe(24),
     "REPORTING_PSEUDONYM_KEY": lambda: secrets.token_urlsafe(48),
+    "MIGRATION_DB_USER": lambda: "migration",
+    "MIGRATION_DB_PASSWORD": lambda: secrets.token_urlsafe(24),
+    "AI_DB_USER": lambda: "ai",
+    "AI_DB_PASSWORD": lambda: secrets.token_urlsafe(24),
     "KC_ADMIN_USER": lambda: "kc-admin",
     "KC_ADMIN_PASSWORD": lambda: secrets.token_urlsafe(24),
     "DEV_IAM_ADMIN_PASSWORD": lambda: secrets.token_urlsafe(16),
@@ -102,6 +106,10 @@ wanted = {
     "LIC_DB_PASSWORD": lambda: secrets.token_urlsafe(24),
     "EXAM_DB_USER": lambda: "examination",
     "EXAM_DB_PASSWORD": lambda: secrets.token_urlsafe(24),
+    "DEV_SEARCH_SERVICE_SECRET": lambda: secrets.token_urlsafe(32),
+    "DEV_REPORTING_SERVICE_SECRET": lambda: secrets.token_urlsafe(32),
+    "DEV_MIGRATION_SERVICE_SECRET": lambda: secrets.token_urlsafe(32),
+    "DEV_AI_SERVICE_SECRET": lambda: secrets.token_urlsafe(32),
     "GRAFANA_ADMIN_PASSWORD": lambda: secrets.token_urlsafe(16),
     "BAO_ROOT_TOKEN": lambda: secrets.token_urlsafe(24),
 }
@@ -126,18 +134,15 @@ if [[ "${1:-}" == "down" ]]; then
 fi
 
 echo "== Building service jars"
-mvn -B -ntp -q package -DskipTests -pl services/iam-service,services/reference-data-service,services/transaction-service,services/hold-eligibility-service,services/traffic-file-service,services/fees-service,services/rules-service,services/workflow-service,services/notification-service,services/document-service,services/appointment-service,services/audit-service,services/payment-service,services/vehicle-service,services/violation-service,services/device-service,services/licensing-service,services/accident-service,services/rental-service,services/permit-service,services/geo-service,services/road-permit-service,services/marine-service,services/crossborder-service,services/search-service,services/reporting-service,services/examination-service -am
+mvn -B -ntp -q package -DskipTests -pl services/iam-service,services/reference-data-service,services/transaction-service,services/hold-eligibility-service,services/traffic-file-service,services/fees-service,services/rules-service,services/workflow-service,services/notification-service,services/document-service,services/appointment-service,services/audit-service,services/payment-service,services/vehicle-service,services/violation-service,services/device-service,services/licensing-service,services/accident-service,services/rental-service,services/permit-service,services/geo-service,services/road-permit-service,services/marine-service,services/crossborder-service,services/search-service,services/reporting-service,services/examination-service,services/migration-service,services/ai-service -am
 
 echo "== Starting the databases and OpenBao"
-"${COMPOSE[@]}" up -d --wait postgres iam-postgres transaction-postgres hold-postgres traffic-file-postgres fees-postgres rules-postgres workflow-postgres notification-postgres document-postgres appointment-postgres audit-postgres payment-postgres vehicle-postgres violation-postgres device-postgres accident-postgres rental-postgres permit-postgres geo-postgres road-permit-postgres marine-postgres crossborder-postgres search-postgres reporting-postgres licensing-postgres examination-postgres openbao
+"${COMPOSE[@]}" up -d --wait postgres iam-postgres transaction-postgres hold-postgres traffic-file-postgres fees-postgres rules-postgres workflow-postgres notification-postgres document-postgres appointment-postgres audit-postgres payment-postgres vehicle-postgres violation-postgres device-postgres accident-postgres rental-postgres permit-postgres geo-postgres road-permit-postgres marine-postgres crossborder-postgres search-postgres reporting-postgres licensing-postgres examination-postgres migration-postgres ai-postgres openbao
 
 echo "== Database owner role itms_owner (ADR-039)"
 for db in "postgres refdata $REFDATA_DB_USER" "iam-postgres iam $IAM_DB_USER" \
           "transaction-postgres transaction $TXN_DB_USER" "hold-postgres hold $HOLD_DB_USER" \
-          "traffic-file-postgres trafficfile $TF_DB_USER" "fees-postgres fees $FEES_DB_USER" "rules-postgres rules $RULES_DB_USER" "workflow-postgres workflow $WORKFLOW_DB_USER" "notification-postgres notification $NOTIF_DB_USER" "document-postgres document $DOC_DB_USER" "appointment-postgres appointment $APPT_DB_USER" "audit-postgres audit $AUDIT_DB_USER" "payment-postgres payment $PAY_DB_USER" "vehicle-postgres vehicle $VEH_DB_USER" "violation-postgres violation $VIO_DB_USER" "device-postgres device $DEVICE_DB_USER" "accident-postgres accident $ACC_DB_USER" "rental-postgres rental $RENT_DB_USER" \
-          "permit-postgres permit $PERMIT_DB_USER" "geo-postgres geo $GEO_DB_USER" "road-permit-postgres roadpermit $ROAD_PERMIT_DB_USER" \
-          "marine-postgres marine $MARINE_DB_USER" "crossborder-postgres crossborder $XB_DB_USER" \
-          "search-postgres search $SEARCH_DB_USER" "reporting-postgres reporting $REPORTING_DB_USER" "licensing-postgres licensing $LIC_DB_USER" "examination-postgres examination $EXAM_DB_USER"; do
+          "traffic-file-postgres trafficfile $TF_DB_USER" "fees-postgres fees $FEES_DB_USER" "rules-postgres rules $RULES_DB_USER" "workflow-postgres workflow $WORKFLOW_DB_USER" "notification-postgres notification $NOTIF_DB_USER" "document-postgres document $DOC_DB_USER" "appointment-postgres appointment $APPT_DB_USER" "audit-postgres audit $AUDIT_DB_USER" "payment-postgres payment $PAY_DB_USER" "vehicle-postgres vehicle $VEH_DB_USER" "violation-postgres violation $VIO_DB_USER" "device-postgres device $DEVICE_DB_USER" "accident-postgres accident $ACC_DB_USER" "rental-postgres rental $RENT_DB_USER" "permit-postgres permit $PERMIT_DB_USER" "geo-postgres geo $GEO_DB_USER" "road-permit-postgres roadpermit $ROAD_PERMIT_DB_USER" "marine-postgres marine $MARINE_DB_USER" "crossborder-postgres crossborder $XB_DB_USER" "search-postgres search $SEARCH_DB_USER" "reporting-postgres reporting $REPORTING_DB_USER" "licensing-postgres licensing $LIC_DB_USER" "examination-postgres examination $EXAM_DB_USER" "migration-postgres migration $MIGRATION_DB_USER" "ai-postgres ai $AI_DB_USER"; do
   set -- $db
   "${COMPOSE[@]}" exec -T "$1" psql -q -v ON_ERROR_STOP=1 -U "$3" -d "$2" < infra/local/db/itms-owner.sql
   echo "   $2: itms_owner owns the schema"
@@ -165,8 +170,8 @@ BAO_AGENT_TOKEN=$({ printf "export BAO_TOKEN='%s' ITMS_DB_LOGIN_TTL='%s' ITMS_DB
     printf "export ACC_DB_USER='%s' ACC_DB_PASSWORD='%s' RENT_DB_USER='%s' RENT_DB_PASSWORD='%s'\n" "$ACC_DB_USER" "$ACC_DB_PASSWORD" "$RENT_DB_USER" "$RENT_DB_PASSWORD"
     printf "export PERMIT_DB_USER='%s' PERMIT_DB_PASSWORD='%s' GEO_DB_USER='%s' GEO_DB_PASSWORD='%s'\n" "$PERMIT_DB_USER" "$PERMIT_DB_PASSWORD" "$GEO_DB_USER" "$GEO_DB_PASSWORD"
     printf "export ROAD_PERMIT_DB_USER='%s' ROAD_PERMIT_DB_PASSWORD='%s' MARINE_DB_USER='%s' MARINE_DB_PASSWORD='%s' XB_DB_USER='%s' XB_DB_PASSWORD='%s'\n" "$ROAD_PERMIT_DB_USER" "$ROAD_PERMIT_DB_PASSWORD" "$MARINE_DB_USER" "$MARINE_DB_PASSWORD" "$XB_DB_USER" "$XB_DB_PASSWORD"
-    printf "export SEARCH_DB_USER='%s' SEARCH_DB_PASSWORD='%s'\n" "$SEARCH_DB_USER" "$SEARCH_DB_PASSWORD"
-    printf "export REPORTING_DB_USER='%s' REPORTING_DB_PASSWORD='%s'\n" "$REPORTING_DB_USER" "$REPORTING_DB_PASSWORD"
+    printf "export SEARCH_DB_USER='%s' SEARCH_DB_PASSWORD='%s' REPORTING_DB_USER='%s' REPORTING_DB_PASSWORD='%s'\n" "$SEARCH_DB_USER" "$SEARCH_DB_PASSWORD" "$REPORTING_DB_USER" "$REPORTING_DB_PASSWORD"
+    printf "export MIGRATION_DB_USER='%s' MIGRATION_DB_PASSWORD='%s' AI_DB_USER='%s' AI_DB_PASSWORD='%s'\n" "$MIGRATION_DB_USER" "$MIGRATION_DB_PASSWORD" "$AI_DB_USER" "$AI_DB_PASSWORD"
     printf "export LIC_DB_USER='%s' LIC_DB_PASSWORD='%s' EXAM_DB_USER='%s' EXAM_DB_PASSWORD='%s'\n" "$LIC_DB_USER" "$LIC_DB_PASSWORD" "$EXAM_DB_USER" "$EXAM_DB_PASSWORD"
     cat infra/local/openbao/configure.sh
   } | "${COMPOSE[@]}" exec -T openbao sh -s | tail -n 1)
@@ -194,6 +199,11 @@ KC=(env MSYS_NO_PATHCONV=1 docker compose "${COMPOSE_FILES[@]}" --env-file "$ENV
 "${KC[@]}" update clients/7d0c1a3e-5b2f-4c1d-9e8a-100000000010 -r itms -s "secret=$DEV_DOCUMENT_SERVICE_SECRET"
 "${KC[@]}" update clients/7d0c1a3e-5b2f-4c1d-9e8a-100000000011 -r itms -s "secret=$DEV_LICENSING_SERVICE_SECRET"
 "${KC[@]}" update clients/7d0c1a3e-5b2f-4c1d-9e8a-100000000012 -r itms -s "secret=$DEV_EXAMINATION_SERVICE_SECRET"
+# Increment 10-14 service clients
+"${KC[@]}" update clients/7d0c1a3e-5b2f-4c1d-9e8a-100000000006 -r itms -s "secret=$DEV_SEARCH_SERVICE_SECRET"
+"${KC[@]}" update clients/7d0c1a3e-5b2f-4c1d-9e8a-100000000007 -r itms -s "secret=$DEV_REPORTING_SERVICE_SECRET"
+"${KC[@]}" update clients/7d0c1a3e-5b2f-4c1d-9e8a-100000000008 -r itms -s "secret=$DEV_MIGRATION_SERVICE_SECRET"
+"${KC[@]}" update clients/7d0c1a3e-5b2f-4c1d-9e8a-100000000009 -r itms -s "secret=$DEV_AI_SERVICE_SECRET"
 
 echo "== Customer sign-in through the mock national digital ID (ADR-067; LOCAL DEVELOPMENT ONLY)"
 # The mock persons are those of the identity-register mock; one password for both, from $ENV_FILE.
@@ -460,6 +470,14 @@ grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker SEARCH_USER
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker SEARCH_USER
 # Increment 11: reports within the assignment's regions (RPT-004).
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker REPORT_VIEWER
+# Increment 12: migration-service (DAT-*) - national scope for data migration
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000017 service-account-itms-migration-service MIGRATION_EXECUTE
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000017 service-account-itms-migration-service RECONCILIATION_EXECUTE
+# Increment 13: ai-service (AI-*) - national scope for AI/ML operations
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000018 service-account-itms-ai-service AI_INFERENCE
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000018 service-account-itms-ai-service AI_MODEL_MANAGE
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000018 service-account-itms-ai-service AI_USE_CASE_MANAGE
+grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000018 service-account-itms-ai-service AI_KILL_SWITCH
 
 cat <<EOF
 
@@ -492,6 +510,8 @@ ITMS local stack is up:
   reporting-service        http://localhost:8108                     (bearer token required)
   licensing-service        http://localhost:8098                     (bearer token required)
   examination-service      http://localhost:8099                     (bearer token required)
+  migration-service        http://localhost:8109                     (bearer token required)
+  ai-service               http://localhost:8110                     (bearer token required)
   Keycloak                http://localhost:8180   (realm: itms; users dev.iam-admin / dev.maker / dev.checker;
                                                    passwords in $ENV_FILE; clients itms-directory-feed and
                                                    itms-transaction-service use DEV_DIRECTORY_FEED_SECRET and

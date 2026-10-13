@@ -46,6 +46,8 @@ configure search-service search-postgres search "$SEARCH_DB_USER" "$SEARCH_DB_PA
 configure reporting-service reporting-postgres reporting "$REPORTING_DB_USER" "$REPORTING_DB_PASSWORD"
 configure licensing-service licensing-postgres licensing "$LIC_DB_USER" "$LIC_DB_PASSWORD"
 configure examination-service examination-postgres examination "$EXAM_DB_USER" "$EXAM_DB_PASSWORD"
+configure migration-service migration-postgres migration "$MIGRATION_DB_USER" "$MIGRATION_DB_PASSWORD"
+configure ai-service ai-postgres ai "$AI_DB_USER" "$AI_DB_PASSWORD"
 
 # The agent may only read database logins.
 printf 'path "database/creds/*" {\n  capabilities = ["read"]\n}\n' | bao policy write itms-db-agent - >/dev/null

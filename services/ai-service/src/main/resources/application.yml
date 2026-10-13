@@ -1,0 +1,163 @@
+# ai-service configuration. All environment-specific values come from environment variables
+# (NFR-042, SEC-004); nothing secret is stored here.
+spring:
+  application:
+    name: ai-service
+  # Secrets arrive as files, one per property, named after it (SEC-004, ADR-038): mounted by the platform
+  # (Kubernetes secrets from the secret store; compose secrets locally), never as environment variables.
+  config:
+    import: "optional:configtree:${ITMS_SECRETS_DIR:/run/secrets/}"
+  datasource:
+    url: ${AI_DB_URL}
+    username: ${AI_DB_USER:}
+    password: ${AI_DB_PASSWORD:}
+  flyway:
+    locations: classpath:db/platform,classpath:db/migration
+    # Platform migrations (db/platform, V0_x) can be added after the service's own; apply them out of order
+    # (ADR-040). Each is additive and touches only platform tables.
+    out-of-order: true
+  # Message broker (INT-005, ADR-002). Producer defaults are kept: acks=all and idempotence on.
+  kafka:
+    bootstrap-servers: ${ITMS_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+  messages:
+    basename: messages
+    fallback-to-system-locale: false
+  threads:
+    virtual:
+      enabled: true
+
+itms:
+  # Domain events and audit records leave through the transactional outbox (INT-005, CC-120, ADR-040). Off by default
+  # so the service runs without a broker; rows wait in the outbox until the relay is switched on.
+  events:
+    enabled: ${ITMS_EVENTS_ENABLED:false}
+    audit-topic: ${ITMS_EVENTS_AUDIT_TOPIC:itms.audit.v1}
+    domain-topic: ${ITMS_EVENTS_DOMAIN_TOPIC:}
+    batch-size: ${ITMS_EVENTS_BATCH_SIZE:100}
+    send-timeout: ${ITMS_EVENTS_SEND_TIMEOUT:10s}
+    relay-interval: ${ITMS_EVENTS_RELAY_INTERVAL:1s}
+  security:
+    issuer: ${ITMS_OIDC_ISSUER}
+    jwk-set-uri: ${ITMS_OIDC_JWKS_URI}
+    audience: itms-api
+    # Grants come from iam-service (ADR-022). token-claims is the interim ADR-018 mode, for tests only.
+    authorisation-source: ${ITMS_AUTHORISATION_SOURCE:iam}
+    iam:
+      base-url: ${ITMS_IAM_URL:}
+      cache-ttl: ${ITMS_IAM_CACHE_TTL:60s}
+  # AI service specific configuration (AI-001..AI-019)
+  ai:
+    # Model inference settings
+    inference:
+      timeout: ${ITMS_AI_INFERENCE_TIMEOUT:5s}
+      max-retries: ${ITMS_AI_INFERENCE_MAX_RETRIES:3}
+      cache-enabled: ${ITMS_AI_INFERENCE_CACHE_ENABLED:true}
+      cache-ttl: ${ITMS_AI_INFERENCE_CACHE_TTL:1h}
+    # Human review settings (AI-012, AI-013)
+    review:
+      default-sla-hours: ${ITMS_AI_REVIEW_DEFAULT_SLA_HOURS:24}
+      escalation-hours: ${ITMS_AI_REVIEW_ESCALATION_HOURS:48}
+      auto-assign: ${ITMS_AI_REVIEW_AUTO_ASSIGN:false}
+    # Drift monitoring settings (AI-006, AI-007)
+    drift:
+      check-interval: ${ITMS_AI_DRIFT_CHECK_INTERVAL:1h}
+      psi-threshold-warning: ${ITMS_AI_DRIFT_PSI_WARNING:0.1}
+      psi-threshold-critical: ${ITMS_AI_DRIFT_PSI_CRITICAL:0.2}
+      feature-drift-threshold-warning: ${ITMS_AI_DRIFT_FEATURE_WARNING:0.1}
+      feature-drift-threshold-critical: ${ITMS_AI_DRIFT_FEATURE_CRITICAL:0.2}
+    # Kill switch settings (AI-014, AI-019)
+    kill-switch:
+      auto-activate-on-critical-drift: ${ITMS_AI_KILL_SWITCH_AUTO_DRIFT:true}
+      auto-activate-on-adversarial-critical: ${ITMS_AI_KILL_SWITCH_AUTO_ADVERSARIAL:true}
+      notification-webhook: ${ITMS_AI_KILL_SWITCH_WEBHOOK:}
+    # Explainability settings (AI-008)
+    explainability:
+      default-method: ${ITMS_AI_EXPLAINABILITY_METHOD:SHAP}
+      cache-enabled: ${ITMS_AI_EXPLAINABILITY_CACHE:true}
+    # Model evaluation settings (AI-004)
+    evaluation:
+      min-test-samples: ${ITMS_AI_EVAL_MIN_SAMPLES:100}
+      max-test-samples: ${ITMS_AI_EVAL_MAX_SAMPLES:10000}
+    # Bias testing settings (AI-015)
+    bias:
+      threshold-warning: ${ITMS_AI_BIAS_THRESHOLD_WARNING:0.05}
+      threshold-fail: ${ITMS_AI_BIAS_THRESHOLD_FAIL:0.10}
+    # Adversarial testing settings (AI-016)
+    adversarial:
+      default-samples: ${ITMS_AI_ADVERSARIAL_SAMPLES:1000}
+      threshold-robust: ${ITMS_AI_ADVERSARIAL_THRESHOLD_ROBUST:0.95}
+      threshold-vulnerable: ${ITMS_AI_ADVERSARIAL_THRESHOLD_VULNERABLE:0.85}
+  # Calls to other services with this service's own client-credentials account (ADR-034).
+  clients:
+    fees:
+      base-url: ${ITMS_FEES_URL:http://fees-service:8080}
+      token-uri: ${ITMS_OIDC_TOKEN_URI:http://keycloak:8080/realms/itms/protocol/openid-connect/token}
+      client-id: ${ITMS_SERVICE_CLIENT_ID:itms-ai-service}
+      client-secret-file: ${ITMS_FEES_CLIENT_SECRET_FILE:/run/secrets/itms.clients.fees.client-secret}
+      timeout: ${ITMS_FEES_TIMEOUT:3s}
+    payments:
+      base-url: ${ITMS_PAYMENTS_URL:http://payment-service:8080}
+      token-uri: ${ITMS_OIDC_TOKEN_URI:http://keycloak:8080/realms/itms/protocol/openid-connect/token}
+      client-id: ${ITMS_SERVICE_CLIENT_ID:itms-ai-service}
+      client-secret-file: ${ITMS_PAYMENTS_CLIENT_SECRET_FILE:/run/secrets/itms.clients.payments.client-secret}
+      timeout: ${ITMS_PAYMENTS_TIMEOUT:3s}
+    violation:
+      base-url: ${ITMS_VIOLATION_URL:http://violation-service:8080}
+      token-uri: ${ITMS_OIDC_TOKEN_URI:http://keycloak:8080/realms/itms/protocol/openid-connect/token}
+      client-id: ${ITMS_SERVICE_CLIENT_ID:itms-ai-service}
+      client-secret-file: ${ITMS_VIOLATION_CLIENT_SECRET_FILE:/run/secrets/itms.clients.violations.client-secret}
+      timeout: ${ITMS_VIOLATION_TIMEOUT:3s}
+    accident:
+      base-url: ${ITMS_ACCIDENT_URL:http://accident-service:8080}
+      token-uri: ${ITMS_OIDC_TOKEN_URI:http://keycloak:8080/realms/itms/protocol/openid-connect/token}
+      client-id: ${ITMS_SERVICE_CLIENT_ID:itms-ai-service}
+      client-secret-file: ${ITMS_ACCIDENT_CLIENT_SECRET_FILE:/run/secrets/itms.clients.accident.client-secret}
+      timeout: ${ITMS_ACCIDENT_TIMEOUT:3s}
+    licensing:
+      base-url: ${ITMS_LICENSING_URL:http://licensing-service:8080}
+      token-uri: ${ITMS_OIDC_TOKEN_URI:http://keycloak:8080/realms/itms/protocol/openid-connect/token}
+      client-id: ${ITMS_SERVICE_CLIENT_ID:itms-ai-service}
+      client-secret-file: ${ITMS_LICENSING_CLIENT_SECRET_FILE:/run/secrets/itms.clients.licensing.client-secret}
+      timeout: ${ITMS_LICENSING_TIMEOUT:3s}
+
+# Observability (NFR-040, ADR-037). Probes and the Prometheus scrape are served on a separate management port, reached
+# only from the operations network; on that port they need no token (ManagementRequests). Traces and logs go to an
+# OpenTelemetry collector only when its endpoints are set, for example
+# MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT=http://otel-collector:4318/v1/traces and
+# MANAGEMENT_OPENTELEMETRY_LOGGING_EXPORT_OTLP_ENDPOINT=http://otel-collector:4318/v1/logs.
+management:
+  server:
+    port: ${ITMS_MANAGEMENT_PORT:8090}
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+        http.client.requests: true
+  tracing:
+    sampling:
+      probability: ${ITMS_TRACING_SAMPLING_PROBABILITY:0.1}
+
+server:
+  error:
+    include-stacktrace: never
+    include-message: never
+
+# Log levels are set per service (NFR-040): ITMS_LOG_LEVEL for ITMS code, ITMS_LOG_LEVEL_ROOT for everything else.
+logging:
+  level:
+    root: ${ITMS_LOG_LEVEL_ROOT:INFO}
+    gov.itms: ${ITMS_LOG_LEVEL:INFO}
+  pattern:
+    level: "%5p [${spring.application.name},%X{correlationId:-}]"
+    correlation: "[%X{traceId:-},%X{spanId:-}] "

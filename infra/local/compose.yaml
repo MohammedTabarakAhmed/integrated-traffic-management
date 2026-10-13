@@ -374,22 +374,7 @@ services:
       timeout: 3s
       retries: 20
 
-  # ---- Increment 10: unified search (holds only its audit and event outboxes)
-  search-postgres:
-    image: postgres:17-alpine
-    environment:
-      POSTGRES_DB: search
-      POSTGRES_USER: ${SEARCH_DB_USER:?run tools/dev/up.sh}
-      POSTGRES_PASSWORD_FILE: /run/secrets/search_db_password
-    secrets: [search_db_password]
-    volumes: [search-db:/var/lib/postgresql/data]
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d search"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-
-  # ---- Increment 11: reporting warehouse (RPT-020; personal identifiers pseudonymised, RPT-022)
+  # ---- Increment 10-14 databases (search-postgres is above)
   reporting-postgres:
     image: postgres:17-alpine
     environment:
@@ -428,6 +413,49 @@ services:
     volumes: [examination-db:/var/lib/postgresql/data]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d examination"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migration-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: migration
+      POSTGRES_USER: ${MIGRATION_DB_USER:?run tools/dev/up.sh}
+      POSTGRES_PASSWORD_FILE: /run/secrets/migration_db_password
+    secrets: [migration_db_password]
+    volumes: [migration-db:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d migration"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  ai-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ai
+      POSTGRES_USER: ${AI_DB_USER:?run tools/dev/up.sh}
+      POSTGRES_PASSWORD_FILE: /run/secrets/ai_db_password
+    secrets: [ai_db_password]
+    volumes: [ai-db:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d ai"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # ---- Increment 10: unified search (holds only its audit and event outboxes)
+  search-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: search
+      POSTGRES_USER: ${SEARCH_DB_USER:?run tools/dev/up.sh}
+      POSTGRES_PASSWORD_FILE: /run/secrets/search_db_password
+    secrets: [search_db_password]
+    volumes: [search-db:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d search"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -1536,6 +1564,87 @@ services:
       timeout: 3s
       retries: 30
 
+  # ---- Increment 12: Data Migration (DAT-001..DAT-017)
+  migration-service:
+    build: ../../services/migration-service
+    mem_limit: ${ITMS_SERVICE_MEM_LIMIT:-512m}
+    environment:
+      <<: [*itms-observability, *itms-events]
+      MIGRATION_DB_URL: jdbc:postgresql://migration-postgres:5432/migration
+      SPRING_DATASOURCE_HIKARI_CONNECTIONINITSQL: SET ROLE itms_owner
+      ITMS_OIDC_ISSUER: http://localhost:8180/realms/itms
+      ITMS_OIDC_JWKS_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/certs
+      ITMS_AUTHORISATION_SOURCE: iam
+      ITMS_IAM_URL: http://iam-service:8080
+    volumes:
+      - type: volume
+        source: db-credentials
+        target: /run/secrets/spring/datasource
+        read_only: true
+        volume: {subpath: migration-service}
+    ports: ["127.0.0.1:8109:8080"]
+    depends_on:
+      bao-agent: {condition: service_healthy}
+      migration-postgres: {condition: service_healthy}
+      kafka: {condition: service_healthy}
+      keycloak: {condition: service_healthy}
+      iam-service: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8090/actuator/health/readiness | grep -q UP"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  # ---- Increment 13: AI & Agentic Automation (AI-001..AI-019)
+  ai-service:
+    build: ../../services/ai-service
+    mem_limit: ${ITMS_SERVICE_MEM_LIMIT:-512m}
+    environment:
+      <<: [*itms-observability, *itms-events]
+      AI_DB_URL: jdbc:postgresql://ai-postgres:5432/ai
+      SPRING_DATASOURCE_HIKARI_CONNECTIONINITSQL: SET ROLE itms_owner
+      ITMS_OIDC_ISSUER: http://localhost:8180/realms/itms
+      ITMS_OIDC_JWKS_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/certs
+      ITMS_AUTHORISATION_SOURCE: iam
+      ITMS_IAM_URL: http://iam-service:8080
+      # AI service calls other services for inference data (fees, payments, violations, accidents, licensing)
+      ITMS_FEES_URL: http://fees-service:8080
+      ITMS_PAYMENTS_URL: http://payment-service:8080
+      ITMS_VIOLATION_URL: http://violation-service:8080
+      ITMS_ACCIDENT_URL: http://accident-service:8080
+      ITMS_LICENSING_URL: http://licensing-service:8080
+      ITMS_OIDC_TOKEN_URI: http://keycloak:8080/realms/itms/protocol/openid-connect/token
+      ITMS_SERVICE_CLIENT_ID: itms-ai-service
+    secrets:
+      - source: ai_service_client_secret
+        target: itms.clients.fees.client-secret
+      - source: ai_service_client_secret
+        target: itms.clients.payments.client-secret
+      - source: ai_service_client_secret
+        target: itms.clients.violations.client-secret
+      - source: ai_service_client_secret
+        target: itms.clients.accident.client-secret
+      - source: ai_service_client_secret
+        target: itms.clients.licensing.client-secret
+    volumes:
+      - type: volume
+        source: db-credentials
+        target: /run/secrets/spring/datasource
+        read_only: true
+        volume: {subpath: ai-service}
+    ports: ["127.0.0.1:8110:8080"]
+    depends_on:
+      bao-agent: {condition: service_healthy}
+      ai-postgres: {condition: service_healthy}
+      kafka: {condition: service_healthy}
+      keycloak: {condition: service_healthy}
+      iam-service: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8090/actuator/health/readiness | grep -q UP"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
   # ---- Increment 3: driving licences and examinations (DL-020..DL-065, DL-030..DL-045)
   licensing-service:
     build: ../../services/licensing-service
@@ -1747,6 +1856,10 @@ services:
         condition: service_healthy
       reporting-service:
         condition: service_healthy
+      migration-service:
+        condition: service_healthy
+      ai-service:
+        condition: service_healthy
     healthcheck:
       # Ready once routes are loaded and the token check answers: an unauthenticated call gets 401.
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9080 && printf 'GET /v1/roles HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && head -1 <&3 | grep -q ' 401 '"]
@@ -1793,7 +1906,7 @@ services:
       openbao:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "for s in iam-service reference-data-service transaction-service hold-eligibility-service traffic-file-service fees-service rules-service workflow-service notification-service document-service appointment-service audit-service payment-service vehicle-service violation-service device-service accident-service rental-service permit-service geo-service road-permit-service marine-service crossborder-service search-service reporting-service licensing-service examination-service; do test -s /run/db-credentials/$$s/username && test -s /run/db-credentials/$$s/password || exit 1; done"]
+      test: ["CMD-SHELL", "for s in iam-service reference-data-service transaction-service hold-eligibility-service traffic-file-service fees-service rules-service workflow-service notification-service document-service appointment-service audit-service payment-service vehicle-service violation-service device-service accident-service rental-service permit-service geo-service road-permit-service marine-service crossborder-service search-service reporting-service licensing-service examination-service migration-service ai-service; do test -s /run/db-credentials/$$s/username && test -s /run/db-credentials/$$s/password || exit 1; done"]
       interval: 2s
       timeout: 3s
       retries: 30
@@ -1930,6 +2043,7 @@ secrets:
     environment: GRAFANA_ADMIN_PASSWORD
   bao_agent_token: # minted by tools/dev/up.sh on every start (policy itms-db-agent: read database logins only)
     environment: BAO_AGENT_TOKEN
+  # Increment 10-14 secrets
   search_db_password:
     environment: SEARCH_DB_PASSWORD
   reporting_db_password:
@@ -1944,6 +2058,12 @@ secrets:
     environment: DEV_EXAMINATION_SERVICE_SECRET
   reporting_pseudonym_key: # RPT-022 pseudonymisation key
     environment: REPORTING_PSEUDONYM_KEY
+  migration_db_password:
+    environment: MIGRATION_DB_PASSWORD
+  ai_db_password:
+    environment: AI_DB_PASSWORD
+  ai_service_client_secret:
+    environment: DEV_AI_SERVICE_SECRET
 
 volumes:
   refdata-db:
@@ -1979,5 +2099,7 @@ volumes:
   reporting-db:
   licensing-db:
   examination-db:
+  migration-db:
+  ai-db:
   db-credentials:
   kafka-data:

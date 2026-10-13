@@ -118,6 +118,14 @@ upstreams:
     type: roundrobin
     nodes:
       "examination-service:8080": 1
+  - id: migration-service
+    type: roundrobin
+    nodes:
+      "migration-service:8080": 1
+  - id: ai-service
+    type: roundrobin
+    nodes:
+      "ai-service:8080": 1
 
 plugin_configs:
   - id: protected-api
@@ -513,4 +521,46 @@ routes:
       - /v1/exam-bookings/*
       - /v1/result-exceptions
       - /v1/result-exceptions/*
+  - id: migration-service
+    name: migration-service
+    upstream_id: migration-service
+    plugin_config_id: protected-api
+    uris:
+      - /v1/migration
+      - /v1/migration/*
+      - /v1/migration/legacy-systems
+      - /v1/migration/legacy-systems/*
+      - /v1/migration/jobs
+      - /v1/migration/jobs/*
+      - /v1/migration/executions
+      - /v1/migration/executions/*
+      - /v1/migration/exceptions
+      - /v1/migration/exceptions/*
+      - /v1/migration/anonymization
+      - /v1/migration/anonymization/*
+  - id: ai-service
+    name: ai-service
+    upstream_id: ai-service
+    plugin_config_id: protected-api
+    uris:
+      - /v1/ai
+      - /v1/ai/*
+      - /v1/ai/models
+      - /v1/ai/models/*
+      - /v1/ai/use-cases
+      - /v1/ai/use-cases/*
+      - /v1/ai/inferences
+      - /v1/ai/inferences/*
+      - /v1/ai/reviews
+      - /v1/ai/reviews/*
+      - /v1/ai/drift
+      - /v1/ai/drift/*
+      - /v1/ai/bias-tests
+      - /v1/ai/bias-tests/*
+      - /v1/ai/adversarial-tests
+      - /v1/ai/adversarial-tests/*
+      - /v1/ai/explanations
+      - /v1/ai/explanations/*
+      - /v1/ai/kill-switch
+      - /v1/ai/kill-switch/*
 #END

@@ -50,6 +50,8 @@
     <module>services/search-service</module>
     <module>services/reporting-service</module>
     <module>services/examination-service</module>
+    <module>services/migration-service</module>
+    <module>services/ai-service</module>
   </modules>
 
   <properties>

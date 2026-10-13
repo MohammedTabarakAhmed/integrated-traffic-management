@@ -1,0 +1,759 @@
+openapi: 3.1.0
+info:
+  title: ITMS Migration Service
+  version: 1.0.0
+  description: |
+    Data migration, reconciliation, legacy ID preservation and rollback (DAT-001..DAT-017).
+    Profile all seven legacy systems (DAT-001). Source-to-target mappings (DAT-002).
+    Data quality rules (DAT-004). Verified backups (DAT-005).
+    ETL with reconciliation (DAT-006, DAT-010). Exception store (DAT-011).
+    Legacy ID preservation (DAT-012). Rollback per cutover (DAT-013).
+    Anonymisation for non-production (DAT-014). Three full dress rehearsals (DAT-008).
+
+servers:
+  - url: /
+security:
+  - bearerAuth: []
+tags:
+  - name: Legacy Systems
+  - name: Entity Mappings
+  - name: Migration Jobs
+  - name: Executions
+  - name: Reconciliation
+  - name: Exceptions
+  - name: Rollback Plans
+  - name: Anonymization
+
+paths:
+  /v1/migration/legacy-systems:
+    get:
+      operationId: listLegacySystems
+      summary: List all legacy systems
+      tags: [Legacy Systems]
+      x-itms-permission: migration.legacy.read
+      x-itms-scope: [national]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: List of legacy systems
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/LegacySystem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: createLegacySystem
+      summary: Register a new legacy system
+      tags: [Legacy Systems]
+      x-itms-permission: migration.legacy.manage
+      x-itms-scope: [national]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LegacySystem' }
+      responses:
+        '201':
+          description: Legacy system created
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LegacySystem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+
+  /v1/migration/legacy-systems/{code}/mappings:
+    get:
+      operationId: getEntityMappings
+      summary: Get entity mappings for a legacy system
+      tags: [Entity Mappings]
+      x-itms-permission: migration.mapping.read
+      x-itms-scope: [national]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema: { type: string, maxLength: 40 }
+      responses:
+        '200':
+          description: Entity mappings
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/EntityMapping' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: createEntityMapping
+      summary: Create an entity mapping
+      tags: [Entity Mappings]
+      x-itms-permission: migration.mapping.manage
+      x-itms-scope: [national]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema: { type: string, maxLength: 40 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EntityMapping' }
+      responses:
+        '201':
+          description: Entity mapping created
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EntityMapping' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+
+  /v1/migration/jobs:
+    get:
+      operationId: listMigrationJobs
+      summary: List all migration jobs
+      tags: [Migration Jobs]
+      x-itms-permission: migration.job.read
+      x-itms-scope: [national]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: List of migration jobs
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/MigrationJob' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: createMigrationJob
+      summary: Create a new migration job
+      tags: [Migration Jobs]
+      x-itms-permission: migration.job.manage
+      x-itms-scope: [national]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MigrationJob' }
+      responses:
+        '201':
+          description: Migration job created
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MigrationJob' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+
+  /v1/migration/jobs/{code}:
+    get:
+      operationId: getMigrationJob
+      summary: Get a migration job by code
+      tags: [Migration Jobs]
+      x-itms-permission: migration.job.read
+      x-itms-scope: [national]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema: { type: string, maxLength: 40 }
+      responses:
+        '200':
+          description: Migration job
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MigrationJob' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/migration/jobs/{code}/start:
+    post:
+      operationId: startMigrationJob
+      summary: Start a scheduled migration job
+      tags: [Migration Jobs]
+      x-itms-permission: migration.job.execute
+      x-itms-scope: [national]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema: { type: string, maxLength: 40 }
+      responses:
+        '200':
+          description: Started migration job
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MigrationJob' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/migration/jobs/{code}/complete:
+    post:
+      operationId: completeMigrationJob
+      summary: Mark a migration job as complete
+      tags: [Migration Jobs]
+      x-itms-permission: migration.job.execute
+      x-itms-scope: [national]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema: { type: string, maxLength: 40 }
+      responses:
+        '200':
+          description: Completed migration job
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MigrationJob' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/migration/jobs/{jobCode}/executions/{entityName}/start:
+    post:
+      operationId: startExecution
+      summary: Start execution for an entity within a job
+      tags: [Executions]
+      x-itms-permission: migration.job.execute
+      x-itms-scope: [national]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: jobCode
+          in: path
+          required: true
+          schema: { type: string, maxLength: 40 }
+        - name: entityName
+          in: path
+          required: true
+          schema: { type: string, maxLength: 100 }
+      responses:
+        '200':
+          description: Started execution
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MigrationExecution' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/migration/executions/{id}/complete:
+    post:
+      operationId: completeExecution
+      summary: Complete an entity execution with counts
+      tags: [Executions]
+      x-itms-permission: migration.job.execute
+      x-itms-scope: [national]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: total
+          in: query
+          required: true
+          schema: { type: integer, format: int64 }
+        - name: processed
+          in: query
+          required: true
+          schema: { type: integer, format: int64 }
+        - name: successful
+          in: query
+          required: true
+          schema: { type: integer, format: int64 }
+        - name: failed
+          in: query
+          required: true
+          schema: { type: integer, format: int64 }
+        - name: errorDetails
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: Completed execution
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MigrationExecution' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/migration/jobs/{jobCode}/reconcile/{entityName}:
+    post:
+      operationId: reconcileEntity
+      summary: Run reconciliation for an entity (DAT-010)
+      tags: [Reconciliation]
+      x-itms-permission: migration.reconcile.execute
+      x-itms-scope: [national]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: jobCode
+          in: path
+          required: true
+          schema: { type: string, maxLength: 40 }
+        - name: entityName
+          in: path
+          required: true
+          schema: { type: string, maxLength: 100 }
+      responses:
+        '200':
+          description: Reconciliation report
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReconciliationReport' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/migration/jobs/{jobCode}/reconciliation:
+    get:
+      operationId: listReconciliationReports
+      summary: List reconciliation reports for a job
+      tags: [Reconciliation]
+      x-itms-permission: migration.reconcile.read
+      x-itms-scope: [national]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: jobCode
+          in: path
+          required: true
+          schema: { type: string, maxLength: 40 }
+      responses:
+        '200':
+          description: Reconciliation reports
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ReconciliationReport' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+
+  /v1/migration/jobs/{jobCode}/executions/{executionId}/exceptions:
+    post:
+      operationId: recordException
+      summary: Record a migration exception (DAT-011)
+      tags: [Exceptions]
+      x-itms-permission: migration.exception.record
+      x-itms-scope: [national]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: jobCode
+          in: path
+          required: true
+          schema: { type: string, maxLength: 40 }
+        - name: executionId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [entityName, legacyId, legacyData, errorCode, errorMessage, severity]
+              properties:
+                entityName: { type: string, maxLength: 100 }
+                legacyId: { type: string }
+                legacyData: { type: object }
+                errorCode: { type: string, maxLength: 40 }
+                errorMessage: { type: string }
+                severity: { type: string, enum: [LOW, MEDIUM, HIGH, CRITICAL] }
+      responses:
+        '201':
+          description: Exception recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExceptionRecord' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /v1/migration/exceptions/{id}/resolve:
+    post:
+      operationId: resolveException
+      summary: Resolve a migration exception
+      tags: [Exceptions]
+      x-itms-permission: migration.exception.resolve
+      x-itms-scope: [national]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: resolution
+          in: query
+          required: true
+          schema: { type: string }
+        - name: assignedTo
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Exception resolved
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExceptionRecord' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/migration/jobs/{jobCode}/exceptions/unresolved:
+    get:
+      operationId: getUnresolvedExceptions
+      summary: Get unresolved exceptions for a job
+      tags: [Exceptions]
+      x-itms-permission: migration.exception.read
+      x-itms-scope: [national]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: jobCode
+          in: path
+          required: true
+          schema: { type: string, maxLength: 40 }
+      responses:
+        '200':
+          description: Unresolved exceptions
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ExceptionRecord' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+
+  /v1/migration/jobs/{jobCode}/rollback-plan:
+    get:
+      operationId: getRollbackPlan
+      summary: Get rollback plan for a job (DAT-013)
+      tags: [Rollback Plans]
+      x-itms-permission: migration.rollback.read
+      x-itms-scope: [national]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: jobCode
+          in: path
+          required: true
+          schema: { type: string, maxLength: 40 }
+      responses:
+        '200':
+          description: Rollback plan
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RollbackPlan' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: createRollbackPlan
+      summary: Create a rollback plan for a job
+      tags: [Rollback Plans]
+      x-itms-permission: migration.rollback.manage
+      x-itms-scope: [national]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: jobCode
+          in: path
+          required: true
+          schema: { type: string, maxLength: 40 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RollbackPlan' }
+      responses:
+        '201':
+          description: Rollback plan created
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RollbackPlan' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+
+  /v1/migration/anonymization/{entityName}:
+    get:
+      operationId: getAnonymizationRules
+      summary: Get anonymization rules for an entity (DAT-014)
+      tags: [Anonymization]
+      x-itms-permission: migration.anonymization.read
+      x-itms-scope: [national]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: entityName
+          in: path
+          required: true
+          schema: { type: string, maxLength: 100 }
+      responses:
+        '200':
+          description: Anonymization rules
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AnonymizationRule' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+
+  /v1/migration/anonymization:
+    post:
+      operationId: createAnonymizationRule
+      summary: Create an anonymization rule
+      tags: [Anonymization]
+      x-itms-permission: migration.anonymization.manage
+      x-itms-scope: [national]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AnonymizationRule' }
+      responses:
+        '201':
+          description: Anonymization rule created
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AnonymizationRule' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  responses:
+    Problem:
+      description: Invalid request
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Unauthorized:
+      description: Authentication required
+  schemas:
+    LegacySystem:
+      type: object
+      additionalProperties: false
+      required: [code, nameEn, nameAr, connectionConfig]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, minLength: 1, maxLength: 40 }
+        nameEn: { type: string, minLength: 1, maxLength: 100 }
+        nameAr: { type: string, minLength: 1, maxLength: 100 }
+        descriptionEn: { type: string, maxLength: 500 }
+        descriptionAr: { type: string, maxLength: 500 }
+        connectionConfig: { type: string, maxLength: 1000 }
+        entityMappings: { type: string, maxLength: 2000 }
+        active: { type: boolean, default: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    EntityMapping:
+      type: object
+      additionalProperties: false
+      required: [legacySystemCode, legacyEntityName, targetEntityName, fieldMappings]
+      properties:
+        id: { type: string, format: uuid }
+        legacySystemCode: { type: string, minLength: 1, maxLength: 40 }
+        legacyEntityName: { type: string, minLength: 1, maxLength: 100 }
+        targetEntityName: { type: string, minLength: 1, maxLength: 100 }
+        fieldMappings: { type: string }
+        transformationRules: { type: string, maxLength: 2000 }
+        validationRules: { type: string, maxLength: 2000 }
+        active: { type: boolean, default: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    MigrationJob:
+      type: object
+      additionalProperties: false
+      required: [code, nameEn, nameAr, legacySystemCode, entityMappings]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, minLength: 1, maxLength: 40 }
+        nameEn: { type: string, minLength: 1, maxLength: 100 }
+        nameAr: { type: string, minLength: 1, maxLength: 100 }
+        legacySystemCode: { type: string, minLength: 1, maxLength: 40 }
+        entityMappings:
+          type: array
+          items: { type: string }
+        status:
+          type: string
+          enum: [SCHEDULED, RUNNING, COMPLETED, FAILED, PARTIAL, CANCELLED, ROLLED_BACK]
+        scheduledAt: { type: string, format: date-time }
+        startedAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time }
+        totalRecords: { type: integer, format: int64 }
+        processedRecords: { type: integer, format: int64 }
+        successfulRecords: { type: integer, format: int64 }
+        failedRecords: { type: integer, format: int64 }
+        errorSummary: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    MigrationExecution:
+      type: object
+      additionalProperties: false
+      required: [id, jobId, entityName, status, totalRecords, processedRecords, successfulRecords, failedRecords]
+      properties:
+        id: { type: string, format: uuid }
+        jobId: { type: string, format: uuid }
+        entityName: { type: string, minLength: 1, maxLength: 100 }
+        status:
+          type: string
+          enum: [PENDING, RUNNING, COMPLETED, FAILED]
+        totalRecords: { type: integer, format: int64 }
+        processedRecords: { type: integer, format: int64 }
+        successfulRecords: { type: integer, format: int64 }
+        failedRecords: { type: integer, format: int64 }
+        startedAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time }
+        errorDetails: { type: string }
+
+    ReconciliationReport:
+      type: object
+      additionalProperties: false
+      required: [id, jobId, entityName, sourceCount, targetCount, matchedCount, mismatchedCount, missingInTarget, extraInTarget, matchPercentage, financialReconciliation, generatedAt, status]
+      properties:
+        id: { type: string, format: uuid }
+        jobId: { type: string, format: uuid }
+        entityName: { type: string, minLength: 1, maxLength: 100 }
+        sourceCount: { type: integer, format: int64 }
+        targetCount: { type: integer, format: int64 }
+        matchedCount: { type: integer, format: int64 }
+        mismatchedCount: { type: integer, format: int64 }
+        missingInTarget: { type: integer, format: int64 }
+        extraInTarget: { type: integer, format: int64 }
+        matchPercentage: { type: number, minimum: 0, maximum: 100 }
+        financialReconciliation: { type: object }
+        generatedAt: { type: string, format: date-time }
+        status:
+          type: string
+          enum: [PASSED, FAILED, WARNING, PENDING_REVIEW]
+
+    ExceptionRecord:
+      type: object
+      additionalProperties: false
+      required: [id, jobId, executionId, entityName, legacyId, legacyData, errorCode, errorMessage, severity, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        jobId: { type: string, format: uuid }
+        executionId: { type: string, format: uuid }
+        entityName: { type: string, minLength: 1, maxLength: 100 }
+        legacyId: { type: string }
+        legacyData: { type: object }
+        targetId: { type: string }
+        errorCode: { type: string, minLength: 1, maxLength: 40 }
+        errorMessage: { type: string }
+        severity:
+          type: string
+          enum: [LOW, MEDIUM, HIGH, CRITICAL]
+        assignedTo: { type: string }
+        resolution: { type: string }
+        createdAt: { type: string, format: date-time }
+        resolvedAt: { type: string, format: date-time }
+
+    RollbackPlan:
+      type: object
+      additionalProperties: false
+      required: [jobCode, nameEn, nameAr, rollbackSteps, validationQueries]
+      properties:
+        id: { type: string, format: uuid }
+        jobCode: { type: string, minLength: 1, maxLength: 40 }
+        nameEn: { type: string, minLength: 1, maxLength: 100 }
+        nameAr: { type: string, minLength: 1, maxLength: 100 }
+        descriptionEn: { type: string, maxLength: 500 }
+        descriptionAr: { type: string, maxLength: 500 }
+        rollbackSteps: { type: string }
+        validationQueries: { type: string }
+        tested: { type: boolean, default: false }
+        testedAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    AnonymizationRule:
+      type: object
+      additionalProperties: false
+      required: [entityName, fieldName, ruleType, ruleConfig]
+      properties:
+        id: { type: string, format: uuid }
+        entityName: { type: string, minLength: 1, maxLength: 100 }
+        fieldName: { type: string, minLength: 1, maxLength: 100 }
+        ruleType:
+          type: string
+          enum: [MASK, HASH, RANDOMIZE, NULLIFY, SHUFFLE, CUSTOM]
+        ruleConfig: { type: object }
+        active: { type: boolean, default: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    Problem:
+      type: object
+      additionalProperties: true
+      properties:
+        type: { type: string, format: uri-reference }
+        title: { type: string, maxLength: 200 }
+        status: { type: integer }
+        detail: { type: string, maxLength: 1000 }
+        requirements:
+          type: array
+          items: { type: string }

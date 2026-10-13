@@ -291,6 +291,106 @@
           }
         }
       ]
+    },
+    {
+      "id": "7d0c1a3e-5b2f-4c1d-9e8a-100000000006",
+      "clientId": "itms-search-service",
+      "name": "search-service's own account for service-to-service calls (CC-100..CC-103). LOCAL DEVELOPMENT ONLY: the secret is set by tools/dev/up.sh",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "fullScopeAllowed": false,
+      "protocolMappers": [
+        {
+          "name": "itms-api audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "itms-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "id": "7d0c1a3e-5b2f-4c1d-9e8a-100000000007",
+      "clientId": "itms-reporting-service",
+      "name": "reporting-service's own account for service-to-service calls (RPT-*). LOCAL DEVELOPMENT ONLY: the secret is set by tools/dev/up.sh",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "fullScopeAllowed": false,
+      "protocolMappers": [
+        {
+          "name": "itms-api audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "itms-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "id": "7d0c1a3e-5b2f-4c1d-9e8a-100000000008",
+      "clientId": "itms-migration-service",
+      "name": "migration-service's own account for service-to-service calls (DAT-*). LOCAL DEVELOPMENT ONLY: the secret is set by tools/dev/up.sh",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "fullScopeAllowed": false,
+      "protocolMappers": [
+        {
+          "name": "itms-api audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "itms-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "id": "7d0c1a3e-5b2f-4c1d-9e8a-100000000009",
+      "clientId": "itms-ai-service",
+      "name": "ai-service's own account for service-to-service calls to fees, payments, violations, accidents, licensing (AI-*). LOCAL DEVELOPMENT ONLY: the secret is set by tools/dev/up.sh",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "fullScopeAllowed": false,
+      "protocolMappers": [
+        {
+          "name": "itms-api audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "itms-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
     }
   ],
   "users": [
@@ -368,6 +468,30 @@
       "username": "service-account-itms-device-service",
       "enabled": true,
       "serviceAccountClientId": "itms-device-service"
+    },
+    {
+      "id": "7d0c1a3e-5b2f-4c1d-9e8a-000000000015",
+      "username": "service-account-itms-search-service",
+      "enabled": true,
+      "serviceAccountClientId": "itms-search-service"
+    },
+    {
+      "id": "7d0c1a3e-5b2f-4c1d-9e8a-000000000016",
+      "username": "service-account-itms-reporting-service",
+      "enabled": true,
+      "serviceAccountClientId": "itms-reporting-service"
+    },
+    {
+      "id": "7d0c1a3e-5b2f-4c1d-9e8a-000000000017",
+      "username": "service-account-itms-migration-service",
+      "enabled": true,
+      "serviceAccountClientId": "itms-migration-service"
+    },
+    {
+      "id": "7d0c1a3e-5b2f-4c1d-9e8a-000000000018",
+      "username": "service-account-itms-ai-service",
+      "enabled": true,
+      "serviceAccountClientId": "itms-ai-service"
     }
   ]
 }

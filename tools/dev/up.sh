@@ -470,14 +470,16 @@ grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000002 dev.maker SEARCH_USER
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker SEARCH_USER
 # Increment 11: reports within the assignment's regions (RPT-004).
 grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000003 dev.checker REPORT_VIEWER
+# Increments 12-13: no iam migration defines these roles yet; the grants wait until migration-service and
+# ai-service pass the module gate (the project guide §2).
 # Increment 12: migration-service (DAT-*) - national scope for data migration
-grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000017 service-account-itms-migration-service MIGRATION_EXECUTE
-grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000017 service-account-itms-migration-service RECONCILIATION_EXECUTE
+# grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000017 service-account-itms-migration-service MIGRATION_EXECUTE
+# grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000017 service-account-itms-migration-service RECONCILIATION_EXECUTE
 # Increment 13: ai-service (AI-*) - national scope for AI/ML operations
-grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000018 service-account-itms-ai-service AI_INFERENCE
-grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000018 service-account-itms-ai-service AI_MODEL_MANAGE
-grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000018 service-account-itms-ai-service AI_USE_CASE_MANAGE
-grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000018 service-account-itms-ai-service AI_KILL_SWITCH
+# grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000018 service-account-itms-ai-service AI_INFERENCE
+# grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000018 service-account-itms-ai-service AI_MODEL_MANAGE
+# grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000018 service-account-itms-ai-service AI_USE_CASE_MANAGE
+# grant 7d0c1a3e-5b2f-4c1d-9e8a-000000000018 service-account-itms-ai-service AI_KILL_SWITCH
 
 cat <<EOF
 

@@ -77,8 +77,8 @@ const FEATURES: [string, string, string, string, string][] = [
 ]
 
 const FUTURE: [string, string, string][] = [
-  ['12', 'Data migration from legacy systems: mapping, reconciliation, rollback (service drafted, not yet in the stack)', 'drafted'],
-  ['13', 'AI agents behind the same APIs: model registry, review queue, drift and bias tests (rule-based assistant preview today)', 'preview'],
+  ['12', 'Data migration from legacy systems: mapping, reconciliation, rollback (service starts in the stack, opt-in in the lite demo profile; quality gate and tests pending)', 'drafted'],
+  ['13', 'AI agents behind the same APIs: model registry, review queue, drift and bias tests (service starts in the stack, opt-in in the lite profile; gate pending; rule-based assistant preview today)', 'preview'],
   ['14', 'Load test at 1.5 × peak, DR failover drill, DAST and pen test, WCAG 2.2 AA audit, Gate F acceptance', 'planned'],
   ['—', 'Per-client API quotas (consumer registry) on top of today’s per-address limits', 'planned'],
   ['—', 'Production: Kubernetes + Helm + Argo CD, TLS 1.3 end to end, HSM-held keys, SIEM', 'planned'],

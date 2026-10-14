@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useState, type ReactNode } from 'react'
-import { Car, CheckCircle2, ChevronRight, CircleDashed, Code2, Globe2, GraduationCap, KeyRound, Loader2, Route as RouteIcon, Search, ShieldCheck, Siren, UserCheck, Users, XCircle } from 'lucide-react'
+import { Car, Check, CheckCircle2, ChevronRight, CircleDashed, ClipboardList, Code2, Copy, Download, Globe2, GraduationCap, KeyRound, Loader2, Route as RouteIcon, Search, ShieldCheck, Siren, UserCheck, Users, XCircle } from 'lucide-react'
 import { ApiError, call, money, when } from '../api'
 import { Drawer, Skeleton, Timeline } from '../components'
 import { load, signInStaff, type Kind } from '../auth'
@@ -21,6 +21,27 @@ type Action = { en: string; ar: string; tone?: 'primary' | 'bad'; run: (x: Ctx) 
 type Tour = { id: string; inc: string; icon: ReactNode; en: string; ar: string; uat?: string; ids: string; textEn: string; textAr: string; actions: Action[] }
 
 class Stopped extends Error {}
+
+// Session log (test evidence): every story run with its steps, who ran each one and the outcome.
+type RunLog = { module: string; uat?: string; ids: string; action: string; at: string; ms: number; outcome: 'PASS' | 'FAIL'; steps: Step[] }
+const MARK: Record<StepState, string> = { run: '…', ok: '✓', stop: '■ (stopped as expected)', fail: '✗' }
+function logMarkdown(log: RunLog[]): string {
+  const passed = log.filter((r) => r.outcome === 'PASS').length
+  return [`**ITMS module tour — test session** · ${passed}/${log.length} runs passed · ${new Date().toISOString()}`, '',
+    ...log.flatMap((r, n) => [
+      `### ${n + 1}. ${r.module} — ${r.action}${r.uat ? ` (${r.uat})` : ''} — ${r.outcome}`,
+      `${r.ids} · started ${r.at} · ${r.ms} ms`, '',
+      ...r.steps.map((s) => `- ${MARK[s.state]} [${s.who}] ${s.en}${s.note ? ` — ${s.note}` : ''}`), '',
+    ])].join('\n')
+}
+function downloadJson(log: RunLog[]) {
+  const blob = new Blob([JSON.stringify({ tool: 'ITMS demo portal · module tour', exportedAt: new Date().toISOString(), runs: log }, null, 2)], { type: 'application/json' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = `itms-module-tour-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`
+  a.click()
+  URL.revokeObjectURL(a.href)
+}
 type Hit = { type: string; id: string; reference: string; region?: string; fields: Record<string, unknown> }
 type AuditRow = { seq: number; occurredAt: string; service: string; action: string; actorId: string; actorUsername?: string | null; channel: string; hash: string }
 // Search result type -> audit entity type (the record's history lives in the central audit chain).
@@ -209,6 +230,8 @@ export default function Modules() {
   const [q, setQ] = useState('')
   const [hits, setHits] = useState<{ items: Hit[]; sources: { name: string; status: string }[] } | null>(null)
   const [record, setRecord] = useState<{ hit: Hit; rows: AuditRow[] | null } | null>(null)
+  const [log, setLog] = useState<RunLog[]>([])
+  const [copied, setCopied] = useState(false)
 
   // Record history (CC-121): the audit timeline of a search result, read from the central hash chain as the auditor.
   const openRecord = async (h: Hit) => {
@@ -234,6 +257,9 @@ export default function Modules() {
   const run = useCallback(async (a: Action) => {
     setRunning(true); setSteps([]); setResult(null); setJson(null)
     let count = 0
+    const trace: Step[] = [] // the same steps as on screen, kept for the session log
+    const started = new Date()
+    const t0 = performance.now()
     const as = (k: Kind) => <T,>(method: 'GET' | 'POST', path: string, body?: unknown, channel?: string) => call<T>(k, method, path, body, lang, channel)
     const ctx: Ctx = {
       lang,
@@ -243,7 +269,11 @@ export default function Modules() {
       step: async (en, arText, who, fn, opts) => {
         const i = count++
         setSteps((s) => [...s, { en, ar: arText, who, state: 'run' }])
-        const set = (patch: Partial<Step>) => setSteps((s) => s.map((x, j) => (j === i ? { ...x, ...patch } : x)))
+        trace[i] = { en, ar: arText, who, state: 'run' }
+        const set = (patch: Partial<Step>) => {
+          trace[i] = { ...trace[i], ...patch, json: undefined }
+          setSteps((s) => s.map((x, j) => (j === i ? { ...x, ...patch } : x)))
+        }
         await wait(350) // let the audience see each step
         try {
           const r = await fn()
@@ -270,8 +300,10 @@ export default function Modules() {
         <div><b>{ar ? 'توقف كما هو مطلوب' : 'Stopped as required'}</b><div className="muted" style={{ fontSize: 13 }}>{ar ? 'لم تُسجَّل أي رسوم.' : 'No fee was charged; nothing was registered.'}</div></div></div>)
     } finally {
       setRunning(false)
+      const outcome = trace.some((s) => s.state === 'fail') ? 'FAIL' : 'PASS'
+      setLog((l) => [...l, { module: tour.en, uat: tour.uat, ids: tour.ids, action: a.en, at: started.toISOString(), ms: Math.round(performance.now() - t0), outcome, steps: [...trace] }])
     }
-  }, [ar, lang])
+  }, [ar, lang, tour])
 
   const search = async () => {
     if (!q.trim()) return
@@ -351,6 +383,17 @@ export default function Modules() {
             </ol>
           )}
           {result && <div className="tour-result">{result}</div>}
+          {log.length > 0 && (
+            <div className="tour-log">
+              <ClipboardList size={15} className="muted" />
+              <span className="grow">{ar ? 'سجل الجلسة' : 'Session log'}: <b>{log.length}</b> {ar ? 'تشغيل' : log.length === 1 ? 'run' : 'runs'} ·{' '}
+                <span className={log.every((r) => r.outcome === 'PASS') ? 'ok-text' : 'bad-text'}>{log.filter((r) => r.outcome === 'PASS').length} {ar ? 'ناجح' : 'passed'}</span></span>
+              <button className="btn ghost" onClick={async () => { try { await navigator.clipboard.writeText(logMarkdown(log)); setCopied(true); setTimeout(() => setCopied(false), 1800) } catch { /* clipboard blocked: JSON still works */ } }}>
+                {copied ? <Check size={14} /> : <Copy size={14} />} {copied ? (ar ? 'نُسخ' : 'Copied') : 'Markdown'}</button>
+              <button className="btn ghost" onClick={() => downloadJson(log)}><Download size={14} /> JSON</button>
+              <button className="btn ghost" onClick={() => setLog([])} aria-label="Clear the session log">{ar ? 'مسح' : 'Clear'}</button>
+            </div>
+          )}
           {json !== null && (
             <details className="json"><summary><Code2 size={14} /> {ar ? 'آخر استجابة API' : 'Last API response'}</summary><pre>{JSON.stringify(json, null, 2)}</pre></details>
           )}

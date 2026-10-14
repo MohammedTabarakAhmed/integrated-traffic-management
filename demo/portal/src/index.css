@@ -345,6 +345,9 @@ html[dir='rtl'] .tour-tab .chev { transform: scaleX(-1); }
 .timeline li.fail .meta { color: #fda4af; }
 .spin { animation: spin 0.9s linear infinite; }
 .tour-result { margin-top: 18px; padding-top: 18px; border-top: 1px dashed var(--line-strong); animation: rise 0.4s both; }
+.tour-log { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 16px; padding: 8px 12px; border-radius: 12px; background: var(--sunken); font-size: 13px; }
+.ok-text { color: var(--green); font-weight: 600; }
+.bad-text { color: var(--red); font-weight: 600; }
 .json { margin-top: 16px; }
 .json summary { cursor: pointer; color: var(--muted); font-size: 13px; display: inline-flex; gap: 6px; align-items: center; }
 .json pre { max-height: 260px; overflow: auto; font-family: 'JetBrains Mono', monospace; font-size: 12px; padding: 14px; border-radius: 12px;

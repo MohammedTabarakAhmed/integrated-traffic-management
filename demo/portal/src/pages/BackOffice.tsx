@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Briefcase, CheckCircle2, Gavel, Hand, History, Lock, LockOpen, XCircle } from 'lucide-react'
 import { ApiError, call, money, when } from '../api'
 import { load, signInStaff } from '../auth'
-import { Card, Drawer, Skeleton, StatusPill, Timeline } from '../components'
+import { Card, Drawer, Skeleton, StatusPill, tabFromLink, Timeline } from '../components'
 import { useI18n } from '../i18n'
 import { nameOf } from '../names'
 
@@ -21,7 +21,7 @@ export default function BackOffice({ notify }: { notify: (t: string, bad?: boole
   const { lang } = useI18n()
   const ar = lang === 'ar'
   const [ready, setReady] = useState(() => !!load('checker'))
-  const [tab, setTab] = useState<Tab>('objections')
+  const [tab, setTab] = useState<Tab>(() => tabFromLink<Tab>(['objections', 'queue', 'holds'], 'objections'))
   const [objections, setObjections] = useState<Objection[] | null>(null)
   const [items, setItems] = useState<Item[] | null>(null)
   const [holds, setHolds] = useState<Hold[] | null>(null)

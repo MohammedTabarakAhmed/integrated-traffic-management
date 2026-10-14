@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Car, Check, CheckCircle2, ChevronRight, CircleDashed, ClipboardList, Code2, Copy, Download, Globe2, GraduationCap, KeyRound, Loader2, Route as RouteIcon, Search, ShieldCheck, Siren, UserCheck, Users, XCircle } from 'lucide-react'
 import { ApiError, call, money, when } from '../api'
-import { Drawer, Skeleton, Timeline } from '../components'
+import { Drawer, Skeleton, tabFromLink, Timeline } from '../components'
 import { load, signInStaff, type Kind } from '../auth'
 import { useI18n } from '../i18n'
 
@@ -222,7 +222,7 @@ export default function Modules() {
   const ar = lang === 'ar'
   const [maker, setMaker] = useState(() => load('staff'))
   const [checker, setChecker] = useState(() => load('checker'))
-  const [active, setActive] = useState(tours[0].id)
+  const [active, setActive] = useState(() => tabFromLink(tours.map((x) => x.id), tours[0].id))
   const [steps, setSteps] = useState<Step[]>([])
   const [result, setResult] = useState<ReactNode>(null)
   const [running, setRunning] = useState(false)

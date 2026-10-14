@@ -2,6 +2,12 @@ import { Component, useEffect, useState, type ReactNode } from 'react'
 import { useI18n } from './i18n'
 import { sentence } from './names'
 
+/** The tab a link asks for (#/page?tab=x), if it is one of the page's tabs; otherwise the page's default. */
+export function tabFromLink<T extends string>(allowed: readonly T[], fallback: T): T {
+  const want = new URLSearchParams(location.hash.split('?')[1] ?? '').get('tab')
+  return (allowed as readonly string[]).includes(want ?? '') ? (want as T) : fallback
+}
+
 /** Keeps a page's render error inside that page: the navigation stays usable and "Try again" re-mounts the page. */
 export class PageBoundary extends Component<{ children: ReactNode; ar: boolean }, { error: Error | null }> {
   state = { error: null as Error | null }

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { BookOpen, Calculator, CheckCircle2, ListTree, Scale, UserCheck } from 'lucide-react'
 import { ApiError, call, money, when } from '../api'
 import { load, signInStaff } from '../auth'
-import { Card, Skeleton, StatusPill } from '../components'
+import { Card, Skeleton, StatusPill, tabFromLink } from '../components'
 import { useI18n } from '../i18n'
 
 // Administration (demo D4.6): the configuration the platform runs on, readable by testers. Violation catalogue
@@ -23,7 +23,7 @@ const isTest = (code: string) => /^(SMK|SMKP|PT_|TEST)/.test(code)
 export default function Admin({ notify }: { notify: (t: string, bad?: boolean) => void }) {
   const { lang } = useI18n()
   const ar = lang === 'ar'
-  const [tab, setTab] = useState<Tab>('catalogue')
+  const [tab, setTab] = useState<Tab>(() => tabFromLink<Tab>(['catalogue', 'lists', 'fees', 'changes'], 'catalogue'))
   const [ready, setReady] = useState(() => !!load('staff') && !!load('checker'))
   const [cat, setCat] = useState<Entry[] | null>(null)
   const [showTest, setShowTest] = useState(false)

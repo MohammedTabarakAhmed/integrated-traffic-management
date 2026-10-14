@@ -19,13 +19,25 @@ const typing = (e: KeyboardEvent) => {
 }
 
 export function Celebration({ onDone }: { onDone: () => void }) {
-  useEffect(() => { const id = setTimeout(onDone, 3200); return () => clearTimeout(id) }, [onDone])
+  useEffect(() => { const id = setTimeout(onDone, 4600); return () => clearTimeout(id) }, [onDone])
+  // The flag is cut into slices that rise and fall a little later and a little further away from the pole: a ripple.
+  const slices = 24
   return (
-    <div className="confetti" aria-hidden="true">
-      {Array.from({ length: 90 }, (_, i) => (
-        <i key={i} style={{ left: `${(i * 37) % 100}%`, background: FLAG[i % 4], border: i % 4 === 2 ? '1px solid #ccc' : undefined, animationDelay: `${(i % 15) * 0.07}s` }} />
-      ))}
-    </div>
+    <>
+      <div className="confetti" aria-hidden="true">
+        {Array.from({ length: 90 }, (_, i) => (
+          <i key={i} style={{ left: `${(i * 37) % 100}%`, background: FLAG[i % 4], border: i % 4 === 2 ? '1px solid #ccc' : undefined, animationDelay: `${(i % 15) * 0.07}s` }} />
+        ))}
+      </div>
+      <div className="flag-wave" aria-hidden="true" dir="ltr">
+        <div className="pole" />
+        <div className="cloth">
+          {Array.from({ length: slices }, (_, i) => (
+            <span key={i} style={{ backgroundPosition: `${-i * (320 / slices)}px 0`, animationDelay: `${-(slices - i) * 0.07}s`, ['--a' as string]: 1 + i * 0.45 }} />
+          ))}
+        </div>
+      </div>
+    </>
   )
 }
 

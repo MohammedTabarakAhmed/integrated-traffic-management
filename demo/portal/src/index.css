@@ -453,6 +453,7 @@ html[lang='ar'] .qa-row.head { letter-spacing: 0; }
 .qa-res { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .qa-res.ok { color: var(--green); }
 .qa-res.bad { color: var(--red); }
+.qa-ev { flex-basis: 100%; font-size: 11px; opacity: .8; }
 .qa-res small { color: var(--muted); }
 .flow { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 14px; }
 .flow-step { position: relative; display: flex; flex-direction: column; gap: 6px; padding: 14px; border-radius: 14px; border: 1px solid var(--line); background: var(--sunken); }

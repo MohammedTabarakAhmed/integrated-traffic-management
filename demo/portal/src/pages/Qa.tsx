@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { ArrowRight, Check, CheckCircle2, ClipboardCheck, Clock, Copy, Download, Database, KeyRound, Network, Play, Radio, Rocket, Server, ShieldCheck, Workflow, XCircle } from 'lucide-react'
+import { ArrowRight, Check, CheckCircle2, ClipboardCheck, Clock, Copy, Download, Database, KeyRound, Network, Play, Printer, Radio, Rocket, Server, ShieldCheck, Workflow, XCircle } from 'lucide-react'
 import { load, signInStaff } from '../auth'
 import { Card } from '../components'
 import { useI18n } from '../i18n'
@@ -146,11 +146,18 @@ export default function Qa({ go }: { go: (r: string) => void }) {
 
   return (
     <>
+      <div className="print-only print-head">
+        <h1>{ar ? 'تقرير اختبار ITMS — الجودة والأمان' : 'ITMS test report — QA & security'}</h1>
+        <p>{new Date().toLocaleString(ar ? 'ar-AE' : 'en-GB')} · {ar ? 'البيئة: المكدس المحلي (lite)، البوابة :9080' : 'Environment: local stack (lite profile), gateway :9080'} · {done.length > 0
+          ? `${ar ? 'الفحوص المباشرة' : 'Live checks'} ${passed}/${done.length} ${ar ? 'ناجح' : 'passed'}`
+          : (ar ? 'لم تُشغَّل الفحوص المباشرة بعد' : 'Live checks not run yet')}</p>
+      </div>
       <Card title={ar ? 'فحوص الأمان المباشرة' : 'Live security checks'} icon={<ShieldCheck size={16} />}
         right={<span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {done.length > 0 && <span className={`pill ${passed === done.length ? 'ok' : 'bad'}`}>{passed}/{done.length} {ar ? 'ناجح' : 'passed'}</span>}
           {done.length > 0 && <button className="btn ghost" onClick={downloadCsv} title={ar ? 'تنزيل الأدلة CSV' : 'Download the evidence as CSV'}><Download size={15} /> CSV</button>}
           {done.length > 0 && <button className="btn ghost" onClick={copyMarkdown} title={ar ? 'نسخ كجدول Markdown لتقرير خطأ' : 'Copy as a Markdown table for a bug report'}>{copied ? <Check size={15} /> : <Copy size={15} />} {copied ? (ar ? 'نُسخ' : 'Copied') : 'Markdown'}</button>}
+          <button className="btn ghost" onClick={() => window.print()} title={ar ? 'طباعة التقرير أو حفظه PDF' : 'Print the report or save it as PDF'}><Printer size={15} /> {ar ? 'طباعة التقرير' : 'Print report'}</button>
           <button className="btn primary" onClick={runAll}><Play size={15} /> {ar ? 'تشغيل الكل' : 'Run all'}</button></span>}>
         <div className="qa-table">
           <div className="qa-row head"><span>{ar ? 'الفحص' : 'Check'}</span><span>{ar ? 'المتوقع' : 'Expected'}</span><span>{ar ? 'الفعلي' : 'Actual'}</span><span /></div>
@@ -214,6 +221,9 @@ export default function Qa({ go }: { go: (r: string) => void }) {
             ))}
           </div>
         </Card>
+      </div>
+      <div className="print-only print-sign">
+        <span>{ar ? 'اختبره' : 'Tested by'}</span><span>{ar ? 'راجعه' : 'Reviewed by'}</span><span>{ar ? 'التاريخ' : 'Date'}</span>
       </div>
     </>
   )

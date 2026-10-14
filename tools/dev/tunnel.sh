@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# Lets a remote tester use the demo portal through a tunnel (for example ngrok in front of the Vite dev server on
-# :5173). Keycloak keeps its issuer (http://localhost:8180, what every service checks); the portal's dev proxy carries
-# the sign-in pages to the tunnel address. This script only registers that address with the itms-portal client
-# (redirect URI, web origin, post-logout redirect) so the national-ID sign-in may return to it.
-#   ITMS_LOCAL_PROFILE=lite bash tools/dev/tunnel.sh https://<name>.ngrok-free.app            register
-#   ITMS_LOCAL_PROFILE=lite bash tools/dev/tunnel.sh --remove https://<name>.ngrok-free.app   unregister
-# Run it again after Keycloak is recreated (the realm is re-imported without the address).
+# Lets a remote tester use the demo portal through a tunnel (ngrok in front of the Vite dev server on :5173).
+# Keycloak keeps its issuer (http://localhost:8180, what every service checks); the portal's dev proxy carries the
+# sign-in pages to the tunnel address. tools/dev/live.sh runs all of this in one go; by hand:
+#   ITMS_LOCAL_PROFILE=lite bash tools/dev/tunnel.sh --policy                                   tunnel key policy file
+#   ITMS_LOCAL_PROFILE=lite bash tools/dev/tunnel.sh https://<name>.ngrok-free.app            register the address
+#   ITMS_LOCAL_PROFILE=lite bash tools/dev/tunnel.sh --remove https://<name>.ngrok-free.app   unregister it
+# The address goes into the itms-portal client (redirect URI, web origin, post-logout redirect). Run it again after
+# Keycloak is recreated (the realm is re-imported without the address). The tunnel key (link ?key=...) is
+# DEMO_TUNNEL_PASSWORD in infra/local/.env, made once and kept; the ngrok traffic policy that asks for it is written
+# to the git-ignored infra/local/secrets/.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 ENV_FILE=infra/local/.env
@@ -16,16 +19,65 @@ case "${ITMS_LOCAL_PROFILE:-full}" in
   *) echo "ITMS_LOCAL_PROFILE must be full or lite, got: $ITMS_LOCAL_PROFILE" >&2; exit 2 ;;
 esac
 PY=${PYTHON:-python3}; command -v "$PY" >/dev/null || PY=python
+POLICY=infra/local/secrets/ngrok-policy.yml
+
+# The tunnel key: made once (appended to .env like up.sh does), then the same every time.
+"$PY" - "$ENV_FILE" <<'PYEOF'
+import secrets, sys
+path = sys.argv[1]
+with open(path, encoding="utf-8") as f:
+    if any(line.startswith("DEMO_TUNNEL_PASSWORD=") for line in f):
+        sys.exit(0)
+with open(path, "a", encoding="utf-8") as f:
+    f.write(f"DEMO_TUNNEL_PASSWORD={secrets.token_urlsafe(12)}\n")
+PYEOF
+set -a; source <(tr -d '\r' < "$ENV_FILE"); set +a
+mkdir -p "$(dirname "$POLICY")"
+# A secret link, not a password prompt: the portal sends its own Authorization header (the sign-in token) on every API
+# call, which an HTTP basic-auth prompt would clash with. Opening <url>/?key=<key> once sets a cookie (one day); a
+# request without that cookie gets a short 401 page.
+"$PY" - "$POLICY" "$DEMO_TUNNEL_PASSWORD" <<'PYEOF'
+import sys
+path, key = sys.argv[1], sys.argv[2]
+page = ("<!doctype html><meta charset=utf-8><title>ITMS demo</title><body style='font:16px system-ui;"
+        "background:#0b1020;color:#e6e9f2;display:grid;place-items:center;height:100vh;margin:0'>"
+        "<div><h2>ITMS demo</h2><p>Open the full link you were sent (it ends with ?key=...).</p></div>")
+policy = f'''on_http_request:
+  - expressions:
+      - "'key' in req.url.query_params && req.url.query_params['key'][0] == '{key}'"
+    actions:
+      - type: custom-response
+        config:
+          status_code: 302
+          headers:
+            location: "/"
+            set-cookie: "itms_gate={key}; Path=/; Max-Age=86400; Secure; HttpOnly; SameSite=Lax"
+  - expressions:
+      - "!('itms_gate' in req.cookies && req.cookies['itms_gate'][0].value == '{key}')"
+    actions:
+      - type: custom-response
+        config:
+          status_code: 401
+          headers:
+            content-type: "text/html; charset=utf-8"
+          body: "{page}"
+'''
+with open(path, "w", encoding="utf-8", newline="\n") as f:
+    f.write(policy)
+PYEOF
+if [[ "${1:-}" == "--policy" ]]; then
+  command -v cygpath >/dev/null && cygpath -w "$PWD/$POLICY" || echo "$PWD/$POLICY"
+  exit 0
+fi
 
 mode=add
 if [[ "${1:-}" == "--remove" ]]; then mode=remove; shift; fi
 url=${1:-}
 url=${url%/}
 if [[ ! "$url" =~ ^https://[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$ ]]; then
-  echo "usage: tunnel.sh [--remove] https://<tunnel host>   (https, host only, no path)" >&2; exit 2
+  echo "usage: tunnel.sh [--policy | [--remove] https://<tunnel host>]   (https, host only, no path)" >&2; exit 2
 fi
 
-set -a; source "$ENV_FILE"; set +a
 KC=(env MSYS_NO_PATHCONV=1 docker compose "${COMPOSE_FILES[@]}" --env-file "$ENV_FILE" exec -T keycloak /opt/keycloak/bin/kcadm.sh)
 "${KC[@]}" config credentials --server http://localhost:8080 --realm master \
   --user "$KC_ADMIN_USER" --password "$KC_ADMIN_PASSWORD" >/dev/null
@@ -47,19 +99,4 @@ print(json.dumps({"redirectUris": redirects, "webOrigins": origins,
                   "attributes": {"post.logout.redirect.uris": "##".join(logout)}}))
 ' "$url" "$mode")
 printf '%s' "$change" | "${KC[@]}" update "clients/$PORTAL_CLIENT" -r itms -f -
-"${KC[@]}" get "clients/$PORTAL_CLIENT" -r itms --fields redirectUris,webOrigins
-# The portal signs staff in with the development passwords, so the tunnel asks for a user name and password first
-# (ngrok traffic policy, basic-auth action). The file sits in a git-ignored secrets/ folder.
-POLICY=infra/local/secrets/ngrok-policy.yml
-if [[ "$mode" == add ]]; then
-  mkdir -p "$(dirname "$POLICY")"
-  pw=$("$PY" -c "import secrets; print(secrets.token_urlsafe(12))")
-  printf 'on_http_request:\n  - actions:\n      - type: basic-auth\n        config:\n          credentials:\n            - "tester:%s"\n' "$pw" > "$POLICY"
-  policy_path=$(command -v cygpath >/dev/null && cygpath -w "$PWD/$POLICY" || echo "$PWD/$POLICY")
-  echo "== $url registered. Tunnel password: user tester, password $pw (send it to the tester separately)"
-  echo "   1. in demo/portal (PowerShell):  \$env:__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS='${url#https://}'; npm run dev"
-  echo "   2. ngrok http 5173 --url=$url --traffic-policy-file \"$policy_path\""
-else
-  rm -f "$POLICY"
-  echo "== $url removed"
-fi
+echo "== $url $([[ "$mode" == add ]] && echo registered || echo removed) for the citizen sign-in"

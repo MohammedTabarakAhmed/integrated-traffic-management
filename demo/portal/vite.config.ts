@@ -52,6 +52,8 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
+    // A remote tester comes in through an ngrok tunnel (tools/dev/live.sh); other unknown hosts stay blocked.
+    allowedHosts: ['.ngrok-free.app', '.ngrok-free.dev', '.ngrok.app', '.ngrok.dev', '.ngrok.io'],
     proxy: {
       '/v1': { target: gateway, changeOrigin: true },
       // Read-only metrics for the architecture map.

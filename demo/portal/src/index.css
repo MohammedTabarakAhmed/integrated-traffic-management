@@ -604,7 +604,14 @@ html[data-theme='light'] .elig.no { background: #fef2f2; color: #7f1d1d; }
 html[data-theme='light'] .modal-back, html[data-theme='light'] .drawer-back { background: rgba(15, 23, 42, 0.35); }
 html[data-theme='light'] .drawer { box-shadow: -20px 0 50px rgba(15, 23, 42, 0.15); }
 html[data-theme='light'] .toast { box-shadow: 0 8px 30px rgba(15, 23, 42, 0.12); }
-html[data-theme='light'] .radar { background: linear-gradient(180deg, #ecfeff, #f5f6fa); }
+html[data-theme='light'] .radar {
+  background:
+    radial-gradient(circle at 50% 100%, transparent 0 24%, rgba(8, 145, 178, 0.25) 24.4% 24.8%, transparent 25% 49%, rgba(8, 145, 178, 0.2) 49.4% 49.8%, transparent 50% 74%, rgba(8, 145, 178, 0.15) 74.4% 74.8%, transparent 75%),
+    linear-gradient(180deg, #ecfeff, #f5f6fa);
+}
+html[data-theme='light'] .radar .sweep { background: conic-gradient(from 0deg, rgba(8, 145, 178, 0.22), transparent 50deg); }
+html[data-theme='light'] .stat { background: var(--panel); box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06); }
+html[data-theme='light'] .bubble.bot { background: var(--panel); color: var(--text); box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06); }
 html[data-theme='light'] .plate { box-shadow: 0 6px 20px rgba(15, 23, 42, 0.15); }
 html[data-theme='light'] .json pre { background: #0f172a; color: #e5e7eb; }
 

@@ -1,7 +1,7 @@
 // Operations view for the demo (Vite dev server only): probes every service port of the local stack and answers
 // /demo/health with up/down and latency, so the architecture map shows all services, including those Prometheus does
 // not scrape. Any HTTP answer (401 included) means the service is up; it only reads.
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type { Plugin } from 'vite'
 
@@ -14,6 +14,13 @@ export const SERVICES: [string, number, string][] = [
   ['permit', 8102, 'permits'], ['geo', 8103, 'road'], ['road-permit', 8104, 'road'], ['marine', 8105, 'road'],
   ['crossborder', 8106, 'crossborder'], ['search', 8107, 'channels'], ['reporting', 8108, 'analytics'],
 ]
+// Portal page file -> route, for the requirements explorer's "Try it" links.
+const ROUTE_OF: Record<string, string> = {
+  Home: 'home', Dashboard: 'dashboard', Receipt: 'dashboard', Objection: 'dashboard', Profile: 'profile', Documents: 'documents',
+  Services: 'services', Settings: 'settings', Assistant: 'assistant', ControlRoom: 'control', BackOffice: 'backoffice',
+  NewFile: 'backoffice?tab=newfile', Applications: 'backoffice?tab=applications', Modules: 'modules', Analytics: 'analytics',
+  Reports: 'reports', Admin: 'admin', Platform: 'platform', Qa: 'qa', Guide: 'guide',
+}
 const INFRA: [string, string][] = [['gateway', 'http://127.0.0.1:9080/'], ['keycloak', 'http://127.0.0.1:8180/realms/itms'], ['prometheus', 'http://127.0.0.1:9090/-/ready']]
 
 async function probe(url: string) {
@@ -35,6 +42,31 @@ export function demoOps(): Plugin {
         const infra = await Promise.all(INFRA.map(async ([name, url]) => ({ name, ...(await probe(url)) })))
         res.setHeader('Content-Type', 'application/json')
         res.end(JSON.stringify({ at: new Date().toISOString(), services, infra }))
+      })
+      // Requirements explorer: the BRD ledger (docs/brief/01, the authoritative status) plus, for each requirement, the
+      // portal screens whose source names it, so "Try it" links come from the code, not from a hand-made list.
+      server.middlewares.use('/demo/ledger', (_req, res) => {
+        try {
+          const text = readFileSync(resolve(__dirname, '../../docs/brief/01_PROJECT_REQUIREMENTS.md'), 'utf8')
+          const shownIn: Record<string, Set<string>> = {}
+          const pages = resolve(__dirname, 'src/pages')
+          for (const f of readdirSync(pages).filter((n) => n.endsWith('.tsx'))) {
+            const route = ROUTE_OF[f.replace('.tsx', '')]
+            if (!route) continue
+            for (const id of readFileSync(resolve(pages, f), 'utf8').match(/\b[A-Z]{2,3}-\d{3}\b/g) ?? []) (shownIn[id] ??= new Set()).add(route)
+          }
+          const rows = text.split(/\r?\n/).filter((l) => l.startsWith('| [')).map((l) => {
+            const c = l.split('|').map((x) => x.trim())
+            const id = c[2].replace(/`/g, '')
+            return { status: c[1], id, priority: c[3], text: c[4], implementation: c[5], test: c[6], notes: c.slice(7).join(' | ').replace(/\|\s*$/, '').trim(),
+              shownIn: [...(shownIn[id] ?? [])] }
+          })
+          res.setHeader('Content-Type', 'application/json')
+          res.end(JSON.stringify({ rows }))
+        } catch (e) {
+          res.statusCode = 500
+          res.end(JSON.stringify({ detail: (e as Error).message }))
+        }
       })
       // OpenAPI specs for the API explorer (/api.html): read from the repository, only the services listed above.
       server.middlewares.use('/specs/', (req, res, next) => {

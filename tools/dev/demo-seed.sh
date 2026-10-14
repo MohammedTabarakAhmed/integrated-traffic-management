@@ -102,6 +102,14 @@ open_txn() { # service -> "<status> <reference or empty>"
   need "$res" 201 409
   printf '%s %s' "$(status_of "$res")" "$( [[ "$(status_of "$res")" == 201 ]] && body_of "$res" | json_field "['reference']")"
 }
+# The service guide shows a real fee: the catalogue entry for first registration, whose fee version VEH_FIRST_REG is
+# set up in step 5 (fees-service quotes by service code). Created once, maker then checker (CC-114).
+if ! curl -sf -o /dev/null -H "Authorization: Bearer $MAKER" "$TXN/v1/services/VEH_FIRST_REG"; then
+  spec='{"code":"VEH_FIRST_REG","name":{"nl":"التسجيل الأول للمركبة","en":"First vehicle registration"},"module":"VEHICLE","customerTypes":["INDIVIDUAL","COMPANY"],"channels":["PORTAL","APP","BACKOFFICE"],"requiredDocuments":["CUSTOMS_CERTIFICATE","INSURANCE_CERTIFICATE","INSPECTION_REPORT"],"feeCode":"VEH_FIRST_REG","sla":"PT2H","regions":["*"],"anyRegion":true,"allowsConcurrentOpen":false}'
+  res=$(post "$MAKER" "$TXN/v1/catalogue-changes" "{\"changeType\":\"CREATE_SERVICE\",\"serviceCode\":\"VEH_FIRST_REG\",\"service\":$spec,\"reason\":\"demo service guide\"}")
+  need "$res" 201
+  need "$(post "$CHECKER" "$TXN/v1/catalogue-changes/$(body_of "$res" | json_field "['id']")/approvals" "")" 200
+fi
 service DEMO_RENEWAL LICENSING "تجديد رخصة القيادة" "Driving licence renewal"
 service DEMO_ADDRESS TRAFFIC_FILE "تحديث العنوان" "Address update"
 service DEMO_CARD LICENSING "بدل فاقد لبطاقة الرخصة" "Licence card replacement"

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Bell, BellRing, Bot, Moon, Search, Sun, UserRound, Briefcase, CalendarDays, FileUp, FileBarChart, SlidersHorizontal, Boxes, Braces, ClipboardCheck, Gauge as GaugeIcon, Globe, Home as HomeIcon, LayoutDashboard, LogOut, Radar, Server, ShieldCheck } from 'lucide-react'
+import { Bell, BellRing, Bot, Moon, Search, Sun, UserRound, Briefcase, BookOpen, CalendarDays, FileUp, ListChecks, FileBarChart, SlidersHorizontal, Boxes, Braces, ClipboardCheck, Gauge as GaugeIcon, Globe, Home as HomeIcon, LayoutDashboard, LogOut, Radar, Server, ShieldCheck } from 'lucide-react'
 import { ApiError, SignedOut, call } from './api'
 import { completeRedirect, load, signInCustomer, signOut } from './auth'
 import { PageBoundary } from './components'
+import Hidden from './Hidden'
 import { useI18n } from './i18n'
 import BackOffice from './pages/BackOffice'
 import ControlRoom from './pages/ControlRoom'
@@ -15,13 +16,15 @@ import Modules from './pages/Modules'
 import Platform from './pages/Platform'
 import Profile from './pages/Profile'
 import Documents from './pages/Documents'
+import Requirements from './pages/Requirements'
+import Guide from './pages/Guide'
 import Qa from './pages/Qa'
 import Receipt from './pages/Receipt'
 import Reports from './pages/Reports'
 import Services from './pages/Services'
 import Settings from './pages/Settings'
 
-type Route = 'home' | 'dashboard' | 'profile' | 'documents' | 'services' | 'backoffice' | 'admin' | 'reports' | 'settings' | 'receipt' | 'qa' | 'control' | 'modules' | 'analytics' | 'assistant' | 'platform'
+type Route = 'requirements' | 'guide' | 'home' | 'dashboard' | 'profile' | 'documents' | 'services' | 'backoffice' | 'admin' | 'reports' | 'settings' | 'receipt' | 'qa' | 'control' | 'modules' | 'analytics' | 'assistant' | 'platform'
 
 const routeOf = (): Route => ((location.hash.replace('#/', '').split('?')[0] || 'home') as Route)
 
@@ -41,6 +44,8 @@ const ABOUT: Record<string, [string, string]> = {
   reports: ['Run a report for any period and download it as a spreadsheet.', 'شغّل تقريرًا لأي فترة ونزّله كجدول بيانات.'],
   admin: ['The settings the system runs on: catalogue, lists, fees and approvals.', 'الإعدادات التي يعمل بها النظام: الدليل والقوائم والرسوم والاعتمادات.'],
   platform: ['What is running right now, and what is built or still to come.', 'ما يعمل الآن، وما بُني وما هو قادم.'],
+  guide: ['Before you start: each service’s fee, documents, time and who can use it; verify a certificate.', 'قبل أن تبدأ: رسوم كل خدمة ومستنداتها ومدتها ومن يحق له؛ وتحقق من شهادة.'],
+  requirements: ['All 438 requirements: what is verified, in progress or still to do, and where to try each.', 'كل المتطلبات الـ438: ما تحقق وما هو قيد التنفيذ وما تبقى، وأين تجرّب كلًا منها.'],
   qa: ['Checks you can run yourself, with the result we expect for each.', 'فحوص يمكنك تشغيلها بنفسك مع النتيجة المتوقعة لكل منها.'],
 }
 
@@ -92,7 +97,7 @@ function ThemeToggle() {
     try { localStorage.setItem('itms.theme', theme) } catch { /* ignore */ }
   }, [theme])
   return (
-    <button className="btn" onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))} aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} title={theme === 'dark' ? 'Light theme' : 'Dark theme'}>
+    <button className="btn" data-theme-toggle onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))} aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} title={theme === 'dark' ? 'Light theme' : 'Dark theme'}>
       {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
     </button>
   )
@@ -120,6 +125,7 @@ export default function App() {
   const [route, setRoute] = useState<Route>(routeOf)
   const [customer, setCustomer] = useState(() => load('customer'))
   const [toast, setToast] = useState<{ text: string; bad?: boolean } | null>(null)
+  const [logoClicks, setLogoClicks] = useState(0)
   const [firstName, setFirstName] = useState<{ en?: string | null; nl?: string | null } | null>(null)
   // The citizen's first name for the greeting (from their own traffic file).
   useEffect(() => {
@@ -160,6 +166,7 @@ export default function App() {
   const nav: { sec: string; items: { r: Route; label: string; icon: React.ReactNode; soon?: boolean }[] }[] = [
     { sec: t.sections.citizen, items: [
       { r: 'home', label: t.nav.home, icon: <HomeIcon size={18} /> },
+      { r: 'guide', label: lang === 'ar' ? 'دليل الخدمات' : 'Service guide', icon: <BookOpen size={18} /> },
       { r: 'dashboard', label: t.nav.dashboard, icon: <LayoutDashboard size={18} /> },
       { r: 'profile', label: lang === 'ar' ? 'ملفي الشخصي' : 'My profile', icon: <UserRound size={18} /> },
       { r: 'documents', label: lang === 'ar' ? 'مستنداتي' : 'My documents', icon: <FileUp size={18} /> },
@@ -177,6 +184,7 @@ export default function App() {
     { sec: t.sections.system, items: [
       { r: 'admin', label: lang === 'ar' ? 'الإدارة' : 'Administration', icon: <SlidersHorizontal size={18} /> },
       { r: 'platform', label: t.nav.platform, icon: <Server size={18} /> },
+      { r: 'requirements', label: lang === 'ar' ? 'المتطلبات' : 'Requirements', icon: <ListChecks size={18} /> },
       { r: 'qa', label: lang === 'ar' ? 'الجودة والأمان' : 'QA & security', icon: <ClipboardCheck size={18} /> },
     ] },
   ]
@@ -209,15 +217,19 @@ export default function App() {
   else if (route === 'analytics') page = <Analytics />
   else if (route === 'assistant') page = <Assistant go={go} />
   else if (route === 'platform') page = <Platform />
+  else if (route === 'requirements') page = <Requirements go={go} />
+  else if (route === 'guide') page = <Guide />
   else if (route === 'qa') page = <Qa go={go} />
   else if (route === 'receipt') page = <Receipt go={go} />
   else page = <div className="card empty" style={{ padding: 60 }}>{t.comingSoon}</div>
 
   return (
     <div className="shell">
+      <div className="uae-ribbon" aria-hidden="true" />
+      <Hidden go={go} notify={(text) => setToast({ text })} logoClicks={logoClicks} />
       <aside className="side">
         <div className="logo">
-          <div className="logo-mark">IT</div>
+          <div className="logo-mark flag" role="img" aria-label="UAE flag" onClick={() => setLogoClicks((n) => n + 1)}>IT</div>
           <div><b>{t.brand}</b><small>{t.brandLong}</small></div>
         </div>
         {nav.map((s) => (
@@ -233,6 +245,7 @@ export default function App() {
         <a className="nav-item" href="/api.html" target="_blank" rel="noreferrer"><Braces size={18} />{lang === 'ar' ? 'مستكشف الواجهات' : 'API explorer'}<span className="soon">↗</span></a>
         <div className="side-foot">
           <span className="pill ok" style={{ alignSelf: 'flex-start' }}><span className="dot live" /> local stack · gateway :9080</span>
+          <small className="muted" style={{ fontSize: 11.5 }}>{lang === 'ar' ? 'اضغط ? للاختصارات' : 'Press ? for shortcuts'}</small>
         </div>
       </aside>
       <main className="main">

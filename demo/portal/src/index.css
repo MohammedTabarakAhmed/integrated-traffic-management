@@ -670,3 +670,72 @@ html[data-theme='light'] .json pre { background: #0f172a; color: #e5e7eb; }
 .rules .rules-title { font-weight: 600; color: var(--text); font-size: 12px; }
 .rules-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 4px 16px; margin: 8px 0 12px; }
 html[data-theme='light'] .btn.danger { color: #b91c1c; border-color: #fecaca; }
+
+/* =====================================================================
+   UAE theme (owner, 2026-10-14): the flag's four colours. Green is the
+   action colour, red stays for warnings, and a flag ribbon and flag logo
+   carry the identity. Later rules win over the ones above.
+   ===================================================================== */
+:root {
+  --uae-red: #e4002b; --uae-green: #00843d; --uae-white: #ffffff; --uae-black: #000000;
+  --accent: #00843d; --accent-ink: #ffffff;
+  --grad: linear-gradient(135deg, #2bb673 0%, #00843d 55%, #00632e 100%);
+}
+.btn.primary:hover { background: #006f33; }
+.uae-ribbon {
+  position: fixed; inset: 0 0 auto 0; height: 4px; z-index: 70; pointer-events: none;
+  background: linear-gradient(90deg, var(--uae-red) 0 25%, var(--uae-green) 25% 50%, var(--uae-white) 50% 75%, var(--uae-black) 75% 100%);
+}
+html[data-theme='light'] .uae-ribbon { box-shadow: 0 1px 0 rgba(15, 23, 42, 0.12); }
+.logo-mark.flag {
+  color: transparent; overflow: hidden; border: 1px solid var(--line-strong);
+  background:
+    linear-gradient(90deg, var(--uae-red) 0 27%, transparent 27%),
+    linear-gradient(180deg, var(--uae-green) 0 33.4%, var(--uae-white) 33.4% 66.7%, var(--uae-black) 66.7% 100%);
+}
+.orbit .core { color: #ffffff; box-shadow: 0 10px 40px rgba(0, 132, 61, 0.35); }
+button.node:hover, button.node:focus-visible { border-color: var(--uae-green); color: var(--uae-green); }
+html[data-theme='light'] .nav-item.active { background: #e8f5ee; border-color: #a7d7bb; }
+html[data-theme='light'] .grad-text { color: var(--uae-green); }
+.pill.uae { background: linear-gradient(90deg, rgba(228, 0, 43, 0.12), rgba(0, 132, 61, 0.12)); border-color: rgba(0, 132, 61, 0.35); color: var(--text); }
+
+/* hidden features: shortcuts sheet and developer panel */
+.kbd-sheet { width: min(520px, 92vw); }
+.kbd-sheet dl { display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px; margin: 0; }
+.kbd-sheet dt kbd, .dev-panel kbd { font-family: 'JetBrains Mono', monospace; font-size: 12px; padding: 2px 7px; border-radius: 6px; border: 1px solid var(--line-strong); }
+.dev-panel {
+  position: fixed; inset-inline-end: 16px; bottom: 16px; z-index: 65; width: min(420px, calc(100vw - 32px)); max-height: 60vh; overflow: auto;
+  background: var(--panel-solid); border: 1px solid var(--line-strong); border-radius: 14px; padding: 14px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+  font-size: 12.5px;
+}
+.dev-panel h3 { margin: 0 0 8px; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+.dev-panel table { width: 100%; border-collapse: collapse; }
+.dev-panel td { padding: 3px 4px; border-bottom: 1px solid var(--line); font-family: 'JetBrains Mono', monospace; font-size: 11.5px; }
+
+/* requirements explorer */
+.req-mods { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 8px; }
+.req-mod { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; align-items: center; text-align: start; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--sunken); color: var(--text); font: inherit; font-size: 13px; cursor: pointer; }
+.req-mod.on, .req-mod:hover { border-color: var(--uae-green); }
+.req-mod-name { grid-column: 1 / -1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.req-bar { display: flex; height: 7px; border-radius: 99px; overflow: hidden; background: var(--line-strong); }
+.req-bar i.x { background: var(--uae-green); }
+.req-bar i.w { background: #e4a400; }
+.req-filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+.req-filters input:not([type=checkbox]), .req-filters select { font: inherit; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line-strong); background: var(--sunken); color: var(--text); }
+.req-filters input:not([type=checkbox]) { flex: 1 1 260px; }
+.req-check { display: flex; gap: 6px; align-items: center; font-size: 13px; }
+.req-tbl td { vertical-align: top; }
+.req-tbl tr.clickable { cursor: pointer; }
+.req-detail td { background: var(--sunken); font-size: 12.5px; }
+
+/* phone widths from 360 px (CH-051 preview): the top bar and tab rows wrap, the service ring shrinks */
+@media (max-width: 760px) {
+  .topbar { flex-wrap: wrap; gap: 8px; }
+  .topbar > div:first-child { flex-basis: 100%; }
+  .topbar .spacer { display: none; }
+  .seg { flex-wrap: wrap; }
+  .orbit { width: calc(100% - 56px); }
+  .orbit .node { font-size: 10.5px; padding: 4px 7px; }
+  .orbit .node i { width: 5px; height: 5px; margin-inline-end: 4px; }
+  .dev-panel { inset-inline-end: 8px; bottom: 8px; }
+}

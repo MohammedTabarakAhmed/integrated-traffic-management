@@ -51,7 +51,7 @@ export default function Home({ go, onCustomer }: { go: (r: string) => void; onCu
   return (
     <div className="hero">
       <div>
-        <span className="pill info"><span className="dot live" /> {t.brandLong}</span>
+        <span className="pill uae"><span className="dot live" /> {t.brandLong}</span>
         <h2>{t.heroA} <span className="grad-text">{t.heroB}</span></h2>
         <p>{t.tagline}</p>
         <div className="ctas">

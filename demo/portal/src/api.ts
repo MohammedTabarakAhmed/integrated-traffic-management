@@ -17,6 +17,16 @@ export class ApiError extends Error {
 
 export class SignedOut extends Error {}
 
+// The last API calls (method, path, status, time, correlation id; never tokens or bodies) for the hidden developer
+// panel: click the logo five times.
+export type CallLog = { at: number; method: string; path: string; status: number; ms: number; corr?: string }
+export const recentCalls: CallLog[] = []
+function logCall(c: CallLog) {
+  recentCalls.unshift(c)
+  recentCalls.length = Math.min(recentCalls.length, 25)
+  dispatchEvent(new Event('itms-call'))
+}
+
 const channel: Record<Kind, string> = { customer: 'PORTAL', staff: 'BACKOFFICE', checker: 'BACKOFFICE' }
 
 export async function call<T>(
@@ -39,7 +49,9 @@ export async function call<T>(
     headers['Idempotency-Key'] = crypto.randomUUID()
     headers['Content-Type'] = 'application/json'
   }
+  const t0 = performance.now()
   const res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) })
+  logCall({ at: Date.now(), method, path: path.split('?')[0], status: res.status, ms: Math.round(performance.now() - t0), corr: res.headers.get('x-correlation-id') ?? undefined })
   const text = await res.text()
   let json: unknown = undefined
   try {

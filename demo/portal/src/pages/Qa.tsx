@@ -94,6 +94,22 @@ const FUTURE: [string, string, string][] = [
   ['—', '172 BRD requirements not started yet (of 438); 140 in progress', 'roadmap'],
 ]
 
+// Accounts and seeded records a tester can use (tools/dev/up.sh and tools/dev/demo-seed.sh); no secrets.
+const TEST_DATA: [string, string, string][] = [
+  ['Demo citizen (national digital ID)', '784199012345671', 'password DEV_CUSTOMER_PASSWORD · file 00000000018'],
+  ['Second citizen (used by smoke, OTP enrolled)', '784198812345672', 'password DEV_CUSTOMER_PASSWORD'],
+  ['Officer / maker', 'dev.maker', 'DEV_MAKER_PASSWORD · records violations, proposes changes'],
+  ['Supervisor / checker', 'dev.checker', 'DEV_CHECKER_PASSWORD · approves, case officer, reports'],
+  ['Access administrator', 'dev.iam-admin', 'DEV_IAM_ADMIN_PASSWORD · roles and assignments'],
+  ['Fee for a first registration', 'VEH_FIRST_REG', 'AED 400 (Administration › Fee calculator)'],
+  ['Appointment centre and service', 'DEMO_DXB_HQ', 'DEMO_EYE_TEST · 30-minute slots, 08:00-20:00'],
+  ['Review workflow (back office)', 'WF_DEMO_REVIEW', 'open cases for dev.checker'],
+  ['Rental company file', 'TF-DEMO-RENTAL', 'UAT-2 (fine goes to the renter)'],
+  ['Partner state', 'OMN', 'UAT-5 (cross-border exchange)'],
+  ['Road segment', 'DEMO_E11_S1', 'road permit story'],
+  ['Training permit type', 'DEMO_INSTRUCTOR', 'permits story'],
+]
+
 function Future({ children }: { children: ReactNode }) {
   return <span className="pill future"><Rocket size={12} /> {children}</span>
 }
@@ -114,6 +130,10 @@ export default function Qa({ go }: { go: (r: string) => void }) {
   const done = CHECKS.filter((c) => typeof res[c.id] === 'object')
   const passed = done.filter((c) => (res[c.id] as Result).pass).length
   const [copied, setCopied] = useState(false)
+  const [copiedValue, setCopiedValue] = useState('')
+  const copyValue = async (v: string) => {
+    try { await navigator.clipboard.writeText(v); setCopiedValue(v); setTimeout(() => setCopiedValue(''), 1500) } catch { /* clipboard blocked */ }
+  }
 
   // Test evidence for a bug tracker: one row per check that ran, with expected vs actual and the correlation id.
   const evidence = () => done.map((c) => ({ c, r: res[c.id] as Result }))
@@ -201,6 +221,19 @@ export default function Qa({ go }: { go: (r: string) => void }) {
               </div>
             ))}
           </div>
+        </Card>
+        <Card title={ar ? 'بيانات الاختبار' : 'Test data'} icon={<Database size={16} />}>
+          <div className="list">
+            {TEST_DATA.map(([what, value, note]) => (
+              <div className="row" key={value}>
+                <div className="grow"><div className="title" style={{ whiteSpace: 'normal', fontWeight: 500 }}>{what}</div>
+                  <div className="meta"><span className="mono">{value}</span>{note && <span>{note}</span>}</div></div>
+                <button className="btn ghost" onClick={() => copyValue(value)} aria-label={`Copy ${value}`} title={ar ? 'نسخ' : 'Copy'}>
+                  {copiedValue === value ? <Check size={14} /> : <Copy size={14} />}</button>
+              </div>
+            ))}
+          </div>
+          <p className="muted" style={{ fontSize: 12.5, marginBottom: 0 }}>{ar ? 'كلمات المرور في infra/local/.env ولا تُعرض هنا. البيانات من tools/dev/demo-seed.sh.' : 'Passwords live in infra/local/.env and are never shown here. Records come from tools/dev/demo-seed.sh.'}</p>
         </Card>
         <Card title={ar ? 'دليل اختبار الميزات' : 'Feature test guide'} icon={<ClipboardCheck size={16} />} className="span-2">
           <div className="table-wrap"><table className="tbl">

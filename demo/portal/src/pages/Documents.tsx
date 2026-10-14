@@ -21,7 +21,7 @@ const KINDS: Record<Kind, { type: string; en: string; ar: string }> = {
   OTHER: { type: 'SUPPORTING_DOCUMENT', en: 'Other supporting document', ar: 'مستند داعم آخر' },
 }
 
-async function sendContent(id: string, file: File) {
+export async function sendContent(id: string, file: File) {
   const s = await fresh('customer')
   if (!s) throw new Error('signed out')
   const res = await fetch(`/v1/documents/${id}/content`, {

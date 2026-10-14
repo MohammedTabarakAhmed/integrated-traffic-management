@@ -70,7 +70,10 @@ await step('Dashboard shows violations, points gauge, transactions and inbox', a
 await step('Pay all → checkout → receipt → duplicate callback (UAT-4)', async () => {
   const pay = page.locator('.kpi.violet button')
   if (await pay.isDisabled()) return 'nothing open to pay (run demo-seed.sh to re-arm)'
-  await pay.click(); await page.waitForURL(/mock-gateway/, { timeout: 20000 })
+  await pay.click() // the fee breakdown first (CC-047), then confirm
+  const lines = await page.locator('.breakdown .item').count()
+  expect(lines > 0, 'no items in the fee breakdown')
+  await page.locator('.breakdown .btn.primary').click(); await page.waitForURL(/mock-gateway/, { timeout: 20000 })
   await page.click('button[type=submit]'); await page.waitForURL(/#\/receipt/, { timeout: 20000 }); await page.waitForTimeout(1000)
   const receipt = await page.locator('.kv dd').first().textContent()
   await page.locator('.receipt .btn:not(.primary)').click(); await page.waitForTimeout(1500)
@@ -126,6 +129,15 @@ await step('Administration: fee quote computed', async () => {
   await page.click('.seg button:nth-child(3)'); await page.click('text=Calculate'); await page.waitForTimeout(1500)
   const total = await page.locator('.quote-total b').textContent().catch(() => '')
   expect(/\d/.test(total ?? ''), 'no quote'); return `VEH_FIRST_REG ${total}`
+})
+
+await step('Service guide: a sample certificate verifies publicly; a wrong code does not (CC-083)', async () => {
+  await go('guide'); await page.waitForTimeout(1500)
+  await page.click('text=Issue a sample certificate'); await page.locator('.result').waitFor({ timeout: 20000 })
+  expect(await page.locator('.result.ok').count() === 1, `not valid: ${await page.locator('.result').textContent()}`)
+  const number = await page.locator('.result .mono').first().textContent()
+  await page.click('text=Try a wrong code'); await page.locator('.result.bad').waitFor({ timeout: 10000 })
+  return `${number} VALID, wrong code → no match`
 })
 
 await step('Reports: run shows a table', async () => {

@@ -19,7 +19,8 @@ type Account = {
 type Txn = { reference: string; serviceCode: string; module: string; status: string; createdAt: string; channel: string }
 type History = { sequence: number; previousStatus?: string | null; status: string; reason: string; note?: string | null; actor: { username?: string | null }; channel: string; changedAt: string }
 type Message = { id: string; subject?: string | null; body: string; createdAt: string; readAt?: string | null; category: string }
-type Payable = { payable: { id: string; itemType: string; itemRef: string; total: number; currency: string; status: string }; paused: boolean }
+type Line = { financialItem: string; beneficiary: string; description?: string | null; amountMinor: number }
+type Payable = { payable: { id: string; itemType: string; itemRef: string; total: number; currency: string; status: string; lines?: Line[] }; paused: boolean }
 type FileT = {
   fileNumber: string; status: string; regionOpened: string; category: string; type: string
   identity?: { name?: Record<string, string> } | null
@@ -50,6 +51,12 @@ export default function Dashboard({ onError, notify }: { onError: (e: unknown) =
   const [objecting, setObjecting] = useState<string | null>(null)
   const [txn, setTxn] = useState<{ x: Txn; history: History[] | null } | null>(null)
   const [msg, setMsg] = useState<Message | null>(null)
+  const [checkout, setCheckout] = useState(false)
+  // Fines that arrived while the page is open (the control room records them live): highlighted and announced.
+  const [fresh, setFresh] = useState<Set<string>>(new Set())
+  const known = useRef<Set<string> | null>(null)
+  const notifyRef = useRef(notify)
+  useEffect(() => { notifyRef.current = notify })
 
   // Transaction detail: its status history, oldest first (CC-023).
   const openTxn = (x: Txn) => {
@@ -67,7 +74,18 @@ export default function Dashboard({ onError, notify }: { onError: (e: unknown) =
   // quietly; a sign-out is always reported.
   const reported = useRef(false)
   const refresh = useCallback(() => {
-    loadMine(lang).then((x) => { reported.current = false; setFailed(false); setD(x) })
+    loadMine(lang).then((x) => {
+      reported.current = false; setFailed(false); setD(x)
+      const arrived = known.current ? x.violations.filter((v) => !known.current!.has(v.number)) : []
+      known.current = new Set(x.violations.map((v) => v.number))
+      if (arrived.length) {
+        setFresh((f) => new Set([...f, ...arrived.map((v) => v.number)]))
+        const pts = arrived.reduce((n, v) => n + v.blackPoints, 0)
+        notifyRef.current(lang === 'ar'
+          ? `مخالفة جديدة على ملفك: ${arrived.map((v) => v.number).join('، ')}${pts ? ` (+${pts} نقاط عند التأكيد)` : ''}`
+          : `New fine on your file: ${arrived.map((v) => v.number).join(', ')}${pts ? ` (+${pts} points once confirmed)` : ''}`)
+      }
+    })
       .catch((e) => { setFailed(true); if (!reported.current || e instanceof SignedOut) { reported.current = true; onError(e) } })
   }, [lang, onError])
   useEffect(() => {
@@ -135,7 +153,7 @@ export default function Dashboard({ onError, notify }: { onError: (e: unknown) =
         <section className="card kpi violet">
           <div style={{ display: 'flex', alignItems: 'flex-start' }}>
             <div className="icon"><Wallet size={18} /></div>
-            <button className="btn primary" style={{ marginInlineStart: 'auto', padding: '8px 12px' }} onClick={payAll} disabled={paying || due.length === 0}>
+            <button className="btn primary" style={{ marginInlineStart: 'auto', padding: '8px 12px' }} onClick={() => setCheckout(true)} disabled={paying || due.length === 0}>
               <CreditCard size={16} /> {paying ? t.paying : due.length ? t.payAll : t.nothingDue}
             </button>
           </div>
@@ -154,10 +172,10 @@ export default function Dashboard({ onError, notify }: { onError: (e: unknown) =
           {d.violations.length === 0 ? <div className="empty">{t.noViolations}</div> : (
             <div className="list">
               {d.violations.slice(0, 6).map((v) => (
-                <div className="row" key={v.number}>
+                <div className={`row ${fresh.has(v.number) ? 'fresh' : ''}`} key={v.number}>
                   <div className={`ico ${v.status === 'PAID' ? 'green' : 'red'}`}><Camera size={17} /></div>
                   <div className="grow">
-                    <div className="title">{nameOf(v.catalogueCode, lang)}</div>
+                    <div className="title">{nameOf(v.catalogueCode, lang)}{fresh.has(v.number) && <span className="pill new" style={{ marginInlineStart: 8 }}>{lang === 'ar' ? 'جديد' : 'new'}</span>}</div>
                     <div className="meta">
                       <span className="mono">{v.number}</span>
                       <span><MapPin size={12} /> {v.location}</span>
@@ -227,6 +245,25 @@ export default function Dashboard({ onError, notify }: { onError: (e: unknown) =
             )}
           </>
         )}
+      </Drawer>
+      <Drawer open={checkout} onClose={() => setCheckout(false)} title={lang === 'ar' ? 'تفاصيل المبلغ قبل الدفع' : 'What you are paying for'}>
+        <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
+          {lang === 'ar' ? 'كل بند مستحق ومكوّناته كما سجلتها خدمة الدفع. لا يُخصم شيء قبل التأكيد.' : 'Each open item and its parts, as payment-service holds them. Nothing is charged until you confirm.'}
+          {' '}<span className="pill">CC-047</span></p>
+        <div className="breakdown">
+          {due.map((p) => (
+            <div className="item" key={p.payable.id}>
+              <div className="item-head"><span>{nameOf(p.payable.itemType, lang)}</span><span className="mono muted" style={{ fontSize: 12 }}>{p.payable.itemRef}</span>
+                <span>{money(p.payable.total, p.payable.currency, lang)}</span></div>
+              {(p.payable.lines ?? []).map((l, i) => (
+                <div className="line" key={i}><span>{l.description ?? nameOf(l.financialItem, lang)}</span><span>{nameOf(l.beneficiary, lang)}</span>
+                  <span>{money(l.amountMinor, p.payable.currency, lang)}</span></div>))}
+            </div>))}
+          {paused.size > 0 && <div className="muted" style={{ fontSize: 13 }}>{lang === 'ar' ? `${paused.size} بند متوقف بسبب اعتراض ولا يدخل في الدفع` : `${paused.size} item(s) paused by an objection are left out`}</div>}
+          <div className="grand"><span>{t.totalDue} · {due.length}</span><b className="grad-text">{money(dueTotal, currency, lang)}</b></div>
+          <button className="btn primary lg" style={{ justifyContent: 'center' }} onClick={payAll} disabled={paying || due.length === 0}>
+            <CreditCard size={16} /> {paying ? t.paying : (lang === 'ar' ? 'تأكيد والانتقال إلى بوابة الدفع' : 'Confirm and go to the payment gateway')}</button>
+        </div>
       </Drawer>
       <Drawer open={!!msg} onClose={() => setMsg(null)} title={msg ? (msg.subject ?? msg.category) : ''}>
         {msg && (

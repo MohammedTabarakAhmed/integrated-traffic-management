@@ -15,6 +15,25 @@ type Plan = { number: string; totalMinor: number; currency: string; months: numb
 type Slot = { resourceCode: string; start: string; end: string; free: number }
 type Booking = { id: string; serviceCode: string; centreCode: string; start: string; end: string; status: string; changes: number }
 
+// violation-service's instalment terms (itms.violations.instalments, VF-071; BRD defaults, Q-083 interim). No API
+// exposes them yet, so the page mirrors the defaults to guide the citizen; the service still checks every request.
+const TERMS = { minMonths: 3, maxMonths: 12, minimumTotalMinor: 500000 }
+
+// The service's split (InstalmentPlan.schedule): equal parts, the remainder on the last one, the first due one month
+// after today (Dubai), a month-end date clamped like java.time plusMonths.
+function previewSchedule(total: number, months: number) {
+  const today = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Dubai' }))
+  const base = Math.floor(total / months)
+  return Array.from({ length: months }, (_, k) => {
+    const i = k + 1
+    const y = today.getFullYear(), m = today.getMonth() + i
+    const last = new Date(y, m + 1, 0).getDate()
+    const due = new Date(y, m, Math.min(today.getDate(), last))
+    const iso = `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, '0')}-${String(due.getDate()).padStart(2, '0')}`
+    return { seq: i, dueDate: iso, amountMinor: i === months ? total - base * (months - 1) : base }
+  })
+}
+
 const CENTRE = 'DEMO_DXB_HQ'
 const SERVICE = 'DEMO_EYE_TEST'
 const utc = (iso: string) => new Date(iso).toISOString().replace(/\.\d+Z$/, 'Z')
@@ -30,6 +49,7 @@ function Instalments({ notify }: { notify: (t: string, bad?: boolean) => void })
   const [pick, setPick] = useState<Set<string>>(new Set())
   const [months, setMonths] = useState(6)
   const [busy, setBusy] = useState(false)
+  const [created, setCreated] = useState<string | null>(null)
 
   const reload = useCallback(() => {
     call<{ items: V[] }>('customer', 'GET', '/v1/me/violations?status=OPEN', undefined, lang).then((r) => setOpen(r.items)).catch(() => setOpen([]))
@@ -48,7 +68,7 @@ function Instalments({ notify }: { notify: (t: string, bad?: boolean) => void })
     try {
       const p = await call<Plan>('customer', 'POST', '/v1/me/instalment-plans', { violationNumbers: [...pick], months }, lang)
       notify(`${ar ? 'تم إنشاء خطة التقسيط' : 'Instalment plan created'} ${p.number}`)
-      setPick(new Set()); reload()
+      setCreated(p.number); setPick(new Set()); reload()
     } catch (e) {
       notify(e instanceof ApiError ? e.message : String(e), true)
     } finally { setBusy(false) }
@@ -56,7 +76,10 @@ function Instalments({ notify }: { notify: (t: string, bad?: boolean) => void })
 
   return (
     <Card title={ar ? 'الدفع بالتقسيط' : 'Pay fines in instalments'} icon={<Layers size={16} />} right={<span className="pill">VF-071</span>}>
-      <p className="muted" style={{ marginTop: 0, fontSize: 13.5 }}>{ar ? 'اختر المخالفات المستحقة ومدة الخطة. الحد الأدنى للمجموع والمدة يحددهما النظام.' : 'Choose open fines and a duration. The minimum total and the allowed months are set by the system.'}</p>
+      <p className="muted" style={{ marginTop: 0, fontSize: 13.5 }}>{ar
+        ? `اختر المخالفات المستحقة ومدة الخطة: من ${TERMS.minMonths} إلى ${TERMS.maxMonths} شهرًا، ومجموع لا يقل عن ${money(TERMS.minimumTotalMinor, 'AED', lang)} (الإعدادات الحالية للنظام).`
+        : `Choose open fines and a duration: ${TERMS.minMonths} to ${TERMS.maxMonths} months, for a total of at least ${money(TERMS.minimumTotalMinor, 'AED', lang)} (the system's current settings).`}
+        {' '}<span className="pill">VF-073</span></p>
       {eligible === null ? <Skeleton /> : eligible.length === 0 ? <div className="empty">{ar ? 'لا مخالفات مستحقة' : 'No open fines'}</div> : (
         <div className="list">
           {eligible.map((v) => (
@@ -70,14 +93,26 @@ function Instalments({ notify }: { notify: (t: string, bad?: boolean) => void })
       )}
       <div className="plan-box">
         <label className="field" style={{ margin: 0, flex: 1 }}><span>{ar ? 'عدد الأشهر' : 'Months'}: <b>{months}</b></span>
-          <input type="range" min={1} max={24} value={months} onChange={(e) => setMonths(Number(e.target.value))} /></label>
+          <input type="range" min={TERMS.minMonths} max={TERMS.maxMonths} value={months} onChange={(e) => setMonths(Number(e.target.value))} /></label>
         <div className="plan-sum"><small>{ar ? 'القسط الشهري' : 'Monthly'}</small><b className="grad-text">{money(months ? Math.ceil(total / months) : 0, 'AED', lang)}</b>
           <small>{ar ? 'المجموع' : 'Total'} {money(total, 'AED', lang)}</small></div>
         <button className="btn primary" disabled={busy || pick.size === 0} onClick={create}>{ar ? 'إنشاء الخطة' : 'Create plan'}</button>
       </div>
+      {pick.size > 0 && total < TERMS.minimumTotalMinor && (
+        <p className="hint-warn">{ar
+          ? `المجموع المختار ${money(total, 'AED', lang)} أقل من الحد الأدنى ${money(TERMS.minimumTotalMinor, 'AED', lang)}؛ سترفض الخدمة الخطة.`
+          : `The chosen total ${money(total, 'AED', lang)} is below the minimum ${money(TERMS.minimumTotalMinor, 'AED', lang)}; the service will refuse the plan.`}</p>)}
+      {pick.size > 0 && total >= months && (
+        <>
+          <h3 className="drawer-sub">{ar ? 'معاينة الجدول' : 'Schedule preview'} <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>
+            {ar ? '· الجدول النهائي يصدر من الخدمة عند الإنشاء' : '· the final schedule comes from the service on creation'}</span></h3>
+          <div className="schedule">{previewSchedule(total, months).map((i) => (
+            <div key={i.seq} className="inst preview"><small>#{i.seq}</small><b>{money(i.amountMinor, 'AED', lang)}</b><small>{i.dueDate}</small></div>
+          ))}</div>
+        </>)}
       {plans.length > 0 && <h3 className="drawer-sub">{ar ? 'خططي' : 'My plans'}</h3>}
       {plans.map((p) => (
-        <div key={p.number} className="plan">
+        <div key={p.number} className={`plan ${created === p.number ? 'fresh' : ''}`}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}><b className="mono">{p.number}</b><StatusPill s={p.status} />
             <span className="muted" style={{ marginInlineStart: 'auto' }}>{money(p.totalMinor, p.currency, lang)} · {p.months} × </span></div>
           <div className="schedule">{p.instalments.map((i) => (

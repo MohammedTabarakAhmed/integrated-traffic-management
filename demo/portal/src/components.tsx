@@ -1,4 +1,4 @@
-import { Component, useEffect, useState, type ReactNode } from 'react'
+import { Component, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useI18n } from './i18n'
 import { sentence } from './names'
 
@@ -31,17 +31,37 @@ export class PageBoundary extends Component<{ children: ReactNode; ar: boolean }
 /** Semicircle points gauge; turns red near the threshold. */
 export function Gauge({ value, max, label }: { value: number; max: number; label: string }) {
   const [shown, setShown] = useState(0)
+  const [count, setCount] = useState(value)
+  const [delta, setDelta] = useState<{ n: number; key: number } | null>(null)
+  const prev = useRef<number | null>(null)
   useEffect(() => {
     const id = requestAnimationFrame(() => setShown(Math.min(value, max)))
     return () => cancelAnimationFrame(id)
   }, [value, max])
+  // A change after the first reading counts up to the new value and flashes the difference (+4, -12).
+  useEffect(() => {
+    const from = prev.current
+    prev.current = value
+    if (from === null || from === value) { setCount(value); return }
+    setDelta({ n: value - from, key: Date.now() })
+    const t0 = performance.now()
+    let raf = 0
+    const step = (t: number) => {
+      const f = Math.min(1, (t - t0) / 900)
+      setCount(Math.round(from + (value - from) * (1 - (1 - f) ** 3)))
+      if (f < 1) raf = requestAnimationFrame(step)
+    }
+    raf = requestAnimationFrame(step)
+    const hide = setTimeout(() => setDelta(null), 3200)
+    return () => { cancelAnimationFrame(raf); clearTimeout(hide); setCount(value) }
+  }, [value])
   const r = 90
   const len = Math.PI * r
   const ratio = max > 0 ? shown / max : 0
   const danger = value >= max * 0.75
   const ticks = Array.from({ length: 9 }, (_, i) => i / 8)
   return (
-    <div className={`gauge ${danger ? 'danger' : ''}`} role="meter" aria-valuemin={0} aria-valuemax={max} aria-valuenow={value} aria-label={label}>
+    <div className={`gauge ${danger ? 'danger' : ''} ${delta ? 'bump' : ''}`} role="meter" aria-valuemin={0} aria-valuemax={max} aria-valuenow={value} aria-label={label}>
       <svg viewBox="-110 -110 220 130">
         <defs>
           <linearGradient id="g-ok" x1="0" x2="1">
@@ -66,9 +86,10 @@ export function Gauge({ value, max, label }: { value: number; max: number; label
           stroke={`url(#${danger ? 'g-bad' : 'g-ok'})`} strokeDasharray={len} strokeDashoffset={len * (1 - ratio)} />
       </svg>
       <div className="value">
-        <b className={danger ? '' : 'grad-text'} style={danger ? { color: 'var(--red)' } : undefined}>{value}</b>
+        <b className={danger ? '' : 'grad-text'} style={danger ? { color: 'var(--red)' } : undefined}>{count}</b>
         <span>{label}</span>
       </div>
+      {delta && <span key={delta.key} className={`gauge-delta ${delta.n > 0 ? 'up' : 'down'}`} aria-live="polite">{delta.n > 0 ? `+${delta.n}` : delta.n}</span>}
     </div>
   )
 }

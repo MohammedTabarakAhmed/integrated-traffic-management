@@ -739,3 +739,30 @@ html[data-theme='light'] .grad-text { color: var(--uae-green); }
   .orbit .node i { width: 5px; height: 5px; margin-inline-end: 4px; }
   .dev-panel { inset-inline-end: 8px; bottom: 8px; }
 }
+
+/* Demo D4.14: live points change, new fines, checkout breakdown, result cards, instalment preview */
+.gauge-delta { position: absolute; top: 4px; inset-inline-end: 8%; padding: 4px 10px; border-radius: 999px; font-weight: 800; font-size: 15px;
+  animation: delta-up 3.2s ease-out forwards; pointer-events: none; }
+.gauge-delta.up { color: #fff; background: linear-gradient(135deg, var(--amber), var(--red)); }
+.gauge-delta.down { color: #fff; background: linear-gradient(135deg, var(--cyan), var(--green)); }
+@keyframes delta-up { 0% { opacity: 0; transform: translateY(14px) scale(0.6); } 12% { opacity: 1; transform: none; } 80% { opacity: 1; } 100% { opacity: 0; transform: translateY(-14px); } }
+.gauge.bump svg { animation: gauge-bump 0.9s ease-out; }
+@keyframes gauge-bump { 0% { transform: scale(1); } 30% { transform: scale(1.06); } 100% { transform: scale(1); } }
+.row.fresh, .plan.fresh { animation: fresh-glow 2.4s ease-out 3; border-radius: 12px; }
+@keyframes fresh-glow { 0% { background: rgba(251, 191, 36, 0.22); } 100% { background: transparent; } }
+.pill.new { background: linear-gradient(135deg, var(--amber), var(--red)); color: #fff; border: 0; }
+.breakdown { display: grid; gap: 10px; }
+.breakdown .item { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+.breakdown .item-head { display: flex; gap: 8px; align-items: center; font-weight: 600; }
+.breakdown .line { display: flex; gap: 8px; font-size: 13px; color: var(--muted); padding-top: 4px; }
+.breakdown .line span:last-child, .breakdown .item-head span:last-child { margin-inline-start: auto; }
+.breakdown .grand { display: flex; align-items: baseline; padding: 12px; border-radius: 12px; background: var(--sunken); border: 1px solid var(--line-strong); }
+.breakdown .grand b { margin-inline-start: auto; font-size: 24px; }
+.result { margin-top: 12px; padding: 16px; border-radius: 14px; border: 1px solid var(--line-strong); display: grid; gap: 6px; animation: rise 0.35s ease-out; }
+.result.ok { border-color: rgba(52, 211, 153, 0.5); background: linear-gradient(135deg, rgba(52, 211, 153, 0.14), transparent); }
+.result.bad { border-color: rgba(244, 63, 94, 0.5); background: linear-gradient(135deg, rgba(244, 63, 94, 0.14), transparent); }
+.result.warn { border-color: rgba(251, 191, 36, 0.5); background: linear-gradient(135deg, rgba(251, 191, 36, 0.14), transparent); }
+.result .big { display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 800; }
+.result dl.kv { margin: 6px 0 0; }
+.inst.preview { border: 1px dashed var(--line-strong); background: transparent; }
+.hint-warn { color: var(--amber); font-size: 13px; margin: 10px 0 14px; }

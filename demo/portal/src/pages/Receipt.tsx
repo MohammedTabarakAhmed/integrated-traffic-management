@@ -12,14 +12,29 @@ export default function Receipt({ go }: { go: (r: string) => void }) {
   const [busy, setBusy] = useState(false)
   const colours = ['#22d3ee', '#6366f1', '#a855f7', '#34d399', '#fbbf24']
 
+  const [err, setErr] = useState('')
+  // The mock gateway keeps the sent callback in memory: after a dev-server restart it answers 404, which is shown as such.
   const retry = async () => {
-    setBusy(true)
+    setBusy(true); setErr('')
     try {
       const r = await fetch(`/mock-gateway/pay/${payment}/replay`, { method: 'POST' })
-      setDup(await r.json())
+      const body = await r.json().catch(() => ({}))
+      if (!r.ok) { setDup(null); setErr(body.detail ?? `HTTP ${r.status}`); return }
+      setDup(body)
+    } catch (e) {
+      setErr((e as Error).message)
     } finally {
       setBusy(false)
     }
+  }
+
+  if (!payment) {
+    return (
+      <section className="card receipt">
+        <p className="muted">{lang === 'ar' ? 'لا يوجد دفع لعرضه. ادفع مخالفاتك من لوحتك.' : 'No payment to show. Pay your fines from your dashboard.'}</p>
+        <button className="btn primary" onClick={() => go('dashboard')}><LayoutDashboard size={16} /> {t.back}</button>
+      </section>
+    )
   }
 
   return (
@@ -50,6 +65,7 @@ export default function Receipt({ go }: { go: (r: string) => void }) {
             </div>
           </div>
         )}
+        {err && <p role="alert" style={{ color: 'var(--red)', fontSize: 13 }}>{lang === 'ar' ? 'تعذّرت إعادة المحاولة: ' : 'Retry not possible: '}{err}</p>}
         <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
           <button className="btn primary" onClick={() => go('dashboard')}><LayoutDashboard size={16} /> {t.back}</button>
           <button className="btn" onClick={retry} disabled={busy || !payment}><RefreshCcw size={16} /> {t.retryCallback}</button>

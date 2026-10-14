@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { AlertOctagon, Bell, Camera, CarFront, CreditCard, FileText, Inbox, MapPin, ReceiptText, Wallet } from 'lucide-react'
-import { call, money, when } from '../api'
+import { call, money, SignedOut, when } from '../api'
 import { load } from '../auth'
 import Objection from './Objection'
 import { Card, Drawer, Gauge, Kpi, Skeleton, StatusPill, Timeline } from '../components'
@@ -45,6 +45,7 @@ export async function loadMine(lang: string): Promise<Data> {
 export default function Dashboard({ onError, notify }: { onError: (e: unknown) => void; notify: (text: string) => void }) {
   const { t, lang } = useI18n()
   const [d, setD] = useState<Data | null>(null)
+  const [failed, setFailed] = useState(false)
   const [paying, setPaying] = useState(false)
   const [objecting, setObjecting] = useState<string | null>(null)
   const [txn, setTxn] = useState<{ x: Txn; history: History[] | null } | null>(null)
@@ -62,8 +63,12 @@ export default function Dashboard({ onError, notify }: { onError: (e: unknown) =
     if (!m.readAt) call('customer', 'POST', `/v1/me/inbox/${m.id}/reads`, undefined, lang).then(() => refresh()).catch(() => {})
   }
 
+  // A failing 5-second refresh reports once (not a toast every 5 s), keeps the last data on screen and retries
+  // quietly; a sign-out is always reported.
+  const reported = useRef(false)
   const refresh = useCallback(() => {
-    loadMine(lang).then(setD).catch(onError)
+    loadMine(lang).then((x) => { reported.current = false; setFailed(false); setD(x) })
+      .catch((e) => { setFailed(true); if (!reported.current || e instanceof SignedOut) { reported.current = true; onError(e) } })
   }, [lang, onError])
   useEffect(() => {
     refresh()
@@ -71,6 +76,14 @@ export default function Dashboard({ onError, notify }: { onError: (e: unknown) =
     return () => clearInterval(id)
   }, [refresh])
 
+  if (!d && failed) {
+    return (
+      <div className="card empty" style={{ padding: 48, textAlign: 'center' }}>
+        <p>{lang === 'ar' ? 'تعذّر تحميل بياناتك الآن. تتم إعادة المحاولة تلقائيًا.' : 'Your data could not be loaded right now. Retrying automatically.'}</p>
+        <button className="btn" onClick={refresh}>{lang === 'ar' ? 'أعد المحاولة الآن' : 'Retry now'}</button>
+      </div>
+    )
+  }
   if (!d) {
     return (
       <div className="grid g-4">

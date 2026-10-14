@@ -71,7 +71,9 @@ export function mockGateway(opts: { gateway: string; keycloak: string }): Plugin
     const signature = createHmac('sha256', key).update([id, txn, 'SUCCESS', amount, currency, paidAt].join('|')).digest('hex')
     const cb = { gatewayTxnId: txn, merchantRef: id, status: 'SUCCESS', amountMinor: Number(amount), currency, paidAt, signature }
     let back = form.get('return') || '/#/receipt'
-    if (!back.startsWith('http://localhost:5173/') && !back.startsWith('/')) back = '/#/receipt' // no open redirect
+    // No open redirect: only this portal, and a same-site path (not //host or /\host, which browsers treat as another site).
+    const samePath = back.startsWith('/') && !back.startsWith('//') && !back.startsWith('/\\')
+    if (!back.startsWith('http://localhost:5173/') && !samePath) back = '/#/receipt'
     try {
       const out = await sendCallback(id, cb)
       sent.set(id, { body: cb })

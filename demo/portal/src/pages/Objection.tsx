@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Gavel, X } from 'lucide-react'
 import { call } from '../api'
 import { useI18n } from '../i18n'
@@ -17,6 +17,11 @@ export default function Objection({ number, onClose, onDone }: { number: string;
   const [text, setText] = useState('')
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    addEventListener('keydown', onKey)
+    return () => removeEventListener('keydown', onKey)
+  }, [onClose])
 
   const submit = async () => {
     setBusy(true); setErr('')

@@ -8,10 +8,8 @@ import gov.itms.migration.domain.MigrationModels;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.*;
-import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-@Service
 public class MigrationService {
     private final Ports.LegacySystemRepository legacyRepo;
     private final Ports.EntityMappingRepository mappingRepo;

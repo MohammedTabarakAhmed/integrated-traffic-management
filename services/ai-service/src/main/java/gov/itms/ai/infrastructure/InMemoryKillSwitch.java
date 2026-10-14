@@ -2,7 +2,6 @@ package gov.itms.ai.infrastructure;
 
 import gov.itms.ai.application.Ports;
 import gov.itms.ai.domain.Models;
-import org.springframework.stereotype.Component;
 
 import java.time.Instant;
 import java.util.concurrent.atomic.AtomicReference;
@@ -11,7 +10,6 @@ import java.util.concurrent.atomic.AtomicReference;
  * In-memory kill switch implementation (AI-014, AI-019).
  * In production, this would be backed by a distributed coordination system (etcd, Consul, etc.).
  */
-@Component
 public class InMemoryKillSwitch implements Ports.KillSwitch {
 
     private final AtomicReference<State> state = new AtomicReference<>(

@@ -4,9 +4,7 @@ import gov.itms.migration.application.Ports;
 import java.util.List;
 import java.util.Map;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.stereotype.Component;
 
-@Component
 public class JdbcDataAccessPort implements Ports.DataAccessPort {
     private final JdbcClient jdbc;
 

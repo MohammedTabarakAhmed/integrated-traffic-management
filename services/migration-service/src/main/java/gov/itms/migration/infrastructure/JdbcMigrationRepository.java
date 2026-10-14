@@ -8,9 +8,7 @@ import java.time.Instant;
 import java.util.*;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.stereotype.Repository;
 
-@Repository
 public class JdbcMigrationRepository implements
         Ports.LegacySystemRepository, Ports.EntityMappingRepository,
         Ports.MigrationJobRepository, Ports.MigrationExecutionRepository,

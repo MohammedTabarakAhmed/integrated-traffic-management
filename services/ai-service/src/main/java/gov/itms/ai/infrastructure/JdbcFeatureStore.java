@@ -2,7 +2,6 @@ package gov.itms.ai.infrastructure;
 
 import gov.itms.ai.application.Ports;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.stereotype.Component;
 
 import java.time.Instant;
 import java.util.Map;
@@ -11,7 +10,6 @@ import java.util.Optional;
 /**
  * JDBC implementation of FeatureStore.
  */
-@Component
 public class JdbcFeatureStore implements Ports.FeatureStore {
 
     private final JdbcTemplate jdbc;

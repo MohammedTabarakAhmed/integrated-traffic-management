@@ -4,7 +4,6 @@ import gov.itms.ai.application.Ports;
 import gov.itms.ai.domain.Models;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
-import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.ResultSet;
@@ -18,7 +17,6 @@ import java.util.UUID;
 /**
  * JDBC implementation of UseCaseRepository.
  */
-@Repository
 @Transactional
 public class JdbcUseCaseRepository implements Ports.UseCaseRepository {
 

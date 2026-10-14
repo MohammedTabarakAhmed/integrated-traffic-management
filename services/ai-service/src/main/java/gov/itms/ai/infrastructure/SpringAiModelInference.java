@@ -4,7 +4,6 @@ import java.util.List;
 
 import gov.itms.ai.application.Ports;
 import gov.itms.ai.domain.Models;
-import org.springframework.stereotype.Component;
 
 import java.util.Map;
 import java.util.UUID;
@@ -13,7 +12,6 @@ import java.util.UUID;
  * Adapter for model inference using Spring AI (AI-005).
  * Supports multiple model frameworks (OpenAI, Ollama, local, etc.).
  */
-@Component
 public class SpringAiModelInference implements Ports.ModelInference {
 
     // In a real implementation, this would use Spring AI's ChatClient, EmbeddingClient, etc.

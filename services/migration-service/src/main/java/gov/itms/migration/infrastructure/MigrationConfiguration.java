@@ -5,49 +5,17 @@ import gov.itms.migration.application.Ports;
 import gov.itms.platform.audit.AuditRecorder;
 import gov.itms.platform.events.DomainEventRecorder;
 import java.time.Clock;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 @Configuration(proxyBeanMethods = false)
+@EnableConfigurationProperties(MigrationService.MigrationProperties.class)
 public class MigrationConfiguration {
+    /** One JDBC repository implements every migration port; registering it once avoids ambiguous injection. */
     @Bean
-    Ports.LegacySystemRepository legacySystemRepository(JdbcClient jdbc) {
-        return new JdbcMigrationRepository(jdbc);
-    }
-
-    @Bean
-    Ports.EntityMappingRepository entityMappingRepository(JdbcClient jdbc) {
-        return new JdbcMigrationRepository(jdbc);
-    }
-
-    @Bean
-    Ports.MigrationJobRepository migrationJobRepository(JdbcClient jdbc) {
-        return new JdbcMigrationRepository(jdbc);
-    }
-
-    @Bean
-    Ports.MigrationExecutionRepository migrationExecutionRepository(JdbcClient jdbc) {
-        return new JdbcMigrationRepository(jdbc);
-    }
-
-    @Bean
-    Ports.ReconciliationRepository reconciliationRepository(JdbcClient jdbc) {
-        return new JdbcMigrationRepository(jdbc);
-    }
-
-    @Bean
-    Ports.ExceptionRepository exceptionRepository(JdbcClient jdbc) {
-        return new JdbcMigrationRepository(jdbc);
-    }
-
-    @Bean
-    Ports.RollbackPlanRepository rollbackPlanRepository(JdbcClient jdbc) {
-        return new JdbcMigrationRepository(jdbc);
-    }
-
-    @Bean
-    Ports.AnonymizationRepository anonymizationRepository(JdbcClient jdbc) {
+    JdbcMigrationRepository migrationRepository(JdbcClient jdbc) {
         return new JdbcMigrationRepository(jdbc);
     }
 
@@ -57,19 +25,11 @@ public class MigrationConfiguration {
     }
 
     @Bean
-    MigrationService migrationService(Ports.LegacySystemRepository legacyRepo,
-                                      Ports.EntityMappingRepository mappingRepo,
-                                      Ports.MigrationJobRepository jobRepo,
-                                      Ports.MigrationExecutionRepository execRepo,
-                                      Ports.ReconciliationRepository reconRepo,
-                                      Ports.ExceptionRepository exceptionRepo,
-                                      Ports.RollbackPlanRepository rollbackRepo,
-                                      Ports.AnonymizationRepository anonymizationRepo,
-                                      Ports.DataAccessPort dataAccess,
+    MigrationService migrationService(JdbcMigrationRepository repository, Ports.DataAccessPort dataAccess,
                                       AuditRecorder audit, DomainEventRecorder events,
                                       Clock clock, MigrationService.MigrationProperties properties) {
-        return new MigrationService(legacyRepo, mappingRepo, jobRepo, execRepo,
-                reconRepo, exceptionRepo, rollbackRepo, anonymizationRepo,
+        return new MigrationService(repository, repository, repository, repository,
+                repository, repository, repository, repository,
                 dataAccess, audit, events, clock, properties);
     }
 }

@@ -2,7 +2,6 @@ package gov.itms.ai.infrastructure;
 
 import gov.itms.ai.application.Ports;
 import gov.itms.ai.domain.Models;
-import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Map;
@@ -11,7 +10,6 @@ import java.util.Map;
  * Simple model evaluator implementation (AI-004).
  * In production, this would use proper ML evaluation libraries.
  */
-@Component
 public class SimpleModelEvaluator implements Ports.ModelEvaluator {
 
     @Override

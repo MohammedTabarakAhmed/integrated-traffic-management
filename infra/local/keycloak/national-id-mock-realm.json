@@ -24,7 +24,8 @@
       "redirectUris": ["http://localhost:8180/realms/itms/broker/national-id/endpoint"],
       "webOrigins": [],
       "attributes": {
-        "pkce.code.challenge.method": "S256"
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:8180/realms/itms/broker/national-id/endpoint/logout_response"
       },
       "protocolMappers": [
         {

@@ -290,7 +290,8 @@ if ! "${KC[@]}" get authentication/flows -r national-id-mock --fields alias --fo
   "${KC[@]}" update realms/national-id-mock -s browserFlow=national-id-sign-in
 fi
 "${KC[@]}" update clients/8e1d2b4f-6c3a-4d2e-9f0b-200000000001 -r national-id-mock -f - <<'ACR'
-{"attributes": {"acr.loa.map": "{\"national-id\":1,\"otp\":2}", "default.acr.values": "national-id"}}
+{"attributes": {"acr.loa.map": "{\"national-id\":1,\"otp\":2}", "default.acr.values": "national-id",
+ "post.logout.redirect.uris": "http://localhost:8180/realms/itms/broker/national-id/endpoint/logout_response"}}
 ACR
 "${KC[@]}" update identity-provider/instances/national-id -r itms -s config.forwardParameters=acr_values
 if [[ -z "$("${KC[@]}" get identity-provider/instances/national-id/mappers -r itms --fields name --format csv \

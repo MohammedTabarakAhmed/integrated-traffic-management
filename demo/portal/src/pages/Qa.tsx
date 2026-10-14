@@ -3,6 +3,7 @@ import { ArrowRight, Check, CheckCircle2, ClipboardCheck, Clock, Copy, Download,
 import { load, signInStaff } from '../auth'
 import { Card } from '../components'
 import { useI18n } from '../i18n'
+import { QA_AR } from './qa-ar'
 
 // QA & security (demo, for testers): live checks of the platform's controls with expected vs actual results, the
 // UAT checklist with where to test each one, the request flow (system design) and what is still to come.
@@ -117,6 +118,7 @@ function Future({ children }: { children: ReactNode }) {
 export default function Qa({ go }: { go: (r: string) => void }) {
   const { lang } = useI18n()
   const ar = lang === 'ar'
+  const tr = (en: string) => (ar ? QA_AR[en] ?? en : en)
   const [res, setRes] = useState<Record<string, Result | 'run'>>({})
 
   const runOne = async (c: Check) => {
@@ -215,8 +217,8 @@ export default function Qa({ go }: { go: (r: string) => void }) {
             {UAT.map(([id, what, how, expect, route, auto]) => (
               <div className="row" key={id}>
                 <span className="pill ok">{id}</span>
-                <div className="grow"><div className="title" style={{ whiteSpace: 'normal' }}>{what}</div>
-                  <div className="meta"><span>▶ {how}</span></div><div className="meta"><span>✓ {expect}</span><span className="mono">auto: {auto}</span></div></div>
+                <div className="grow"><div className="title" style={{ whiteSpace: 'normal' }}>{tr(what)}</div>
+                  <div className="meta"><span>▶ {tr(how)}</span></div><div className="meta"><span>✓ {tr(expect)}</span><span className="mono">auto: {auto}</span></div></div>
                 <button className="btn" onClick={() => go(route)}>{ar ? 'اختبر' : 'Test'}</button>
               </div>
             ))}
@@ -226,8 +228,8 @@ export default function Qa({ go }: { go: (r: string) => void }) {
           <div className="list">
             {TEST_DATA.map(([what, value, note]) => (
               <div className="row" key={value}>
-                <div className="grow"><div className="title" style={{ whiteSpace: 'normal', fontWeight: 500 }}>{what}</div>
-                  <div className="meta"><span className="mono">{value}</span>{note && <span>{note}</span>}</div></div>
+                <div className="grow"><div className="title" style={{ whiteSpace: 'normal', fontWeight: 500 }}>{tr(what)}</div>
+                  <div className="meta"><span className="mono">{value}</span>{note && <span>{tr(note)}</span>}</div></div>
                 <button className="btn ghost" onClick={() => copyValue(value)} aria-label={`Copy ${value}`} title={ar ? 'نسخ' : 'Copy'}>
                   {copiedValue === value ? <Check size={14} /> : <Copy size={14} />}</button>
               </div>
@@ -239,7 +241,7 @@ export default function Qa({ go }: { go: (r: string) => void }) {
           <div className="table-wrap"><table className="tbl">
             <thead><tr><th>{ar ? 'الميزة' : 'Feature'}</th><th>{ar ? 'الخطوات' : 'Steps'}</th><th>{ar ? 'النتيجة المتوقعة' : 'Expected'}</th><th>IDs</th><th /></tr></thead>
             <tbody>{FEATURES.map(([f, how, exp, route, ids]) => (
-              <tr key={f}><td><b>{f}</b></td><td className="muted">{how}</td><td>{exp}</td><td className="mono" style={{ fontSize: 11.5, whiteSpace: 'nowrap' }}>{ids}</td>
+              <tr key={f}><td><b>{tr(f)}</b></td><td className="muted">{tr(how)}</td><td>{tr(exp)}</td><td className="mono" style={{ fontSize: 11.5, whiteSpace: 'nowrap' }}>{ids}</td>
                 <td><button className="btn ghost" onClick={() => go(route)}>{ar ? 'اختبر' : 'Test'}</button></td></tr>))}</tbody>
           </table></div>
         </Card>
@@ -248,8 +250,8 @@ export default function Qa({ go }: { go: (r: string) => void }) {
             {FUTURE.map(([inc, what, state]) => (
               <div className="row" key={what}>
                 <span className="rm-n" style={{ width: 30, height: 30 }}>{inc}</span>
-                <div className="grow"><div className="title" style={{ whiteSpace: 'normal', fontWeight: 500 }}>{what}</div></div>
-                <Future>{state}</Future>
+                <div className="grow"><div className="title" style={{ whiteSpace: 'normal', fontWeight: 500 }}>{tr(what)}</div></div>
+                <Future>{tr(state)}</Future>
               </div>
             ))}
           </div>

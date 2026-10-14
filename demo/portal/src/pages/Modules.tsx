@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useState, type ReactNode } from 'react'
-import { Car, Check, CheckCircle2, ChevronRight, CircleDashed, ClipboardList, Code2, Copy, Download, Globe2, GraduationCap, KeyRound, Loader2, Route as RouteIcon, Search, ShieldCheck, Siren, UserCheck, Users, XCircle } from 'lucide-react'
+import { Car, Check, CheckCircle2, ChevronRight, CircleDashed, ClipboardList, Code2, Copy, Download, Globe2, GraduationCap, KeyRound, Loader2, Radar, Route as RouteIcon, Search, ShieldCheck, Siren, UserCheck, Users, XCircle } from 'lucide-react'
 import { ApiError, call, money, when } from '../api'
 import { Drawer, Skeleton, tabFromLink, Timeline } from '../components'
 import { load, signInStaff, type Kind } from '../auth'
@@ -128,6 +128,27 @@ const tours: Tour[] = [
       const done = await step<{ status: string; number: string; trainingHours: number }>('Ready for the test', 'جاهز للاختبار', 'maker',
         () => m('POST', `/v1/learning-files/${lf.id}/transitions`, { action: 'ready-for-test' }), { note: (r) => r.status })
       show(<Kv rows={[['File', <span className="mono">{done.number}</span>], ['Class', 'LIGHT · AUTOMATIC'], ['Status', done.status]]} />)
+    } }] },
+  { id: 'devices', inc: '4', icon: <Radar size={18} />, en: 'Enforcement devices', ar: 'أجهزة الضبط', ids: 'VF-080 · VF-081 · VF-011',
+    textEn: 'Radars and cameras are registered with their road, direction, speed limit and calibration date. A capture from a device whose calibration has expired, or that fails the quality check, waits for a person to review it.',
+    textAr: 'تُسجَّل الرادارات والكاميرات بطريقها واتجاهها وحد السرعة وتاريخ المعايرة. والالتقاط من جهاز انتهت معايرته أو لم يجتز فحص الجودة ينتظر مراجعة بشرية.',
+    actions: [{ en: 'Show devices and the review queue', ar: 'عرض الأجهزة وقائمة المراجعة', tone: 'primary', run: async ({ step, m, c, show, lang }) => {
+      type Device = { code: string; type: string; road?: string; direction?: string; speedLimitKmh?: number; status: string; calibrationExpiresAt?: string | null }
+      type Capture = { id: string; deviceCode: string; capturedAt: string; catalogueCode?: string; reason?: string; status?: string }
+      const d = await step<{ items: Device[] }>('Device register (Dubai)', 'سجل الأجهزة (دبي)', 'maker', () => m('GET', '/v1/devices?region=DXB'),
+        { note: (x) => `${x.items.length} devices · ${x.items.filter((i) => i.calibrationExpiresAt && i.calibrationExpiresAt < new Date().toISOString()).length} with expired calibration` })
+      const q = await step<{ items: Capture[] }>('Quality review queue', 'قائمة مراجعة الجودة', 'checker', () => c('GET', '/v1/device-captures/review-queue?region=DXB&limit=20'),
+        { note: (x) => `${x.items.length} captures waiting for a person` })
+      const expired = (i: Device) => !!i.calibrationExpiresAt && i.calibrationExpiresAt < new Date().toISOString()
+      show(<div className="list">{[...d.items].sort((x, y) => Number(/^RAD-\d{6,}/.test(x.code)) - Number(/^RAD-\d{6,}/.test(y.code))).slice(0, 6).map((i) => (
+        <div className="row" key={i.code}><div className="ico cyan"><Radar size={15} /></div>
+          <div className="grow"><div className="title mono" style={{ fontSize: 13 }}>{i.code} · {i.type}</div>
+            <div className="meta"><span>{i.road ?? '—'} {i.direction ?? ''}</span>{i.speedLimitKmh ? <span>{i.speedLimitKmh} km/h</span> : null}
+              <span>{lang === 'ar' ? 'المعايرة حتى' : 'calibrated until'} {i.calibrationExpiresAt?.slice(0, 10) ?? '—'}</span></div></div>
+          <span className={`pill ${expired(i) ? 'bad' : 'ok'}`}>{expired(i) ? (lang === 'ar' ? 'المعايرة منتهية' : 'calibration expired') : i.status}</span></div>))}
+        {q.items.length > 0 && <div className="row"><div className="grow"><div className="title">{lang === 'ar' ? 'بانتظار المراجعة' : 'Waiting for review'}: {q.items.length}</div>
+          <div className="meta">{q.items.slice(0, 3).map((x) => <span key={x.id} className="mono">{x.deviceCode} · {x.reason ?? x.catalogueCode ?? ''}</span>)}</div></div></div>}
+      </div>)
     } }] },
   { id: 'accidents', inc: '6', icon: <Siren size={18} />, en: 'Accidents', ar: 'الحوادث', ids: 'AC-002 · AC-005 · AC-006',
     textEn: 'An officer files an accident from the field device. Both drivers agree 70/30, so fault is decided at once with no investigation.',

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { BookOpen, Calculator, CheckCircle2, ListTree, Scale, UserCheck } from 'lucide-react'
+import { BookOpen, Calculator, CheckCircle2, KeyRound, ListTree, Scale, UserCheck } from 'lucide-react'
 import { ApiError, call, money, when } from '../api'
 import { load, signInStaff } from '../auth'
 import { Card, Skeleton, StatusPill, tabFromLink } from '../components'
 import { useI18n } from '../i18n'
+import Access from './Access'
 
 // Administration (demo D4.6): the configuration the platform runs on, readable by testers. Violation catalogue
 // (VF-001..VF-004), reference lists (CC-010), fee quotes (CC-040) and service-catalogue changes under maker-checker
@@ -15,7 +16,7 @@ type RefItem = { code: string; name?: { nl: string; en: string }; active?: boole
 type Line = { kind: string; feeCode?: string; nameEn?: string; nameNl?: string; amount?: number; amountMinor?: number; total?: number }
 type Quote = { id: string; lines: Line[]; total?: number; totalMinor?: number; currency?: string }
 type Change = { id: string; changeType: string; serviceCode?: string | null; status: string; maker?: { username?: string } | string | null; checker?: { username?: string } | string | null; submittedAt: string; reason: string }
-type Tab = 'catalogue' | 'lists' | 'fees' | 'changes'
+type Tab = 'catalogue' | 'lists' | 'fees' | 'changes' | 'access'
 
 const who = (x: Change['maker']) => (typeof x === 'string' ? x : x?.username) ?? '—'
 const isTest = (code: string) => /^(SMK|SMKP|PT_|TEST)/.test(code)
@@ -23,7 +24,7 @@ const isTest = (code: string) => /^(SMK|SMKP|PT_|TEST)/.test(code)
 export default function Admin({ notify }: { notify: (t: string, bad?: boolean) => void }) {
   const { lang } = useI18n()
   const ar = lang === 'ar'
-  const [tab, setTab] = useState<Tab>(() => tabFromLink<Tab>(['catalogue', 'lists', 'fees', 'changes'], 'catalogue'))
+  const [tab, setTab] = useState<Tab>(() => tabFromLink<Tab>(['catalogue', 'lists', 'fees', 'changes', 'access'], 'catalogue'))
   const [ready, setReady] = useState(() => !!load('staff') && !!load('checker'))
   const [cat, setCat] = useState<Entry[] | null>(null)
   const [showTest, setShowTest] = useState(false)
@@ -86,12 +87,14 @@ export default function Admin({ notify }: { notify: (t: string, bad?: boolean) =
     ['lists', ar ? 'القوائم المرجعية' : 'Reference lists', <ListTree size={15} key="b" />],
     ['fees', ar ? 'حاسبة الرسوم' : 'Fee calculator', <Calculator size={15} key="c" />],
     ['changes', ar ? 'المنشئ والمدقق' : 'Maker-checker', <UserCheck size={15} key="d" />],
+    ['access', ar ? 'الصلاحيات' : 'Access', <KeyRound size={15} key="e" />],
   ]
   return (
     <>
       <div className="seg" role="tablist">{tabs.map(([k, label, icon]) => (
         <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{icon}{label}</button>))}</div>
 
+      {tab === 'access' && ready && <Access />}
       {tab === 'catalogue' && (
         <Card title={ar ? 'دليل المخالفات (إصدارات سارية)' : 'Violation catalogue (versions in force)'} icon={<BookOpen size={16} />}
           right={<label className="toggle"><input type="checkbox" checked={showTest} onChange={(e) => setShowTest(e.target.checked)} /> {ar ? 'إظهار بيانات الاختبار' : 'show test entries'}</label>}>

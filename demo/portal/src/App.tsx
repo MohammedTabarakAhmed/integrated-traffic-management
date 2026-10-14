@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Bell, BellRing, Bot, Moon, Search, Sun, UserRound, Briefcase, CalendarDays, FileBarChart, SlidersHorizontal, Boxes, Braces, ClipboardCheck, Gauge as GaugeIcon, Globe, Home as HomeIcon, LayoutDashboard, LogOut, Radar, Server, ShieldCheck } from 'lucide-react'
+import { Bell, BellRing, Bot, Moon, Search, Sun, UserRound, Briefcase, CalendarDays, FileUp, FileBarChart, SlidersHorizontal, Boxes, Braces, ClipboardCheck, Gauge as GaugeIcon, Globe, Home as HomeIcon, LayoutDashboard, LogOut, Radar, Server, ShieldCheck } from 'lucide-react'
 import { ApiError, SignedOut, call } from './api'
 import { completeRedirect, load, signInCustomer, signOut } from './auth'
 import { PageBoundary } from './components'
@@ -14,19 +14,21 @@ import Home from './pages/Home'
 import Modules from './pages/Modules'
 import Platform from './pages/Platform'
 import Profile from './pages/Profile'
+import Documents from './pages/Documents'
 import Qa from './pages/Qa'
 import Receipt from './pages/Receipt'
 import Reports from './pages/Reports'
 import Services from './pages/Services'
 import Settings from './pages/Settings'
 
-type Route = 'home' | 'dashboard' | 'profile' | 'services' | 'backoffice' | 'admin' | 'reports' | 'settings' | 'receipt' | 'qa' | 'control' | 'modules' | 'analytics' | 'assistant' | 'platform'
+type Route = 'home' | 'dashboard' | 'profile' | 'documents' | 'services' | 'backoffice' | 'admin' | 'reports' | 'settings' | 'receipt' | 'qa' | 'control' | 'modules' | 'analytics' | 'assistant' | 'platform'
 
 const routeOf = (): Route => ((location.hash.replace('#/', '').split('?')[0] || 'home') as Route)
 
 // One plain sentence under each page title, so a reviewer knows what the page is for.
 const ABOUT: Record<string, [string, string]> = {
   profile: ['What your traffic file says about you, and how to change it.', 'ما يحتويه ملفك المروري عنك وكيفية تغييره.'],
+  documents: ['Upload your Emirates ID, licence or photo; each file is checked and scanned.', 'ارفع هويتك أو رخصتك أو صورتك؛ يُفحص كل ملف.'],
   dashboard: ['Your traffic file, fines, black points and messages in one place.', 'ملفك المروري ومخالفاتك ونقاطك ورسائلك في مكان واحد.'],
   services: ['Spread your fines over a few months, or book a visit to a service centre.', 'قسّط غراماتك على عدة أشهر أو احجز موعدًا في مركز الخدمة.'],
   settings: ['How we reach you. Changes ask for a one-time password first.', 'كيف نتواصل معك. التغييرات تتطلب رمزًا لمرة واحدة.'],
@@ -160,6 +162,7 @@ export default function App() {
       { r: 'home', label: t.nav.home, icon: <HomeIcon size={18} /> },
       { r: 'dashboard', label: t.nav.dashboard, icon: <LayoutDashboard size={18} /> },
       { r: 'profile', label: lang === 'ar' ? 'ملفي الشخصي' : 'My profile', icon: <UserRound size={18} /> },
+      { r: 'documents', label: lang === 'ar' ? 'مستنداتي' : 'My documents', icon: <FileUp size={18} /> },
       { r: 'services', label: lang === 'ar' ? 'خدماتي' : 'My services', icon: <CalendarDays size={18} /> },
       { r: 'settings', label: t.nav.settings, icon: <BellRing size={18} /> },
       { r: 'assistant', label: t.nav.assistant, icon: <Bot size={18} /> },
@@ -192,6 +195,8 @@ export default function App() {
     )
   } else if (route === 'profile') {
     page = customer ? <Profile go={go} /> : <div className="card empty" style={{ padding: 60 }}><button className="btn primary lg" onClick={() => signInCustomer({ returnTo: '#/profile', lang })}><ShieldCheck size={18} /> {t.signInNational}</button></div>
+  } else if (route === 'documents') {
+    page = customer ? <Documents notify={(text, bad) => setToast({ text, bad })} /> : <div className="card empty" style={{ padding: 60 }}><button className="btn primary lg" onClick={() => signInCustomer({ returnTo: '#/documents', lang })}><ShieldCheck size={18} /> {t.signInNational}</button></div>
   } else if (route === 'services') {
     page = customer ? <Services notify={(text, bad) => setToast({ text, bad })} /> : <div className="card empty" style={{ padding: 60 }}><button className="btn primary lg" onClick={() => signInCustomer({ returnTo: '#/services', lang })}><ShieldCheck size={18} /> {t.signInNational}</button></div>
   } else if (route === 'settings') {

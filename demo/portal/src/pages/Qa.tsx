@@ -83,6 +83,9 @@ const FEATURES: [string, string, string, string, string][] = [
   ['Maker-checker', 'Administration › Maker-checker › Propose › Approve as maker', 'Maker refused; Approve as checker succeeds', 'admin', 'CC-020 · CC-114'],
   ['Fee quote', 'Administration › Fee calculator › Calculate', 'First registration: AED 400 with its fee line', 'admin', 'CC-040'],
   ['Report CSV', 'Reports › Run › CSV', 'Chart and table; a bilingual CSV file downloads', 'reports', 'RPT-001 · RPT-002'],
+  ['Upload a document', 'My documents › Emirates ID › type the ID › choose a PDF › Upload', 'Upload stays off until every rule is ✓; someone else’s ID is refused; the file is scanned and listed', 'documents', 'CC-080 · CC-081'],
+  ['Open a traffic file', 'Back office › New file › try 784197012345673, then a visitor passport', 'Deceased / existing / unknown IDs refused with the reason; a visitor gets a new file number', 'backoffice?tab=newfile', 'DL-001 · DL-002'],
+  ['Cancel an application', 'Back office › Applications › Find › Cancel › give a reason', 'Only Draft or Pending payment can be cancelled; it stays in the list as Cancelled', 'backoffice?tab=applications', 'CC-022'],
 ]
 
 const FUTURE: [string, string, string][] = [

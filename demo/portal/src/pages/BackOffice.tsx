@@ -5,6 +5,8 @@ import { load, signInStaff } from '../auth'
 import { Card, Drawer, Skeleton, StatusPill, tabFromLink, Timeline } from '../components'
 import { useI18n } from '../i18n'
 import { nameOf } from '../names'
+import Applications from './Applications'
+import NewFile from './NewFile'
 
 // Back office (demo D4.4), as dev.checker: decide customer objections (VF-051, VF-052), work the case-officer queue
 // (CC-060, CC-063) and lift a hold with a reason (CC-030). Every decision is audited by the services.
@@ -15,13 +17,13 @@ type ItemHistory = { action: string; stepCode: string; actorId: string; at: stri
 type Hold = { id: string; holdType: string; module: string; reason: string; status: string; startDate: string; endDate?: string | null; blockedServices: string[]; liftReason?: string | null }
 
 const DEMO_FILE_ID = '784199012345671'
-type Tab = 'objections' | 'queue' | 'holds'
+type Tab = 'objections' | 'queue' | 'holds' | 'newfile' | 'applications'
 
 export default function BackOffice({ notify }: { notify: (t: string, bad?: boolean) => void }) {
   const { lang } = useI18n()
   const ar = lang === 'ar'
   const [ready, setReady] = useState(() => !!load('checker'))
-  const [tab, setTab] = useState<Tab>(() => tabFromLink<Tab>(['objections', 'queue', 'holds'], 'objections'))
+  const [tab, setTab] = useState<Tab>(() => tabFromLink<Tab>(['objections', 'queue', 'holds', 'newfile', 'applications'], 'objections'))
   const [objections, setObjections] = useState<Objection[] | null>(null)
   const [items, setItems] = useState<Item[] | null>(null)
   const [holds, setHolds] = useState<Hold[] | null>(null)
@@ -76,6 +78,8 @@ export default function BackOffice({ notify }: { notify: (t: string, bad?: boole
     ['objections', ar ? 'الاعتراضات' : 'Objections', objections?.length],
     ['queue', ar ? 'قائمة العمل' : 'Work queue', items?.filter((i) => !['COMPLETED', 'CANCELLED'].includes(i.status)).length],
     ['holds', ar ? 'الحجوزات' : 'Holds', holds?.filter((h) => h.status === 'ACTIVE').length],
+    ['newfile', ar ? 'ملف جديد' : 'New file', undefined],
+    ['applications', ar ? 'الطلبات' : 'Applications', undefined],
   ]
   return (
     <>
@@ -86,6 +90,8 @@ export default function BackOffice({ notify }: { notify: (t: string, bad?: boole
         <span className="pill ok" style={{ marginInlineStart: 'auto' }}><Hand size={12} /> dev.checker</span>
       </div>
 
+      {tab === 'newfile' && <NewFile notify={notify} />}
+      {tab === 'applications' && <Applications notify={notify} />}
       {tab === 'objections' && (
         <Card title={ar ? 'اعتراضات المتعاملين بانتظار القرار' : 'Customer objections awaiting a decision'} icon={<Gavel size={16} />} right={<span className="pill">VF-051 · VF-052</span>}>
           {objections === null ? <Skeleton /> : objections.length === 0 ? <div className="empty">{ar ? 'لا اعتراضات معلّقة. قدّم اعتراضًا من البوابة.' : 'No pending objections. Submit one from the citizen portal.'}</div> : (

@@ -52,6 +52,15 @@ export const QA_AR: Record<string, string> = {
   'Report CSV': 'تقرير CSV',
   'Reports › Run › CSV': 'التقارير › تشغيل › CSV',
   'Chart and table; a bilingual CSV file downloads': 'رسم وجدول؛ ويُنزَّل ملف CSV ثنائي اللغة',
+  'Upload a document': 'رفع مستند',
+  'My documents › Emirates ID › type the ID › choose a PDF › Upload': 'مستنداتي › الهوية الإماراتية › اكتب الرقم › اختر ملف PDF › رفع',
+  'Upload stays off until every rule is ✓; someone else’s ID is refused; the file is scanned and listed': 'يبقى الرفع معطّلًا حتى تتحقق كل الشروط؛ تُرفض هوية شخص آخر؛ يُفحص الملف ويظهر في القائمة',
+  'Open a traffic file': 'فتح ملف مروري',
+  'Back office › New file › try 784197012345673, then a visitor passport': 'المكتب الخلفي › ملف جديد › جرّب 784197012345673 ثم جواز زائر',
+  'Deceased / existing / unknown IDs refused with the reason; a visitor gets a new file number': 'تُرفض الهوية للمتوفى أو صاحب الملف أو غير المسجّل مع السبب؛ ويحصل الزائر على رقم ملف جديد',
+  'Cancel an application': 'إلغاء طلب',
+  'Back office › Applications › Find › Cancel › give a reason': 'المكتب الخلفي › الطلبات › بحث › إلغاء › اكتب السبب',
+  'Only Draft or Pending payment can be cancelled; it stays in the list as Cancelled': 'يُلغى فقط ما هو مسودة أو بانتظار الدفع؛ ويبقى في القائمة بحالة ملغى',
 
   // Coming in future
   'Data migration from legacy systems: mapping, reconciliation, rollback (service starts in the stack, opt-in in the lite demo profile; quality gate and tests pending)':

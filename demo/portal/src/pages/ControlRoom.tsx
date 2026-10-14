@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Ban, CheckCircle2, Clock, Lock, Radar, ShieldAlert, ShieldX, Siren, Smartphone, TrafficCone, Zap } from 'lucide-react'
+import { Ban, Check, CheckCircle2, Clock, Copy, Lock, Radar, ShieldAlert, ShieldX, Siren, Smartphone, TrafficCone, Zap } from 'lucide-react'
 import { ApiError, call } from '../api'
 import { load, signInStaff } from '../auth'
 import { Card, Gauge, StatusPill } from '../components'
@@ -70,6 +70,15 @@ export default function ControlRoom() {
   const [pending, setPending] = useState<Pending[]>([])
   const [busy, setBusy] = useState<string | null>(null)
   const [now, setNow] = useState(Date.now())
+  const [copied, setCopied] = useState(false)
+  // Test evidence: the feed (oldest first) with the file's points, suspension and eligibility at the time of copying.
+  const copyFeed = async () => {
+    const tone = { ok: '✓', info: '·', warn: '!', bad: '✗' } as const
+    const md = [`**ITMS control room — UAT-1 session** · ${new Date().toISOString()}`,
+      `File ${file ?? '—'} · points ${acct ? `${acct.activePoints}/${acct.threshold}` : '—'} · suspension ${acct?.activeSuspension ? `#${acct.activeSuspension.ordinal} until ${acct.activeSuspension.until}` : 'none'} · hold ${hold ? `${hold.holdType} ${hold.status}` : 'none'} · renewal ${elig ? (elig.eligible ? 'ALLOWED' : 'BLOCKED') : 'not checked'}`, '',
+      ...[...feed].reverse().map((f) => `- ${f.at.toISOString()} ${tone[f.tone]} ${f.en}`)].join('\n')
+    try { await navigator.clipboard.writeText(md); setCopied(true); setTimeout(() => setCopied(false), 1800) } catch { /* clipboard blocked */ }
+  }
   const seen = useRef<{ susp: string | null; entries: Set<string> | null }>({ susp: null, entries: null })
 
   const log = useCallback((en: string, arText: string, tone: FeedItem['tone'] = 'info') =>
@@ -232,7 +241,10 @@ export default function ControlRoom() {
             </>
           ) : <div className="empty">{ar ? 'لا يوجد إيقاف بعد' : 'No suspension yet'}</div>}
         </Card>
-        <Card className="span-2" title={ar ? 'سجل الأحداث' : 'Event feed'} icon={<Zap size={16} />} right={<span className="pill">{feed.length}</span>}>
+        <Card className="span-2" title={ar ? 'سجل الأحداث' : 'Event feed'} icon={<Zap size={16} />} right={<span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            {feed.length > 0 && <button className="btn ghost" onClick={copyFeed} title={ar ? 'نسخ السجل كـ Markdown' : 'Copy the feed as Markdown for a test report'}>
+              {copied ? <Check size={14} /> : <Copy size={14} />} {copied ? (ar ? 'نُسخ' : 'Copied') : 'Markdown'}</button>}
+            <span className="pill">{feed.length}</span></span>}>
           <div className="feed">
             {feed.length === 0 ? <div className="empty">{ar ? 'بانتظار الأحداث' : 'Waiting for events'}</div> :
               feed.map((f, i) => (

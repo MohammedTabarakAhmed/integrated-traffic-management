@@ -1,6 +1,26 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { Component, useEffect, useState, type ReactNode } from 'react'
 import { useI18n } from './i18n'
 import { sentence } from './names'
+
+/** Keeps a page's render error inside that page: the navigation stays usable and "Try again" re-mounts the page. */
+export class PageBoundary extends Component<{ children: ReactNode; ar: boolean }, { error: Error | null }> {
+  state = { error: null as Error | null }
+  static getDerivedStateFromError(error: Error) { return { error } }
+  componentDidCatch(error: Error) { console.error('[ITMS] page error', error) }
+  render() {
+    if (!this.state.error) return this.props.children
+    const { ar } = this.props
+    return (
+      <div className="banner" role="alert" style={{ margin: 0 }}>
+        <div className="grow">
+          <b>{ar ? 'تعذّر عرض هذه الصفحة' : 'This page could not be shown'}</b>
+          <div className="muted" style={{ fontSize: 13 }}>{this.state.error.message}</div>
+        </div>
+        <button className="btn" onClick={() => this.setState({ error: null })}>{ar ? 'حاول مجددًا' : 'Try again'}</button>
+      </div>
+    )
+  }
+}
 
 /** Semicircle points gauge; turns red near the threshold. */
 export function Gauge({ value, max, label }: { value: number; max: number; label: string }) {

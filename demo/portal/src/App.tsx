@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Bell, BellRing, Bot, Moon, Search, Sun, UserRound, Briefcase, CalendarDays, FileBarChart, SlidersHorizontal, Boxes, Braces, ClipboardCheck, Gauge as GaugeIcon, Globe, Home as HomeIcon, LayoutDashboard, LogOut, Radar, Server, ShieldCheck } from 'lucide-react'
 import { ApiError, SignedOut, call } from './api'
 import { completeRedirect, load, signInCustomer, signOut } from './auth'
+import { PageBoundary } from './components'
 import { useI18n } from './i18n'
 import BackOffice from './pages/BackOffice'
 import ControlRoom from './pages/ControlRoom'
@@ -249,7 +250,7 @@ export default function App() {
         {route === 'home' && (
           <div className="topbar"><div className="spacer" /><ThemeToggle /><button className="btn" onClick={toggle}><Globe size={16} /> {t.language}</button></div>
         )}
-        {page}
+        <PageBoundary key={route} ar={lang === 'ar'}>{page}</PageBoundary>
       </main>
       {toast && <div className={`toast ${toast.bad ? 'bad' : ''}`} role="status">{toast.text}</div>}
     </div>

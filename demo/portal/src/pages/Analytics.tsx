@@ -49,7 +49,7 @@ export default function Analytics() {
 
   const verify = useCallback(async () => {
     setVerifying(true)
-    try { setChain(await call('checker', 'GET', '/v1/audit-integrity')) } finally { setVerifying(false) }
+    try { setChain(await call('checker', 'GET', '/v1/audit-integrity')) } catch { /* keep the last result; the button is enabled again */ } finally { setVerifying(false) }
   }, [])
 
   useEffect(() => {

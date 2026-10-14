@@ -126,7 +126,9 @@ export default function Dashboard({ onError, notify }: { onError: (e: unknown) =
       const basket = await call<{ id: string }>('customer', 'POST', '/v1/me/baskets', { payableIds: due.map((p) => p.payable.id) }, lang)
       const started = await call<{ redirectUrl: string | null }>('customer', 'POST', `/v1/baskets/${basket.id}/payments`,
         { method: 'GATEWAY_CARD', returnUrl: `${location.origin}/#/receipt` }, lang)
-      if (started.redirectUrl) location.assign(started.redirectUrl)
+      // The mock gateway's pages are served by this portal (mock-gateway.ts); its WireMock session names
+      // localhost:5173, so a remote tester (tunnel) is sent to the same pages on the address they use.
+      if (started.redirectUrl) location.assign(started.redirectUrl.replace(/^http:\/\/localhost:5173(?=\/mock-gateway\/)/, location.origin))
     } catch (e) {
       onError(e)
       setPaying(false)

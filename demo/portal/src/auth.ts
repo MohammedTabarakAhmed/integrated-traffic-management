@@ -3,7 +3,9 @@
 // sessionStorage only, so closing the tab signs out.
 
 const REALM = '/realms/itms/protocol/openid-connect'
-const KEYCLOAK = 'http://localhost:8180' // the browser must see the real issuer for redirects
+// The browser must see the real issuer for redirects. From another address (a tunnel for a remote tester, see
+// tools/dev/tunnel.sh) Keycloak is reached through the portal's own proxy, which keeps the issuer localhost:8180.
+const KEYCLOAK = location.hostname === 'localhost' ? 'http://localhost:8180' : location.origin
 const PORTAL = 'itms-portal'
 const DEV_CLI = 'itms-dev-cli'
 

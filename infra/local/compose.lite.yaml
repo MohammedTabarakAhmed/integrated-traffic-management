@@ -115,7 +115,15 @@ services:
     environment: *lite-service-jvm
   examination-service:
     environment: *lite-service-jvm
+  # Increments 12-13 (migration-service, ai-service) are opt-in here: with them a 10 GB Docker VM swaps and calls between
+  # services time out. Start them with COMPOSE_PROFILES=increments-12-13 (they have not passed the module gate yet).
   migration-service:
+    profiles: [increments-12-13]
     environment: *lite-service-jvm
   ai-service:
+    profiles: [increments-12-13]
     environment: *lite-service-jvm
+  apisix:
+    depends_on:
+      migration-service: {condition: service_healthy, required: false}
+      ai-service: {condition: service_healthy, required: false}

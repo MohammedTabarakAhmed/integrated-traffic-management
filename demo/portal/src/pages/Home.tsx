@@ -1,7 +1,6 @@
 import { LayoutDashboard, MousePointerClick, Radar, ShieldCheck, User, UserCheck, LogIn } from 'lucide-react'
 import { CountUp } from '../components'
 import { useI18n } from '../i18n'
-import { signInStaff, signInChecker } from '../auth'
 
 // Service names around the core; the angle spreads them over two rings. Each one opens the page where that service
 // can be seen working (a module story opens on its own tab).
@@ -48,7 +47,7 @@ function node(p: { n: string; left: string; top: string }) {
   )
 }
 
-export default function Home({ go, onCustomer }: { go: (r: string) => void; onCustomer: () => void }) {
+export default function Home({ go, onCustomer, onStaff, onChecker }: { go: (r: string) => void; onCustomer: () => void; onStaff: () => void; onChecker: () => void }) {
   const { t, lang } = useI18n()
   const ar = lang === 'ar'
   return (
@@ -75,11 +74,7 @@ export default function Home({ go, onCustomer }: { go: (r: string) => void; onCu
               </div>
               <div style={{ marginInlineStart: 'auto', fontSize: 13, color: 'var(--muted)' }}>784199012345671</div>
             </button>
-            <button className="btn lg role-card" onClick={() => {
-              signInStaff('dev.maker', import.meta.env.DEV_MAKER_PASSWORD ?? '')
-                .then(() => window.location.hash = '#/control')
-                .catch(() => alert('Sign-in failed'))
-            }} style={{ width: '100%', textAlign: 'start', justifyContent: 'flex-start' }}>
+            <button className="btn lg role-card" onClick={onStaff} style={{ width: '100%', textAlign: 'start', justifyContent: 'flex-start' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <div style={{ width: 44, height: 44, borderRadius: 12, display: 'grid', placeItems: 'center', background: 'rgba(139, 92, 246, 0.12)', color: '#a78bfa', border: '1px solid rgba(139, 92, 246, 0.25)' }}><User size={18} /></div>
                 <div>
@@ -89,11 +84,7 @@ export default function Home({ go, onCustomer }: { go: (r: string) => void; onCu
               </div>
               <div style={{ marginInlineStart: 'auto', fontSize: 13, color: 'var(--muted)' }}>{t.staffCta}</div>
             </button>
-            <button className="btn lg role-card" onClick={() => {
-              signInChecker('dev.checker', import.meta.env.DEV_CHECKER_PASSWORD ?? '')
-                .then(() => window.location.hash = '#/backoffice')
-                .catch(() => alert('Sign-in failed'))
-            }} style={{ width: '100%', textAlign: 'start', justifyContent: 'flex-start' }}>
+            <button className="btn lg role-card" onClick={onChecker} style={{ width: '100%', textAlign: 'start', justifyContent: 'flex-start' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <div style={{ width: 44, height: 44, borderRadius: 12, display: 'grid', placeItems: 'center', background: 'rgba(251, 191, 36, 0.1)', color: 'var(--amber)', border: '1px solid rgba(251, 191, 36, 0.25)' }}><UserCheck size={18} /></div>
                 <div>

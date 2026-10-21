@@ -244,16 +244,16 @@ export default function App() {
   const customerSignIn = () => signInCustomer({ returnTo: '#/dashboard', lang })
 
   // Staff sign-in helper with preset credentials shown in the role card.
-  const staffSignIn = (username: string, password: string) => {
+  const staffSignIn = (username: string, password: string, landOn = 'control') => {
     signInStaff(username, password)
-      .then(() => { setStaff(load('staff')); setKind('staff'); setRoute(routeOf()) })
+      .then(() => { setStaff(load('staff')); setKind('staff'); location.hash = `#/${landOn}`; setRoute(landOn as Route) })
       .catch((e) => setToast({ text: String(e.message ?? e), bad: true }))
   }
 
   // Checker sign-in helper
-  const checkerSignIn = (username: string, password: string) => {
+  const checkerSignIn = (username: string, password: string, landOn = 'backoffice') => {
     signInChecker(username, password)
-      .then(() => { setChecker(load('checker')); setKind('checker'); setRoute(routeOf()) })
+      .then(() => { setChecker(load('checker')); setKind('checker'); location.hash = `#/${landOn}`; setRoute(landOn as Route) })
       .catch((e) => setToast({ text: String(e.message ?? e), bad: true }))
   }
 
@@ -266,20 +266,9 @@ export default function App() {
   const nav = kind ? NAV_BY_ROLE[kind] : []
   const current = nav.flatMap((s) => s.items).find((i) => i.r === route) ?? (route === 'receipt' ? { label: t.receipt } : undefined)
 
-  // RBAC guard: redirect unauthorized access to home
-  if (!canAccessRoute(kind, route)) {
-    if (kind) {
-      // Logged in but not authorized for this route
-      setRoute('home')
-      location.hash = '#/home'
-    } else {
-      // Not logged in - will show sign-in prompt in main content
-    }
-  }
-
   const signInHeadline = kind ? `Sign in as ${kind}` : 'Welcome to ITMS'
   let page: React.ReactNode
-  if (route === 'home') page = <Home go={go} onCustomer={customerSignIn} />
+  if (route === 'home') page = <Home go={go} onCustomer={customerSignIn} onStaff={() => staffSignIn('dev.maker', import.meta.env.VITE_ITMS_STAFF_PASSWORD ?? '')} onChecker={() => checkerSignIn('dev.checker', import.meta.env.VITE_ITMS_CHECKER_PASSWORD ?? '')} />
   else if (route === 'dashboard') {
     page = customer ? <Dashboard onError={onError} notify={(text) => setToast({ text })} /> : (
       <div className="card" style={{ maxWidth: 520, margin: '8vh auto', textAlign: 'center', padding: 36 }}>

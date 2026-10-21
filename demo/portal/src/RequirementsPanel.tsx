@@ -22,17 +22,10 @@ export function RequirementsPanel({ go, lang }: { go: (r: string) => void; lang:
       .catch(() => setRows([]))
   }, [])
 
-  if (!rows) return null
-
-  const total = rows.length
-  const verified = rows.filter((r) => r.status === '[x]').length
-  const progress = rows.filter((r) => r.status === '[~]').length
-  const pending = rows.filter((r) => r.status === '[ ]').length
-  const pct = total > 0 ? Math.round((verified / total) * 100) : 0
-
+  // Hooks must run on every render with the same order: compute from rows ?? [] before any early return.
   const byModule = useMemo(() => {
     const m: Record<string, { v: number; p: number; n: number }> = {}
-    for (const r of rows) {
+    for (const r of rows ?? []) {
       const pre = r.id.split('-')[0]
       if (!m[pre]) m[pre] = { v: 0, p: 0, n: 0 }
       if (r.status === '[x]') m[pre].v++
@@ -41,6 +34,14 @@ export function RequirementsPanel({ go, lang }: { go: (r: string) => void; lang:
     }
     return Object.entries(m).sort((a, b) => (b[1].v + b[1].p) - (a[1].v + a[1].p))
   }, [rows])
+
+  if (!rows) return null
+
+  const total = rows.length
+  const verified = rows.filter((r) => r.status === '[x]').length
+  const progress = rows.filter((r) => r.status === '[~]').length
+  const pending = rows.filter((r) => r.status === '[ ]').length
+  const pct = total > 0 ? Math.round((verified / total) * 100) : 0
 
   return (
     <section className="req-panel page-enter" aria-label={ar ? 'مستكشف المتطلبات' : 'Requirements explorer'}>

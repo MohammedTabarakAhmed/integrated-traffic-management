@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Bot, CreditCard, Gavel, OctagonX, Power, Send, ShieldCheck, User, Wrench } from 'lucide-react'
+import { Bot, CreditCard, Gavel, ListChecks, OctagonX, Power, Send, ShieldCheck, User, Wrench } from 'lucide-react'
 import { call, money, when } from '../api'
 import { load, signInCustomer } from '../auth'
 import { useI18n } from '../i18n'

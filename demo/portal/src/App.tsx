@@ -2,7 +2,7 @@ import { LiveTicker } from './LiveTicker'
 import { useCallback, useEffect, useState } from 'react'
 import { Bell, BellRing, Bot, Moon, Search, Sun, UserRound, Briefcase, BookOpen, CalendarDays, FileUp, ListChecks, FileBarChart, SlidersHorizontal, Boxes, Braces, ClipboardCheck, Gauge as GaugeIcon, Globe, Home as HomeIcon, LayoutDashboard, LogOut, Radar, Server, ShieldCheck, LogIn, User, CheckCheck, LogIn as LogInIcon } from 'lucide-react'
 import { ApiError, SignedOut, call } from './api'
-import { completeRedirect, load, signInCustomer, signInStaff, signInAdmin, signInChecker, signOut } from './auth'
+import { completeRedirect, load, signInCustomer, signInStaff, signInChecker, signOut } from './auth'
 import { PageBoundary } from './components'
 import Hidden from './Hidden'
 import { RequirementsPanel } from './RequirementsPanel'
@@ -60,16 +60,6 @@ const NAV_BY_ROLE: Record<string, { sec: string; items: { r: Route; label: strin
       { r: 'qa', label: 'QA & security', icon: <ClipboardCheck size={18} /> },
     ] },
   ],
-  admin: [
-    { sec: 'Administration', items: [
-      { r: 'admin', label: 'Administration', icon: <SlidersHorizontal size={18} /> },
-      { r: 'platform', label: 'Platform', icon: <Server size={18} /> },
-      { r: 'requirements', label: 'Requirements', icon: <ListChecks size={18} /> },
-      { r: 'qa', label: 'QA & security', icon: <ClipboardCheck size={18} /> },
-      { r: 'analytics', label: 'Analytics', icon: <GaugeIcon size={18} /> },
-      { r: 'reports', label: 'Reports', icon: <FileBarChart size={18} /> },
-    ] },
-  ],
   checker: [
     { sec: 'Staff console', items: [
       { r: 'backoffice', label: 'Back office', icon: <Briefcase size={18} /> },
@@ -90,7 +80,6 @@ const NAV_BY_ROLE: Record<string, { sec: string; items: { r: Route; label: strin
 const ALLOWED_ROUTES: Record<string, Route[]> = {
   customer: ['home', 'guide', 'dashboard', 'profile', 'documents', 'services', 'settings', 'assistant', 'receipt'],
   staff: ['home', 'control', 'backoffice', 'modules', 'analytics', 'reports', 'admin', 'platform', 'requirements', 'qa', 'guide', 'dashboard', 'profile', 'documents', 'services', 'settings', 'assistant', 'receipt'],
-  admin: ['home', 'admin', 'platform', 'requirements', 'qa', 'analytics', 'reports', 'guide', 'dashboard', 'profile', 'documents', 'services', 'settings', 'assistant', 'receipt'],
   checker: ['home', 'backoffice', 'modules', 'analytics', 'reports', 'admin', 'platform', 'requirements', 'qa', 'guide', 'dashboard', 'profile', 'documents', 'services', 'settings', 'assistant', 'receipt'],
 }
 
@@ -212,12 +201,10 @@ export default function App() {
   const [route, setRoute] = useState<Route>(routeOf)
   const [customer, setCustomer] = useState(() => load('customer'))
   const [staff, setStaff] = useState(() => load('staff'))
-  const [admin, setAdmin] = useState(() => load('admin'))
   const [checker, setChecker] = useState(() => load('checker'))
-  const [kind, setKind] = useState<'customer' | 'staff' | 'admin' | 'checker' | null>(() => {
+  const [kind, setKind] = useState<'customer' | 'staff' | 'checker' | null>(() => {
     if (load('customer')) return 'customer'
     if (load('staff')) return 'staff'
-    if (load('admin')) return 'admin'
     if (load('checker')) return 'checker'
     return null
   })
@@ -260,13 +247,6 @@ export default function App() {
   const staffSignIn = (username: string, password: string) => {
     signInStaff(username, password)
       .then(() => { setStaff(load('staff')); setKind('staff'); setRoute(routeOf()) })
-      .catch((e) => setToast({ text: String(e.message ?? e), bad: true }))
-  }
-
-  // Admin sign-in helper
-  const adminSignIn = (username: string, password: string) => {
-    signInAdmin(username, password)
-      .then(() => { setAdmin(load('admin')); setKind('admin'); setRoute(routeOf()) })
       .catch((e) => setToast({ text: String(e.message ?? e), bad: true }))
   }
 
@@ -352,12 +332,10 @@ export default function App() {
   const handleSignOut = () => {
     if (kind === 'customer') signOut('customer')
     else if (kind === 'staff') signOut('staff')
-    else if (kind === 'admin') signOut('admin')
     else if (kind === 'checker') signOut('checker')
     setKind(null)
     setCustomer(null)
     setStaff(null)
-    setAdmin(null)
     setChecker(null)
     setRoute('home')
   }

@@ -1,7 +1,7 @@
-import { LayoutDashboard, MousePointerClick, Radar, ShieldCheck, User, UserCheck, LogIn, Server, Users } from 'lucide-react'
+import { LayoutDashboard, MousePointerClick, Radar, ShieldCheck, User, UserCheck, LogIn } from 'lucide-react'
 import { CountUp } from '../components'
 import { useI18n } from '../i18n'
-import { signInStaff, signInAdmin, signInChecker } from '../auth'
+import { signInStaff, signInChecker } from '../auth'
 
 // Service names around the core; the angle spreads them over two rings. Each one opens the page where that service
 // can be seen working (a module story opens on its own tab).
@@ -88,20 +88,6 @@ export default function Home({ go, onCustomer }: { go: (r: string) => void; onCu
                 </div>
               </div>
               <div style={{ marginInlineStart: 'auto', fontSize: 13, color: 'var(--muted)' }}>{t.staffCta}</div>
-            </button>
-            <button className="btn lg role-card" onClick={() => {
-              signInAdmin('dev.admin', import.meta.env.DEV_ADMIN_PASSWORD ?? '')
-                .then(() => window.location.hash = '#/admin')
-                .catch(() => alert('Sign-in failed'))
-            }} style={{ width: '100%', textAlign: 'start', justifyContent: 'flex-start' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <div style={{ width: 44, height: 44, borderRadius: 12, display: 'grid', placeItems: 'center', background: 'rgba(34, 211, 238, 0.12)', color: 'var(--cyan)', border: '1px solid rgba(34, 211, 238, 0.25)' }}><Server size={18} /></div>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--text)' }}>{ar ? 'مدير النظام' : 'System Admin'}</div>
-                  <div style={{ color: 'var(--muted)', fontSize: 13 }}>dev.admin</div>
-                </div>
-              </div>
-              <div style={{ marginInlineStart: 'auto', fontSize: 13, color: 'var(--muted)' }}>{ar ? 'إدارة النظام والمنصة' : 'System & platform admin'}</div>
             </button>
             <button className="btn lg role-card" onClick={() => {
               signInChecker('dev.checker', import.meta.env.DEV_CHECKER_PASSWORD ?? '')

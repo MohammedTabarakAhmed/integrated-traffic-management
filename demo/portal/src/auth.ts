@@ -1,6 +1,5 @@
 // Sign-in. Customers: authorisation code + PKCE with the public client itms-portal; Keycloak sends them straight to the
-// national digital ID (mock). Staff (control room): the local dev client itms-dev-cli with a dev account.
-// Admin: separate admin client itms-admin. Checker: separate checker client itms-checker. Tokens live in
+// national digital ID (mock). Staff (control room): the local dev client itms-dev-cli with a dev account. Tokens live in
 // sessionStorage only, so closing the tab signs out.
 
 const REALM = '/realms/itms/protocol/openid-connect'
@@ -9,8 +8,6 @@ const REALM = '/realms/itms/protocol/openid-connect'
 const KEYCLOAK = location.hostname === 'localhost' ? 'http://localhost:8180' : location.origin
 const PORTAL = 'itms-portal'
 const DEV_CLI = 'itms-dev-cli'
-const ADMIN_CLI = 'itms-admin'
-const CHECKER_CLI = 'itms-checker'
 
 export type Session = { accessToken: string; idToken?: string; refreshToken?: string; expiresAt: number; claims: Claims }
 export type Claims = Record<string, unknown> & {
@@ -23,7 +20,7 @@ export type Claims = Record<string, unknown> & {
   realm_access?: { roles: string[] }
   resource_access?: Record<string, { roles: string[] }>
 }
-export type Kind = 'customer' | 'staff' | 'admin' | 'checker' // checker: the second person of maker-checker (module tour)
+export type Kind = 'customer' | 'staff' | 'checker' // checker: the second person of maker-checker (module tour)
 
 const storeKey = (k: Kind) => `itms.session.${k}`
 
@@ -63,7 +60,7 @@ export async function fresh(k: Kind): Promise<Session | null> {
   if (!s) return null
   if (s.expiresAt > Date.now() + 30_000) return s
   if (!s.refreshToken) { save(k, null); return null }
-  const clientId = k === 'customer' ? PORTAL : k === 'admin' ? ADMIN_CLI : k === 'checker' ? CHECKER_CLI : DEV_CLI
+  const clientId = k === 'customer' ? PORTAL : DEV_CLI
   try {
     const res = await fetch(`${REALM}/token`, {
       method: 'POST',
@@ -152,25 +149,12 @@ export async function signInStaff(username: string, password: string): Promise<S
   return s
 }
 
-/** Admin sign-in with dedicated admin client. */
-export async function signInAdmin(username: string, password: string): Promise<Session> {
-  const res = await fetch(`${REALM}/token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ grant_type: 'password', client_id: ADMIN_CLI, scope: 'openid', username, password }),
-  })
-  if (!res.ok) throw new Error(res.status === 401 ? 'Wrong user name or password' : `Sign-in failed (${res.status})`)
-  const s = toSession(await res.json())
-  save('admin', s)
-  return s
-}
-
-/** Checker sign-in with dedicated checker client. */
+/** Checker sign-in (maker-checker) uses same dev client. */
 export async function signInChecker(username: string, password: string): Promise<Session> {
   const res = await fetch(`${REALM}/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ grant_type: 'password', client_id: CHECKER_CLI, scope: 'openid', username, password }),
+    body: new URLSearchParams({ grant_type: 'password', client_id: DEV_CLI, scope: 'openid', username, password }),
   })
   if (!res.ok) throw new Error(res.status === 401 ? 'Wrong user name or password' : `Sign-in failed (${res.status})`)
   const s = toSession(await res.json())
@@ -178,7 +162,7 @@ export async function signInChecker(username: string, password: string): Promise
   return s
 }
 
-/** Sign out any role. Customer goes through Keycloak logout; staff/admin/checker just clear their session. */
+/** Sign out any role. Customer goes through Keycloak logout; staff/checker just clear their session. */
 export function signOut(k: Kind) {
   const s = load(k)
   save(k, null)
@@ -186,7 +170,7 @@ export function signOut(k: Kind) {
     const q = new URLSearchParams({ id_token_hint: s.idToken, post_logout_redirect_uri: redirectUri() })
     location.assign(`${KEYCLOAK}${REALM}/logout?${q}`)
   } else {
-    // Staff / admin / checker: no browser-based OIDC session to end at Keycloak, just clear local storage and go home.
+    // Staff / checker: no browser-based OIDC session to end at Keycloak, just clear local storage and go home.
     location.hash = '#/home'
     location.reload()
   }

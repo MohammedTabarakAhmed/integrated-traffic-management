@@ -37,6 +37,23 @@ export function demoOps(): Plugin {
   return {
     name: 'itms-demo-ops',
     configureServer(server) {
+      // Tunnel gate helper: ngrok's traffic policy redirects ?key=... here; this sets the day cookie the policy accepts.
+      // The key is DEMO_TUNNEL_PASSWORD from infra/local/.env (written by tunnel.sh once).
+      let gateKey = ''
+      try {
+        const envText = readFileSync(resolve(__dirname, '../../infra/local/.env'), 'utf8')
+        gateKey = envText.split(/\r?\n/).find((l) => l.startsWith('DEMO_TUNNEL_PASSWORD='))?.split('=')[1]?.trim() ?? ''
+      } catch { /* no env: the gate helper stays off */ }
+      server.middlewares.use('/gate-set', (req, res) => {
+        if (!gateKey) { res.statusCode = 404; res.end(); return }
+        // middleware mount strips the path: req.url is "/?key=..." here.
+        const q = new URLSearchParams((req.url ?? '').replace(/^\/*[^?]*\?/, '').replace(/^\?/, ''))
+        if (q.get('key') !== gateKey) { res.statusCode = 401; res.end('bad key'); return }
+        res.setHeader('Set-Cookie', `itms_gate=${gateKey}; Path=/; Max-Age=86400; SameSite=Lax`)
+        res.statusCode = 302
+        res.setHeader('Location', '/')
+        res.end()
+      })
       server.middlewares.use('/demo/health', async (_req, res) => {
         const services = await Promise.all(SERVICES.map(async ([name, port, group]) => ({ name, port, group, ...(await probe(`http://127.0.0.1:${port}/v1/`)) })))
         const infra = await Promise.all(INFRA.map(async ([name, url]) => ({ name, ...(await probe(url)) })))

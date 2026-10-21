@@ -44,14 +44,16 @@ page = ("<!doctype html><meta charset=utf-8><title>ITMS demo</title><body style=
         "<div><h2>ITMS demo</h2><p>Open the full link you were sent (it ends with ?key=...).</p></div>")
 policy = f'''on_http_request:
   - expressions:
-      - "'key' in req.url.query_params && req.url.query_params['key'][0] == '{key}'"
+      - "req.url.query_params['key'][0] == '{key}'"
     actions:
       - type: custom-response
         config:
-          status_code: 302
+          status_code: 200
           headers:
+            content-type: "text/html; charset=utf-8"
             location: "/"
-            set-cookie: "itms_gate={key}; Path=/; Max-Age=86400; Secure; HttpOnly; SameSite=Lax"
+            set-cookie: "itms_gate={key}; Path=/; Max-Age=86400; SameSite=Lax"
+          body: "<meta charset=utf-8><title>ITMS demo</title><body style='font:16px system-ui;background:#0b1020;color:#e6e9f2'><h2>ITMS demo</h2><p>Loading… <a href='/'>continue</a>.</p>"
   - expressions:
       - "!('itms_gate' in req.cookies && req.cookies['itms_gate'][0].value == '{key}')"
     actions:

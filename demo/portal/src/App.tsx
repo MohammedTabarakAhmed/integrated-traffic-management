@@ -2,7 +2,7 @@ import { LiveTicker } from './LiveTicker'
 import { useCallback, useEffect, useState } from 'react'
 import { Bell, BellRing, Bot, Moon, Search, Sun, UserRound, Briefcase, BookOpen, CalendarDays, FileUp, ListChecks, FileBarChart, SlidersHorizontal, Boxes, Braces, ClipboardCheck, Gauge as GaugeIcon, Globe, Home as HomeIcon, LayoutDashboard, LogOut, Radar, Server, ShieldCheck, LogIn, User, CheckCheck, LogIn as LogInIcon } from 'lucide-react'
 import { ApiError, SignedOut, call } from './api'
-import { completeRedirect, load, signInCustomer, signInStaff, signOut } from './auth'
+import { completeRedirect, load, signInCustomer, signInStaff, signInAdmin, signInChecker, signOut } from './auth'
 import { PageBoundary } from './components'
 import Hidden from './Hidden'
 import { RequirementsPanel } from './RequirementsPanel'
@@ -32,12 +32,7 @@ type Route = 'requirements' | 'guide' | 'home' | 'dashboard' | 'profile' | 'docu
 const routeOf = (): Route => ((location.hash.replace('#/', '').split('?')[0] || 'home') as Route)
 
 // Role-based navigation: each role sees only its own pages.
-const NAV_BY_ROLE: Record<string | null, { sec: string; items: { r: Route; label: string; icon: React.ReactNode }[] }[]> = {
-  null: [
-    { sec: 'Portal', items: [
-      { r: 'home', label: 'Overview', icon: <HomeIcon size={18} /> },
-    ] },
-  ],
+const NAV_BY_ROLE: Record<string, { sec: string; items: { r: Route; label: string; icon: React.ReactNode }[] }[]> = {
   customer: [
     { sec: 'Citizen portal', items: [
       { r: 'home', label: 'Overview', icon: <HomeIcon size={18} /> },
@@ -65,6 +60,16 @@ const NAV_BY_ROLE: Record<string | null, { sec: string; items: { r: Route; label
       { r: 'qa', label: 'QA & security', icon: <ClipboardCheck size={18} /> },
     ] },
   ],
+  admin: [
+    { sec: 'Administration', items: [
+      { r: 'admin', label: 'Administration', icon: <SlidersHorizontal size={18} /> },
+      { r: 'platform', label: 'Platform', icon: <Server size={18} /> },
+      { r: 'requirements', label: 'Requirements', icon: <ListChecks size={18} /> },
+      { r: 'qa', label: 'QA & security', icon: <ClipboardCheck size={18} /> },
+      { r: 'analytics', label: 'Analytics', icon: <GaugeIcon size={18} /> },
+      { r: 'reports', label: 'Reports', icon: <FileBarChart size={18} /> },
+    ] },
+  ],
   checker: [
     { sec: 'Staff console', items: [
       { r: 'backoffice', label: 'Back office', icon: <Briefcase size={18} /> },
@@ -79,6 +84,21 @@ const NAV_BY_ROLE: Record<string | null, { sec: string; items: { r: Route; label
       { r: 'qa', label: 'QA & security', icon: <ClipboardCheck size={18} /> },
     ] },
   ],
+}
+
+// Allowed routes per role (for RBAC guard)
+const ALLOWED_ROUTES: Record<string, Route[]> = {
+  customer: ['home', 'guide', 'dashboard', 'profile', 'documents', 'services', 'settings', 'assistant', 'receipt'],
+  staff: ['home', 'control', 'backoffice', 'modules', 'analytics', 'reports', 'admin', 'platform', 'requirements', 'qa', 'guide', 'dashboard', 'profile', 'documents', 'services', 'settings', 'assistant', 'receipt'],
+  admin: ['home', 'admin', 'platform', 'requirements', 'qa', 'analytics', 'reports', 'guide', 'dashboard', 'profile', 'documents', 'services', 'settings', 'assistant', 'receipt'],
+  checker: ['home', 'backoffice', 'modules', 'analytics', 'reports', 'admin', 'platform', 'requirements', 'qa', 'guide', 'dashboard', 'profile', 'documents', 'services', 'settings', 'assistant', 'receipt'],
+}
+
+// Check if current role has access to a route
+function canAccessRoute(role: string | null, route: Route): boolean {
+  if (!role) return route === 'home'
+  const allowed = ALLOWED_ROUTES[role] ?? []
+  return allowed.includes(route)
 }
 
 const ABOUT: Record<string, [string, string]> = {
@@ -191,9 +211,13 @@ export default function App() {
   const { t, lang, toggle } = useI18n()
   const [route, setRoute] = useState<Route>(routeOf)
   const [customer, setCustomer] = useState(() => load('customer'))
-  const [kind, setKind] = useState<'customer' | 'staff' | 'checker' | null>(() => {
+  const [staff, setStaff] = useState(() => load('staff'))
+  const [admin, setAdmin] = useState(() => load('admin'))
+  const [checker, setChecker] = useState(() => load('checker'))
+  const [kind, setKind] = useState<'customer' | 'staff' | 'admin' | 'checker' | null>(() => {
     if (load('customer')) return 'customer'
     if (load('staff')) return 'staff'
+    if (load('admin')) return 'admin'
     if (load('checker')) return 'checker'
     return null
   })
@@ -233,9 +257,23 @@ export default function App() {
   const customerSignIn = () => signInCustomer({ returnTo: '#/dashboard', lang })
 
   // Staff sign-in helper with preset credentials shown in the role card.
-  const staffSignIn = (username: string, password: string, roleKind: 'staff' | 'checker') => {
-    signInStaff(username, password, roleKind)
-      .then(() => { setKind(roleKind); setRoute(routeOf()) })
+  const staffSignIn = (username: string, password: string) => {
+    signInStaff(username, password)
+      .then(() => { setStaff(load('staff')); setKind('staff'); setRoute(routeOf()) })
+      .catch((e) => setToast({ text: String(e.message ?? e), bad: true }))
+  }
+
+  // Admin sign-in helper
+  const adminSignIn = (username: string, password: string) => {
+    signInAdmin(username, password)
+      .then(() => { setAdmin(load('admin')); setKind('admin'); setRoute(routeOf()) })
+      .catch((e) => setToast({ text: String(e.message ?? e), bad: true }))
+  }
+
+  // Checker sign-in helper
+  const checkerSignIn = (username: string, password: string) => {
+    signInChecker(username, password)
+      .then(() => { setChecker(load('checker')); setKind('checker'); setRoute(routeOf()) })
       .catch((e) => setToast({ text: String(e.message ?? e), bad: true }))
   }
 
@@ -245,8 +283,19 @@ export default function App() {
     setToast({ text: e instanceof Error ? e.message : String(e), bad: true })
   }, [t])
 
-  const nav = NAV_BY_ROLE[kind ?? null]
+  const nav = kind ? NAV_BY_ROLE[kind] : []
   const current = nav.flatMap((s) => s.items).find((i) => i.r === route) ?? (route === 'receipt' ? { label: t.receipt } : undefined)
+
+  // RBAC guard: redirect unauthorized access to home
+  if (!canAccessRoute(kind, route)) {
+    if (kind) {
+      // Logged in but not authorized for this route
+      setRoute('home')
+      location.hash = '#/home'
+    } else {
+      // Not logged in - will show sign-in prompt in main content
+    }
+  }
 
   const signInHeadline = kind ? `Sign in as ${kind}` : 'Welcome to ITMS'
   let page: React.ReactNode
@@ -283,47 +332,68 @@ export default function App() {
   else page = <div className="card empty" style={{ padding: 60 }}>{t.comingSoon}</div>
 
   const signedIn = kind !== null
+
+  // RBAC guard: check if current role can access this route
+  const hasAccess = canAccessRoute(kind, route)
+  const [showUnauthorized, setShowUnauthorized] = useState(false)
+
+  useEffect(() => {
+    if (signedIn && !hasAccess) {
+      setShowUnauthorized(true)
+      const timer = setTimeout(() => {
+        setRoute('home')
+        location.hash = '#/home'
+        setShowUnauthorized(false)
+      }, 2000)
+      return () => clearTimeout(timer)
+    }
+  }, [signedIn, hasAccess, route])
+
   const handleSignOut = () => {
     if (kind === 'customer') signOut('customer')
     else if (kind === 'staff') signOut('staff')
+    else if (kind === 'admin') signOut('admin')
     else if (kind === 'checker') signOut('checker')
     setKind(null)
     setCustomer(null)
+    setStaff(null)
+    setAdmin(null)
+    setChecker(null)
     setRoute('home')
   }
 
   return (
-    <div className="shell">
+    <div className={`shell ${signedIn ? '' : 'no-sidebar'}`}>
       <div className="uae-ribbon" aria-hidden="true" />
       <Hidden go={go} notify={(text) => setToast({ text })} logoClicks={logoClicks} />
-      <aside className="side">
-        <div className="logo">
-          <div className="logo-mark flag" role="img" aria-label="UAE flag" onClick={() => setLogoClicks((n) => n + 1)}>IT</div>
-          <div><b>{t.brand}</b><small>{t.brandLong}</small></div>
-        </div>
-        {nav.map((s) => (
-          <div key={s.sec}>
-            <div className="nav-sec">{s.sec}</div>
-            {s.items.map((i) => (
-              <button key={i.r} className={`nav-item ${route === i.r ? 'active' : ''}`} onClick={() => go(i.r)} aria-current={route === i.r ? 'page' : undefined}>
-                {i.icon}{i.label}
-              </button>
-            ))}
+      {signedIn && (
+        <aside className="side">
+          <div className="logo">
+            <div className="logo-mark flag" role="img" aria-label="UAE flag" onClick={() => setLogoClicks((n) => n + 1)}>IT</div>
+            <div><b>{t.brand}</b><small>{t.brandLong}</small></div>
           </div>
-        ))}
-        <a className="nav-item" href="/api.html" target="_blank" rel="noreferrer"><Braces size={18} />{lang === 'ar' ? 'مستكشف الواجهات' : 'API explorer'}<span className="soon">↗</span></a>
-        {signedIn && (
+          {nav.map((s) => (
+            <div key={s.sec}>
+              <div className="nav-sec">{s.sec}</div>
+              {s.items.map((i) => (
+                <button key={i.r} className={`nav-item ${route === i.r ? 'active' : ''}`} onClick={() => go(i.r)} aria-current={route === i.r ? 'page' : undefined}>
+                  {i.icon}{i.label}
+                </button>
+              ))}
+            </div>
+          ))}
+          <a className="nav-item" href="/api.html" target="_blank" rel="noreferrer"><Braces size={18} />{lang === 'ar' ? 'مستكشف الواجهات' : 'API explorer'}<span className="soon">↗</span></a>
           <button className="nav-item" onClick={handleSignOut} style={{ marginTop: 12, color: 'var(--red)' }}>
             <LogOut size={16} /> {t.signOut}
           </button>
-        )}
-        <RequirementsPanel go={go} lang={lang} />
-        <HealthPanel lang={lang} />
-        <div className="side-foot">
-          <span className="pill ok" style={{ alignSelf: 'flex-start' }}><span className="dot live" /> local stack · gateway :9080</span>
-          <small className="muted" style={{ fontSize: 11.5 }}>{lang === 'ar' ? 'اضغط ? للاختصارات' : 'Press ? for shortcuts'}</small>
-        </div>
-      </aside>
+          <RequirementsPanel go={go} lang={lang} />
+          <HealthPanel lang={lang} />
+          <div className="side-foot">
+            <span className="pill ok" style={{ alignSelf: 'flex-start' }}><span className="dot live" /> local stack · gateway :9080</span>
+            <small className="muted" style={{ fontSize: 11.5 }}>{lang === 'ar' ? 'اضغط ? للاختصارات' : 'Press ? for shortcuts'}</small>
+          </div>
+        </aside>
+      )}
       <main className="main">
         {!signedIn && route !== 'home' && (
           <div className="card" style={{ maxWidth: 520, margin: '8vh auto', textAlign: 'center', padding: 40 }}>

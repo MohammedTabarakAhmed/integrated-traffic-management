@@ -27,7 +27,7 @@ function logCall(c: CallLog) {
   dispatchEvent(new Event('itms-call'))
 }
 
-const channel: Record<Kind, string> = { customer: 'PORTAL', staff: 'BACKOFFICE', checker: 'BACKOFFICE' }
+const channel: Record<Kind, string> = { customer: 'PORTAL', staff: 'BACKOFFICE', admin: 'ADMIN', checker: 'BACKOFFICE' }
 
 export async function call<T>(
   kind: Kind,

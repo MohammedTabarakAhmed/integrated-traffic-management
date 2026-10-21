@@ -257,6 +257,10 @@ button.node:hover, button.node:focus-visible { border-color: var(--accent); colo
   .g-3 { grid-template-columns: 1fr; }
   .hero { grid-template-columns: 1fr; }
 }
+/* No sidebar when not logged in */
+.shell.no-sidebar { grid-template-columns: 1fr; }
+.shell.no-sidebar .side { display: none; }
+
 @media (max-width: 760px) {
   .shell { grid-template-columns: 1fr; }
   .side { position: static; height: auto; flex-direction: row; flex-wrap: wrap; }

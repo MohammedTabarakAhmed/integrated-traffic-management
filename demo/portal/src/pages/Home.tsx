@@ -1,6 +1,7 @@
-import { LayoutDashboard, MousePointerClick, Radar, ShieldCheck, User, UserCheck, LogIn } from 'lucide-react'
+import { LayoutDashboard, MousePointerClick, Radar, ShieldCheck, User, UserCheck, LogIn, Server, Users } from 'lucide-react'
 import { CountUp } from '../components'
 import { useI18n } from '../i18n'
+import { signInStaff, signInAdmin, signInChecker } from '../auth'
 
 // Service names around the core; the angle spreads them over two rings. Each one opens the page where that service
 // can be seen working (a module story opens on its own tab).
@@ -75,23 +76,9 @@ export default function Home({ go, onCustomer }: { go: (r: string) => void; onCu
               <div style={{ marginInlineStart: 'auto', fontSize: 13, color: 'var(--muted)' }}>784199012345671</div>
             </button>
             <button className="btn lg role-card" onClick={() => {
-              // Staff sign-in with preset dev.maker credentials
-              fetch('http://localhost:8180/realms/itms/protocol/openid-connect/token', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: new URLSearchParams({ grant_type: 'password', client_id: 'itms-dev-cli', scope: 'openid', username: 'dev.maker', password: import.meta.env.DEV_MAKER_PASSWORD ?? '' }),
-              }).then(async (r) => {
-                if (!r.ok) { alert(t.noFile); return }
-                const tok = await r.json()
-                sessionStorage.setItem('itms.session.staff', JSON.stringify({
-                  accessToken: tok.access_token,
-                  idToken: tok.id_token,
-                  refreshToken: tok.refresh_token,
-                  expiresAt: Date.now() + tok.expires_in * 1000,
-                  claims: JSON.parse(atob(tok.access_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/').replace(/=+$/, '')))
-                }))
-                window.location.hash = '#/control'
-              }).catch(() => alert('Sign-in failed'))
+              signInStaff('dev.maker', import.meta.env.DEV_MAKER_PASSWORD ?? '')
+                .then(() => window.location.hash = '#/control')
+                .catch(() => alert('Sign-in failed'))
             }} style={{ width: '100%', textAlign: 'start', justifyContent: 'flex-start' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <div style={{ width: 44, height: 44, borderRadius: 12, display: 'grid', placeItems: 'center', background: 'rgba(139, 92, 246, 0.12)', color: '#a78bfa', border: '1px solid rgba(139, 92, 246, 0.25)' }}><User size={18} /></div>
@@ -103,23 +90,23 @@ export default function Home({ go, onCustomer }: { go: (r: string) => void; onCu
               <div style={{ marginInlineStart: 'auto', fontSize: 13, color: 'var(--muted)' }}>{t.staffCta}</div>
             </button>
             <button className="btn lg role-card" onClick={() => {
-              // Supervisor sign-in with preset dev.checker credentials
-              fetch('http://localhost:8180/realms/itms/protocol/openid-connect/token', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: new URLSearchParams({ grant_type: 'password', client_id: 'itms-dev-cli', scope: 'openid', username: 'dev.checker', password: import.meta.env.DEV_CHECKER_PASSWORD ?? '' }),
-              }).then(async (r) => {
-                if (!r.ok) { alert(t.noFile); return }
-                const tok = await r.json()
-                sessionStorage.setItem('itms.session.checker', JSON.stringify({
-                  accessToken: tok.access_token,
-                  idToken: tok.id_token,
-                  refreshToken: tok.refresh_token,
-                  expiresAt: Date.now() + tok.expires_in * 1000,
-                  claims: JSON.parse(atob(tok.access_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/').replace(/=+$/, '')))
-                }))
-                window.location.hash = '#/backoffice'
-              }).catch(() => alert('Sign-in failed'))
+              signInAdmin('dev.admin', import.meta.env.DEV_ADMIN_PASSWORD ?? '')
+                .then(() => window.location.hash = '#/admin')
+                .catch(() => alert('Sign-in failed'))
+            }} style={{ width: '100%', textAlign: 'start', justifyContent: 'flex-start' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ width: 44, height: 44, borderRadius: 12, display: 'grid', placeItems: 'center', background: 'rgba(34, 211, 238, 0.12)', color: 'var(--cyan)', border: '1px solid rgba(34, 211, 238, 0.25)' }}><Server size={18} /></div>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--text)' }}>{ar ? 'مدير النظام' : 'System Admin'}</div>
+                  <div style={{ color: 'var(--muted)', fontSize: 13 }}>dev.admin</div>
+                </div>
+              </div>
+              <div style={{ marginInlineStart: 'auto', fontSize: 13, color: 'var(--muted)' }}>{ar ? 'إدارة النظام والمنصة' : 'System & platform admin'}</div>
+            </button>
+            <button className="btn lg role-card" onClick={() => {
+              signInChecker('dev.checker', import.meta.env.DEV_CHECKER_PASSWORD ?? '')
+                .then(() => window.location.hash = '#/backoffice')
+                .catch(() => alert('Sign-in failed'))
             }} style={{ width: '100%', textAlign: 'start', justifyContent: 'flex-start' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <div style={{ width: 44, height: 44, borderRadius: 12, display: 'grid', placeItems: 'center', background: 'rgba(251, 191, 36, 0.1)', color: 'var(--amber)', border: '1px solid rgba(251, 191, 36, 0.25)' }}><UserCheck size={18} /></div>

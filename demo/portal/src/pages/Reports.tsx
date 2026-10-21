@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { Download, FileBarChart, Play } from 'lucide-react'
+import { Download, FileBarChart, Play, ListChecks } from 'lucide-react'
 import { ApiError, call, money } from '../api'
 import { fresh, load, signInStaff } from '../auth'
 import { Card, Skeleton } from '../components'
@@ -103,6 +103,33 @@ export default function Reports({ notify }: { notify: (t: string, bad?: boolean)
           </>
         )}
       </Card>
+      <Card className="req-progress page-enter" style={{ gridColumn: '1 / -1' }}>
+      <div className="req-progress-head">
+        <ListChecks size={16} />
+        <span>{ar ? 'متطلبات التقارير' : 'Reports requirements'}</span>
+        <span className="pill ok">{ar ? 'مباشر' : 'live'}</span>
+      </div>
+      <div className="req-progress-items">
+        {[
+          { id: 'RPT-001', en: 'Violations recorded per period (day/month)', ar: 'مخالفات مسجلة لكل فترة (يوم/شهر)' },
+          { id: 'RPT-002', en: 'Payments confirmed with amounts per period', ar: 'مدفوعات مؤكدة بالمبالغ لكل فترة' },
+          { id: 'RPT-004', en: 'CSV download (bilingual title, print date)', ar: 'تنزيل CSV (عنوان ثنائي اللغة، تاريخ الطباعة)' },
+          { id: 'RPT-010', en: 'Operational reports by service, region, period', ar: 'تقارير تشغيلية حسب الخدمة، المنطقة، الفترة' },
+          { id: 'RPT-011', en: 'Export PDF/Excel/CSV', ar: 'تصدير PDF/Excel/CSV' },
+          { id: 'RPT-012', en: 'Scheduled report runs', ar: 'تشغيل تقارير مجدول' },
+          { id: 'RPT-021', en: 'Role-scoped access to reports', ar: 'وصول مقيد بالصلاحيات للتقارير' },
+          { id: 'RPT-022', en: 'Classification-driven masking in reports', ar: 'إخفاء يعتمد على التصنيف في التقارير' },
+          { id: 'CC-121', en: 'Entity history timeline in report context', ar: 'خط زمني للكيان ضمن سياق التقرير' },
+          { id: 'SEC-014', en: 'Masking by classification; reveal audited', ar: 'إخفاء حسب التصنيف؛ الكشف مدقق' },
+        ].map((r) => (
+          <div key={r.id} className="req-progress-row">
+            <span className="req-progress-id mono" style={{ color: 'var(--uae-green)' }}>{r.id}</span>
+            <span className="req-progress-text" style={{ flex: 1 }}>{ar ? r.ar : r.en}</span>
+            <span className="pill ok">{ar ? 'مبني' : 'built'}</span>
+          </div>
+        ))}
+      </div>
+    </Card>
     </div>
   )
 }

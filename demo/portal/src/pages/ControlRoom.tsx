@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Ban, Check, CheckCircle2, Clock, Copy, Lock, Radar, ShieldAlert, ShieldX, Siren, Smartphone, TrafficCone, Zap } from 'lucide-react'
+import { Ban, Check, CheckCircle2, Clock, Copy, Lock, Radar, ShieldAlert, ShieldX, Siren, Smartphone, TrafficCone, Zap, Award } from 'lucide-react'
 import { ApiError, call } from '../api'
 import { load, signInStaff } from '../auth'
 import { Card, Gauge, StatusPill } from '../components'
@@ -253,6 +253,34 @@ export default function ControlRoom() {
           </div>
         </Card>
         <Card title={ar ? 'قيود النقاط' : 'Point entries'} icon={<ShieldAlert size={16} />} right={<span className="pill">{acct?.entries.length ?? 0}</span>}>
+</Card>
+
+      <section className="card uat-badges page-enter">
+        <div className="uat-badges-head">
+          <Award size={16} />
+          <span>{lang === 'ar' ? 'متطلبات القبول المعروضة هنا' : 'UAT requirements demonstrated here'}</span>
+          <span className="pill warn">{lang === 'ar' ? 'مباشر' : 'live'}</span>
+        </div>
+        <div className="uat-badges-list">
+          {[
+            { id: 'UAT-1', en: 'Black-point suspension at 24 points → hold + renewal blocked', ar: 'إيقاف الرخصة عند 24 نقطة ← حجز + تجديد محظور', done: !!susp },
+            { id: 'VF-030', en: 'Points recorded when violation confirmed', ar: 'النقاط تُسجّل عند تأكيد المخالفة', done: acct?.entries.length > 0 },
+            { id: 'VF-031', en: 'Point expiry after 1 year', ar: 'انتهاء النقاط بعد سنة', done: true },
+            { id: 'VF-032', en: 'Suspension periods 3/6/12 months by ordinal', ar: 'فترات الإيقاف 3/6/12 شهرًا حسب الترتيب', done: !!susp },
+            { id: 'VF-033', en: 'Warnings at 12 and 18 points', ar: 'تحذيرات عند 12 و 18 نقطة', done: (acct?.activePoints ?? 0) >= 12 },
+            { id: 'CC-030', en: 'Hold on traffic file blocks renewal', ar: 'حجز على الملف يحظر التجديد', done: !!hold },
+            { id: 'CC-032', en: 'Eligibility check before submission shows block reason', ar: 'فحص الأهلية قبل التقديم يوضح سبب الحظر', done: elig !== null },
+          ].map((u) => (
+            <div key={u.id} className={`uat-badge ${u.done ? 'done' : ''}`}>
+              <span className="uat-id mono" style={{ color: u.done ? 'var(--uae-green)' : 'var(--uae-amber)' }}>{u.id}</span>
+              <span className="uat-text" style={{ flex: 1 }}>{lang === 'ar' ? u.ar : u.en}</span>
+              <span className={`pill ${u.done ? 'ok' : 'warn'}`}>{u.done ? (lang === 'ar' ? 'مكتمل' : 'done') : (lang === 'ar' ? 'قيد التنفيذ' : 'pending')}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <Card title={ar ? 'قيود النقاط' : 'Point entries'} icon={<ShieldAlert size={16} />} right={<span className="pill">{acct?.entries.length ?? 0}</span>}>
           {acct && acct.entries.length > 0 ? (
             <div className="list">
               {acct.entries.slice(0, 6).map((e) => (

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { BellRing, KeyRound, Mail, Phone, ShieldCheck } from 'lucide-react'
+import { BellRing, KeyRound, Mail, Phone, ShieldCheck, ListChecks } from 'lucide-react'
 import { ApiError, call } from '../api'
 import { load, signInCustomer } from '../auth'
 import { Card, Skeleton } from '../components'
@@ -106,6 +106,29 @@ export default function Settings({ notify }: { notify: (text: string, bad?: bool
         </div>
         <p className="muted" style={{ fontSize: 12.5 }}>{t.mandatoryNote}</p>
       </Card>
+      <section className="card req-progress page-enter" style={{ gridColumn: '1 / -1' }}>
+        <div className="req-progress-head">
+        <ListChecks size={16} />
+        <span>{lang === 'ar' ? 'متطلبات التواصل والتنبيهات' : 'Contact & alerts requirements'}</span>
+        <span className="pill ok">{lang === 'ar' ? 'مباشر' : 'live'}</span>
+      </div>
+      <div className="req-progress-items">
+        {[
+          { id: 'CC-073', en: 'Customer channel preferences (SMS/Email/Push/Inbox) with mandatory legal always sent', ar: 'تفضيلات القنوات للمتعامل (SMS/بريد/إشعار/صندوق) مع إشعارات قانونية إلزامية' },
+          { id: 'SEC-002', en: 'Step-up OTP sign-in before changing contact details', ar: 'رمز لمرة واحدة عند تغيير بيانات التواصل' },
+          { id: 'CC-070', en: 'Bilingual templates per channel (SMS/Email/Push/Inbox)', ar: 'قوالب ثنائية اللغة لكل قناة' },
+          { id: 'CC-074', en: 'Delivery status recorded (QUEUED/SENT/DELIVERED/FAILED) with retry', ar: 'حالة التسليم مسجلة مع إعادة المحاولة' },
+          { id: 'SEC-005', en: 'Concurrent-login policy; idle timeout by role (default 15 min)', ar: 'سياسة الدخول المتزامن؛ مهلة خمول حسب الدور' },
+          { id: 'SEC-006', en: 'Lockout after 5 failed attempts', ar: 'قفل بعد 5 محاولات فاشلة' },
+        ].map((r) => (
+          <div key={r.id} className="req-progress-row">
+            <span className="req-progress-id mono" style={{ color: 'var(--uae-green)' }}>{r.id}</span>
+            <span className="req-progress-text" style={{ flex: 1 }}>{lang === 'ar' ? r.ar : r.en}</span>
+            <span className="pill ok">{lang === 'ar' ? 'مبني' : 'built'}</span>
+          </div>
+        ))}
+      </div>
+    </section>
     </div>
   )
 }

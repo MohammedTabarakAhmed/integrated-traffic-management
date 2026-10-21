@@ -166,6 +166,35 @@ export default function Assistant({ go }: { go: (r: string) => void }) {
         </dl>
         <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>{ar ? 'معاينة قائمة على القواعد. في المرحلة 13 يحلّ وكيل الذكاء الاصطناعي محل الصياغة خلف الأدوات والصلاحيات نفسها.' : 'Rule-based preview. In Increment 13 the AI agent replaces the wording behind the same tools, permissions and stop switch.'}</p>
       </aside>
+
+      {/* Assistant requirements progress — AI-003, AI-006, AI-033, AI-035, CC-073, SEC-033, CC-023, VF-050, FN-001, VF-071 */}
+      <section className="card req-progress page-enter" style={{ gridColumn: '1 / -1', marginTop: 18 }}>
+      <div className="req-progress-head">
+        <ListChecks size={16} />
+        <span>{ar ? 'متطلبات المساعد' : 'Assistant requirements'}</span>
+        <span className="pill warn">{ar ? 'معاينة' : 'preview'}</span>
+      </div>
+      <div className="req-progress-items">
+        {[
+          { id: 'AI-003', en: 'AI agents run on authority infrastructure with same APIs/permissions', ar: 'وكلاء الذكاء الاصطناعي يعملون على بنية السلطة بنفس واجهات البرمجة/الصلاحيات' },
+          { id: 'AI-006', en: 'Human in the loop for every high-impact action', ar: 'إنسان في الحلقة لكل إجراء عالي التأثير' },
+          { id: 'AI-033', en: 'Behaviour monitoring of agents; per-agent emergency stop', ar: 'مراقبة سلوك الوكلاء؛ إيقاف طارئ لكل وكيل' },
+          { id: 'AI-035', en: 'Adversarial testing (prompt injection, poisoning, evasion)', ar: 'اختبارات الخصومة (حقن أوامر، تسميم، تهرب)' },
+          { id: 'CC-073', en: 'Reads customer preferences from notification-service', ar: 'يقرأ تفضيلات المتعامل من خدمة الإشعارات' },
+          { id: 'SEC-033', en: 'Kill switch revokes all agent tokens and assignments', ar: 'مفتاح الإيقاف يلغي جميع رموز ومهام الوكيل' },
+          { id: 'CC-023', en: 'Explains transaction status history', ar: 'يشرح سجل حالات المعاملات' },
+          { id: 'VF-050', en: 'Explains objection process and pause effect', ar: 'يشرح عملية الاعتراض وتأثير التوقف' },
+          { id: 'FN-001', en: 'Shows payables and receipt from payment-service', ar: 'يعرض المستحقات والإيصال من خدمة الدفع' },
+          { id: 'VF-071', en: 'Explains instalment plan schedule and minimum', ar: 'يشرح جدول خطة التقسيط والحد الأدنى' },
+        ].map((r) => (
+          <div key={r.id} className="req-progress-row">
+            <span className="req-progress-id mono" style={{ color: 'var(--uae-amber)' }}>{r.id}</span>
+            <span className="req-progress-text" style={{ flex: 1 }}>{ar ? r.ar : r.en}</span>
+            <span className="pill warn">{ar ? 'مخطط' : 'planned'}</span>
+          </div>
+        ))}
+      </div>
+    </section>
     </div>
   )
 }

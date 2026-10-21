@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Download, FileCheck2, FileUp, ShieldCheck } from 'lucide-react'
+import { Download, FileCheck2, FileUp, ShieldCheck, ListChecks } from 'lucide-react'
 import { ApiError, call, when } from '../api'
 import { fresh, load } from '../auth'
 import { Card, Skeleton, StatusPill } from '../components'
@@ -143,6 +143,33 @@ export default function Documents({ notify }: { notify: (t: string, bad?: boolea
           ? 'كل ملف يُفحص من البرمجيات الضارة ويُحفظ مع بصمته. المستندات سجلات رسمية ولا تُحذف من البوابة.'
           : 'Every file is scanned for malware and stored with its fingerprint. Documents are official records and cannot be deleted from the portal.'}</p>
       </Card>
+
+      <section className="card req-progress page-enter" style={{ gridColumn: '1 / -1' }}>
+        <div className="req-progress-head">
+          <ListChecks size={16} />
+          <span>{ar ? 'متطلبات المستندات' : 'Document requirements'}</span>
+          <span className="pill ok">{ar ? 'مباشر' : 'live'}</span>
+        </div>
+        <div className="req-progress-items">
+          {[
+            { id: 'CC-080', en: 'Store uploaded documents with type, owner, expiry, classification', ar: 'خزن المستندات المرفوعة مع النوع، المالك، تاريخ الانتهاء، التصنيف' },
+            { id: 'CC-081', en: 'Configurable allowed types & sizes; malware scan (ClamAV)', ar: 'أنواع وأحجام ملفات قابلة للضبط؛ فحص برمجيات ضارة (ClamAV)' },
+            { id: 'CC-085', en: 'Large media (accident photos, video up to 2 GB) with record links', ar: 'وسائط كبيرة (صور حادث، فيديو حتى 2 جيجابايت) مع روابط للسجلات' },
+            { id: 'SEC-004', en: 'Secrets as files; short-lived DB logins via OpenBao', ar: 'الأسرار كملفات؛ تسجيل دخول قصيرة الأمد عبر OpenBao' },
+            { id: 'DAT-020', en: 'Certificate templates bilingual with placeholders', ar: 'قوالب شهادات ثنائية اللغة مع العناصر النائبة' },
+            { id: 'DAT-021', en: 'Issued certificates carry unique number + QR + verification code', ar: 'الشهادات المصدرة تحمل رقمًا فريدًا + QR + رمز تحقق' },
+            { id: 'DAT-022', en: 'Public verification page (no token required)', ar: 'صفحة تحقق عامة (بدون رمز)' },
+            { id: 'DAT-023', en: 'Sealed PDFs (PAdES B-B, ECDSA P-256, PKCS#11/PKCS#12)', ar: 'PDFs مختومة (PAdES B-B، ECDSA P-256، PKCS#11/PKCS#12)' },
+            { id: 'DAT-024', en: 'Audit outbox on every document create/read', ar: 'صندوق تدقيق صادر على كل إنشاء/قراءة للمستند' },
+          ].map((r) => (
+            <div key={r.id} className="req-progress-row">
+              <span className="req-progress-id mono" style={{ color: 'var(--uae-green)' }}>{r.id}</span>
+              <span className="req-progress-text" style={{ flex: 1 }}>{ar ? r.ar : r.en}</span>
+              <span className="pill ok">{ar ? 'مبني' : 'built'}</span>
+            </div>
+          ))}
+        </div>
+      </section>
     </div>
   )
 }

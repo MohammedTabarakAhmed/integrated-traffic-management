@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { ArrowRight, Check, CheckCircle2, ClipboardCheck, Clock, Copy, Download, Database, KeyRound, Network, Play, Printer, Radio, Rocket, Server, ShieldCheck, Workflow, XCircle } from 'lucide-react'
+import { ArrowRight, Check, CheckCircle2, ClipboardCheck, Clock, Copy, Download, Database, KeyRound, ListChecks, Network, Play, Printer, Radio, Rocket, Server, ShieldCheck, Workflow, XCircle } from 'lucide-react'
 import { load, signInStaff } from '../auth'
 import { Card } from '../components'
 import { useI18n } from '../i18n'
@@ -263,6 +263,61 @@ export default function Qa({ go }: { go: (r: string) => void }) {
       <div className="print-only print-sign">
         <span>{ar ? 'اختبره' : 'Tested by'}</span><span>{ar ? 'راجعه' : 'Reviewed by'}</span><span>{ar ? 'التاريخ' : 'Date'}</span>
       </div>
+
+      <section className="card req-progress page-enter" style={{ gridColumn: '1 / -1' }}>
+        <div className="req-progress-head">
+          <ListChecks size={16} />
+          <span>{ar ? 'متطلبات الجودة والأمان' : 'QA & security requirements'}</span>
+          <span className="pill ok">{ar ? 'مباشر' : 'live'}</span>
+        </div>
+        <div className="req-progress-items">
+          {[
+            { id: 'INT-001', en: 'API gateway token check, rate limit, correlation id', ar: 'بوابة API: فحص الرمز، حد المعدل، معرّف التتبع' },
+            { id: 'SEC-001', en: 'Staff authN via enterprise SSO + MFA; customer via national digital ID', ar: 'مصادقة الموظفين عبر SSO المؤسسي + MFA؛ المتعامل عبر الهوية الرقمية الوطنية' },
+            { id: 'SEC-020', en: 'ASVS L3 for auth, payment, admin; forged token refused', ar: 'ASVS L3 للمصادقة، الدفع، الإدارة؛ رمز مزور يُرفض' },
+            { id: 'CC-001', en: 'RBAC with data scopes (region/centre/module); officer without report.read → 403', ar: 'RBAC مع نطاقات بيانات؛ موظف بلا report.read → 403' },
+            { id: 'CH-002', en: 'Customer-only /v1/me/... APIs; staff token → 403', ar: 'واجهات /v1/me/... للمتعاملين فقط؛ رمز الموظف → 403' },
+            { id: 'SEC-022', en: 'RFC 9457 problem+json for invalid input', ar: 'problem+json لـ RFC 9457 عند إدخال غير صالح' },
+            { id: 'SEC-023', en: 'OWASP Dependency-Check gate (CVSS ≥ 7 fails)', ar: 'بوابة OWASP Dependency-Check (CVSS ≥ 7 تفشل)' },
+            { id: 'CC-083', en: 'Public certificate verification page (no token); rate limit 30/min', ar: 'صفحة تحقق شهادات عامة (بدون رمز)؛ حد معدل 30/دقيقة' },
+            { id: 'CC-023', en: 'Transaction status history with actor/channel/reason', ar: 'سجل حالات المعاملة مع الفاعل/القناة/السبب' },
+            { id: 'CC-073', en: 'Channel preferences; mandatory legal always sent', ar: 'تفضيلات القنوات؛ الإشعارات القانونية تُرسل دائمًا' },
+            { id: 'VF-050', en: 'Object to fine pauses it while reviewed', ar: 'الاعتراض على الغرامة يعلّقها أثناء المراجعة' },
+            { id: 'VF-051', en: 'Accept/Reduce/Reject objection; reduction limit enforced', ar: 'قبول/تخفيض/رفض الاعتراض؛ حد التخفيض مفروض' },
+            { id: 'CC-060', en: 'Workflow engine with approval/review/inspection steps', ar: 'محرك سير عمل بخطوات اعتماد/مراجعة/تفتيش' },
+            { id: 'CC-063', en: 'Personal/team/esc. queues with filters; bulk assign', ar: 'طوابير شخصية/فريقية/مصعّدة مع فلاتر؛ تعيين جماعي' },
+            { id: 'CC-030', en: 'Hold on traffic file blocks listed services', ar: 'حجز على الملف يحظر الخدمات المذكورة' },
+            { id: 'CC-032', en: 'Eligibility check shows hold blocks renewal', ar: 'فحص الأهلية يوضح أن الحجز يحظر التجديد' },
+            { id: 'CC-121', en: 'Entity history timeline from central audit chain', ar: 'خط زمني للكيان من سلسلة التدقيق المركزية' },
+            { id: 'RPT-001', en: 'Violations recorded per day/month (area chart)', ar: 'مخالفات مسجلة لكل يوم/شهر (رسم مساحي)' },
+            { id: 'RPT-002', en: 'Payments confirmed per day/month (line chart)', ar: 'مدفوعات مؤكدة لكل يوم/شهر (رسم خطي)' },
+            { id: 'CC-080', en: 'Upload documents (Emirates ID, licence, photo); malware scan', ar: 'رفع مستندات (هوية، رخصة، صورة)؛ فحص برمجيات ضارة' },
+            { id: 'CC-081', en: 'Configurable types/sizes; ClamAV INSTREAM scan', ar: 'أنواع وأحجام قابلة للضبط؛ فحص ClamAV INSTREAM' },
+            { id: 'DL-001', en: 'Open traffic file via national ID or visitor passport', ar: 'فتح ملف مروري عبر الهوية الوطنية أو جواز زائر' },
+            { id: 'DL-002', en: 'Register check refuses unknown/deceased/banned/already registered', ar: 'فحص السجل يرفض مجهول/متوفى/محظور/مُسجل مسبقاً' },
+            { id: 'CC-022', en: 'Cancel Draft/Pending payment; stays visible as Cancelled', ar: 'إلغاء مسودة/معلق الدفع؛ يبقى مرئياً كملغى' },
+            { id: 'VF-071', en: 'Instalment plan 3–12 months; min AED 5,000', ar: 'خطة تقسيط 3–12 شهر؛ حد أدنى 5,000 درهم' },
+            { id: 'CC-090', en: 'Book/change/cancel appointment (max 2 changes)', ar: 'احجز/غيّر/ألغِ موعدًا (حد أقصى تغييران)' },
+            { id: 'CC-091', en: 'Third change refused; cancelled stays visible', ar: 'التغيير الثالث مرفوض؛ الملغى يبقى مرئيًا' },
+            { id: 'CC-020', en: 'Service catalogue maker-checker (propose → approve)', ar: 'دليل الخدمات: منشئ يقترح، مدقق يعتمد' },
+            { id: 'CC-114', en: 'Reference data changes through maker-checker', ar: 'تغييرات البيانات المرجعية عبر المنشئ والمدقق' },
+            { id: 'CC-040', en: 'Fee quote per service/region/category; first reg AED 400', ar: 'عرض سعر رسوم لكل خدمة/منطقة/فئة؛ أول تسجيل 400 درهم' },
+            { id: 'CC-083', en: 'Public certificate check with QR/number+code', ar: 'تحقق عام من الشهادة بـ QR/رقم+كود' },
+            { id: 'RPT-004', en: 'CSV download bilingual with print date', ar: 'تنزيل CSV ثنائي اللغة مع تاريخ الطباعة' },
+            { id: 'CC-073', en: 'Customer channel preferences with mandatory legal', ar: 'تفضيلات قنوات المتعامل مع إشعارات قانونية إلزامية' },
+            { id: 'SEC-002', en: 'Step-up OTP before profile change', ar: 'رمز لمرة واحدة قبل تغيير الملف الشخصي' },
+            { id: 'SEC-005', en: 'Concurrent-login policy; idle timeout by role (15 min)', ar: 'سياسة دخول متزامن؛ مهلة خمول حسب الدور (15 دقيقة)' },
+            { id: 'SEC-006', en: 'Lockout after 5 failed attempts', ar: 'قفل بعد 5 محاولات فاشلة' },
+            { id: 'NFR-040', en: 'OpenTelemetry + Prometheus + Tempo + Loki + Grafana', ar: 'OpenTelemetry + Prometheus + Tempo + Loki + Grafana' },
+          ].map((r) => (
+            <div key={r.id} className="req-progress-row">
+              <span className="req-progress-id mono" style={{ color: 'var(--uae-green)' }}>{r.id}</span>
+              <span className="req-progress-text" style={{ flex: 1 }}>{ar ? r.ar : r.en}</span>
+              <span className="pill ok">{ar ? 'مبني' : 'built'}</span>
+            </div>
+          ))}
+        </div>
+      </section>
     </>
   )
 }

@@ -45,17 +45,14 @@ export function load(k: Kind): Session | null {
     const raw = sessionStorage.getItem(storeKey(k))
     if (!raw) return null
     const s = JSON.parse(raw) as Session
-    // Still signed in while the access token is valid or a refresh token can renew it (see fresh()).
     return s.expiresAt > Date.now() + 5_000 || s.refreshToken ? s : null
   } catch {
     return null
   }
 }
 
-/**
- * The session with a valid access token: Keycloak issues 5-minute access tokens, so a token about to expire is renewed
- * with the refresh token (same client). Returns null, and forgets the session, when it can no longer be renewed.
- */
+/** The session with a valid access token: Keycloak issues 5-minute access tokens, so a token about to expire is renewed
+ *  with the refresh token (same client). Returns null, and forgets the session, when it can no longer be renewed. */
 export async function fresh(k: Kind): Promise<Session | null> {
   const s = load(k)
   if (!s) return null
@@ -149,11 +146,16 @@ export async function signInStaff(username: string, password: string, kind: Kind
   return s
 }
 
+/** Sign out any role. Customer goes through Keycloak logout; staff and checker just clear their session. */
 export function signOut(k: Kind) {
   const s = load(k)
   save(k, null)
   if (k === 'customer' && s?.idToken) {
     const q = new URLSearchParams({ id_token_hint: s.idToken, post_logout_redirect_uri: redirectUri() })
     location.assign(`${KEYCLOAK}${REALM}/logout?${q}`)
+  } else {
+    // Staff / checker: no browser-based OIDC session to end at Keycloak, just clear local storage and go home.
+    location.hash = '#/home'
+    location.reload()
   }
 }

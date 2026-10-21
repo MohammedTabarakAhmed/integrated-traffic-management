@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { CalendarCheck, CalendarDays, CalendarX, Clock, Layers, RefreshCw } from 'lucide-react'
+import { CalendarCheck, CalendarDays, CalendarX, Clock, Layers, RefreshCw, ListChecks, ShieldCheck } from 'lucide-react'
 import { ApiError, call, money, when } from '../api'
 import { load } from '../auth'
 import { Card, Skeleton, StatusPill } from '../components'
@@ -193,10 +193,40 @@ function Appointments({ notify }: { notify: (t: string, bad?: boolean) => void }
 }
 
 export default function Services({ notify }: { notify: (t: string, bad?: boolean) => void }) {
+  const { lang } = useI18n()
+  const ar = lang === 'ar'
+
   return (
     <div className="grid g-2">
       <Instalments notify={notify} />
       <Appointments notify={notify} />
+
+      <section className="card req-progress page-enter" style={{ gridColumn: '1 / -1' }}>
+        <div className="req-progress-head">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <ListChecks size={16} />
+            <ShieldCheck size={14} />
+          </div>
+          <span>{ar ? 'متطلبات الخدمات المتاحة' : 'Available services requirements'}</span>
+          <span className="pill ok">{ar ? 'مباشر' : 'live'}</span>
+        </div>
+        <div className="req-progress-items">
+          {[
+            { id: 'VF-071', en: 'Instalment plan for open fines (3–12 months)', ar: 'خطة تقسيط للغرامات المستحقة (3–12 شهرًا)' },
+            { id: 'VF-073', en: 'Minimum AED 5,000 total; equal instalments, first due in 1 month', ar: 'حد أدنى 5,000 درهم؛ أقساط متساوية، أول قسط بعد شهر' },
+            { id: 'CC-090', en: 'Book appointment at service centre (eye test demo)', ar: 'احجز موعدًا في مركز الخدمة (فحص نظر تجريبي)' },
+            { id: 'CC-091', en: 'Change appointment up to 2 times', ar: 'غيّر الموعد حتى مرتين' },
+            { id: 'CC-092', en: 'Cancel appointment with reason', ar: 'ألغِ الموعد مع السبب' },
+            { id: 'CC-093', en: 'Free slots computed live from centre calendar', ar: 'المنافذ الحرة تحسب مباشرة من تقويم المركز' },
+          ].map((r) => (
+            <div key={r.id} className="req-progress-row">
+              <span className="req-progress-id mono" style={{ color: 'var(--uae-green)' }}>{r.id}</span>
+              <span className="req-progress-text" style={{ flex: 1 }}>{ar ? r.ar : r.en}</span>
+              <span className="pill ok">{ar ? 'مبني' : 'built'}</span>
+            </div>
+          ))}
+        </div>
+      </section>
     </div>
   )
 }

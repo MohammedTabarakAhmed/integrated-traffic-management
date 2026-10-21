@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AlertOctagon, Bell, Camera, CarFront, CreditCard, FileText, Inbox, MapPin, ReceiptText, Wallet } from 'lucide-react'
+import { AlertOctagon, Bell, Camera, CarFront, CreditCard, FileText, Inbox, MapPin, ReceiptText, Wallet, ListChecks } from 'lucide-react'
 import { call, money, SignedOut, when } from '../api'
 import { load } from '../auth'
 import Objection from './Objection'
@@ -164,6 +164,33 @@ export default function Dashboard({ onError, notify }: { onError: (e: unknown) =
         </section>
         <Kpi tone="green" icon={<ReceiptText size={18} />} value={d.txns.length} label={t.transactions} />
       </div>
+
+      {/* Citizen requirements progress — CH-002, CH-008, CC-023, CC-047, VF-050, FN-001 */}
+      <section className="card req-progress page-enter">
+        <div className="req-progress-head">
+          <ListChecks size={16} />
+          <span>{lang === 'ar' ? 'متطلبات بوابة المتعامل' : 'Citizen portal requirements'}</span>
+          <span className="pill ok">{lang === 'ar' ? 'مباشر' : 'live'}</span>
+        </div>
+        <div className="req-progress-items">
+          {[{ id: 'CH-002', en: 'My dashboard (file, fines, points, transactions, inbox)', ar: 'لوحتي (الملف، المخالفات، النقاط، المعاملات، الرسائل)' },
+            { id: 'CH-008', en: 'Service guide (fee, docs, time, who can use)', ar: 'دليل الخدمات (الرسوم، المستندات، المدة، من يحق له)' },
+            { id: 'CC-023', en: 'Status history on every transaction', ar: 'سجل الحالات في كل معاملة' },
+            { id: 'CC-047', en: 'Itemised fee breakdown before paying', ar: 'تفصيل الرسوم مفصلاً قبل الدفع' },
+            { id: 'VF-050', en: 'Object to a fine (pauses while reviewed)', ar: 'الاعتراض على مخالفة (يعلّق أثناء المراجعة)' },
+            { id: 'FN-001', en: 'Pay all fines in one basket → one receipt', ar: 'ادفع كل الغرامات في سلة واحدة ← إيصال واحد' },
+            { id: 'CC-080', en: 'Upload documents (Emirates ID, licence, photo)', ar: 'ارفع المستندات (هوية الإمارات، الرخصة، الصورة)' },
+            { id: 'CC-073', en: 'Contact & alerts with OTP step-up', ar: 'التواصل والتنبيهات مع رمز لمرة واحدة' },
+            { id: 'AI', en: 'Assistant explains your own data only', ar: 'المساعد يشرح بياناتك فقط' }].map((r) => (
+            <div key={r.id} className="req-progress-row">
+              <span className="req-progress-id mono" style={{ color: 'var(--uae-green)' }}>{r.id}</span>
+              <span className="req-progress-text" style={{ flex: 1 }}>{lang === 'ar' ? r.ar : r.en}</span>
+              <span className="pill ok">{lang === 'ar' ? 'مبني' : 'built'}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+
       <div className="grid g-3">
         <Card title={t.points} icon={<CarFront size={16} />} right={<span className="pill info"><span className="dot live" /> {lang === 'ar' ? 'مباشر' : 'live'}</span>}>
           <Gauge value={susp ? d.account.suspensions.find((x) => x.id === susp.id)?.pointsAtOrder ?? d.account.activePoints : d.account.activePoints}

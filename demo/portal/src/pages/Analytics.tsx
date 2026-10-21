@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { Activity, Car, Fingerprint, Link2, Siren, Wallet, Camera } from 'lucide-react'
+import { Activity, Car, Fingerprint, Link2, Siren, Wallet, Camera, ListChecks } from 'lucide-react'
 import { call, money } from '../api'
 import { load, signInStaff } from '../auth'
 import { Card, CountUp, Kpi } from '../components'
@@ -139,6 +139,31 @@ export default function Analytics() {
           </div>
         </Card>
       </div>
+
+      <section className="card req-progress page-enter" style={{ gridColumn: '1 / -1' }}>
+        <div className="req-progress-head">
+          <ListChecks size={16} />
+          <span>{ar ? 'متطلبات التحليلات والتدقيق' : 'Analytics & audit requirements'}</span>
+          <span className="pill ok">{ar ? 'مباشر' : 'live'}</span>
+        </div>
+        <div className="req-progress-items">
+          {[
+            { id: 'RPT-001', en: 'Violations recorded per day/week/month (area chart)', ar: 'مخالفات مسجلة لكل يوم/أسبوع/شهر (رسم بياني مساحي)' },
+            { id: 'RPT-002', en: 'Payments confirmed with amounts (line chart)', ar: 'مدفوعات مؤكدة بالمبالغ (رسم بياني خطي)' },
+            { id: 'RPT-004', en: 'Reports downloadable as CSV (bilingual)', ar: 'التقارير قابلة للتحميل كـ CSV (ثنائي اللغة)' },
+            { id: 'CC-120', en: 'Central audit trail: create/update/delete/view with user, role, time, channel, IP, old/new', ar: 'سجل تدقيق مركزي: إنشاء/تحديث/حذف/عرض مع المستخدم، الدور، الوقت، القناة، IP، القديم/الجديد' },
+            { id: 'CC-122', en: 'Hash-chained audit records; Verify now re-hashes entire chain', ar: 'سجلات تدقيق متسلسلة بالتجزئة؛ تحقق الآن يعيد حساب السلسلة كاملة' },
+            { id: 'NFR-040', en: 'OpenTelemetry tracing, Prometheus metrics, Tempo/Loki/Grafana', ar: 'تتبع OpenTelemetry، مقاييس Prometheus، Tempo/Loki/Grafana' },
+            { id: 'CC-121', en: 'Entity history timeline (status changes with user/channel/reason)', ar: 'خط زمني للكيان (تغييرات الحالة مع المستخدم/القناة/السبب)' },
+          ].map((r) => (
+            <div key={r.id} className="req-progress-row">
+              <span className="req-progress-id mono" style={{ color: 'var(--uae-green)' }}>{r.id}</span>
+              <span className="req-progress-text" style={{ flex: 1 }}>{ar ? r.ar : r.en}</span>
+              <span className="pill ok">{ar ? 'مبني' : 'built'}</span>
+            </div>
+          ))}
+        </div>
+      </section>
     </>
   )
 }

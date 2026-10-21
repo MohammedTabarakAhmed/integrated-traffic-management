@@ -1,9 +1,12 @@
+import { LiveTicker } from './LiveTicker'
 import { useCallback, useEffect, useState } from 'react'
-import { Bell, BellRing, Bot, Moon, Search, Sun, UserRound, Briefcase, BookOpen, CalendarDays, FileUp, ListChecks, FileBarChart, SlidersHorizontal, Boxes, Braces, ClipboardCheck, Gauge as GaugeIcon, Globe, Home as HomeIcon, LayoutDashboard, LogOut, Radar, Server, ShieldCheck } from 'lucide-react'
+import { Bell, BellRing, Bot, Moon, Search, Sun, UserRound, Briefcase, BookOpen, CalendarDays, FileUp, ListChecks, FileBarChart, SlidersHorizontal, Boxes, Braces, ClipboardCheck, Gauge as GaugeIcon, Globe, Home as HomeIcon, LayoutDashboard, LogOut, Radar, Server, ShieldCheck, LogIn, User, CheckCheck, LogIn as LogInIcon } from 'lucide-react'
 import { ApiError, SignedOut, call } from './api'
-import { completeRedirect, load, signInCustomer, signOut } from './auth'
+import { completeRedirect, load, signInCustomer, signInStaff, signOut } from './auth'
 import { PageBoundary } from './components'
 import Hidden from './Hidden'
+import { RequirementsPanel } from './RequirementsPanel'
+import { HealthPanel } from './HealthPanel'
 import { useI18n } from './i18n'
 import BackOffice from './pages/BackOffice'
 import ControlRoom from './pages/ControlRoom'
@@ -28,7 +31,56 @@ type Route = 'requirements' | 'guide' | 'home' | 'dashboard' | 'profile' | 'docu
 
 const routeOf = (): Route => ((location.hash.replace('#/', '').split('?')[0] || 'home') as Route)
 
-// One plain sentence under each page title, so a reviewer knows what the page is for.
+// Role-based navigation: each role sees only its own pages.
+const NAV_BY_ROLE: Record<string | null, { sec: string; items: { r: Route; label: string; icon: React.ReactNode }[] }[]> = {
+  null: [
+    { sec: 'Portal', items: [
+      { r: 'home', label: 'Overview', icon: <HomeIcon size={18} /> },
+    ] },
+  ],
+  customer: [
+    { sec: 'Citizen portal', items: [
+      { r: 'home', label: 'Overview', icon: <HomeIcon size={18} /> },
+      { r: 'guide', label: 'Service guide', icon: <BookOpen size={18} /> },
+      { r: 'dashboard', label: 'My dashboard', icon: <LayoutDashboard size={18} /> },
+      { r: 'profile', label: 'My profile', icon: <UserRound size={18} /> },
+      { r: 'documents', label: 'My documents', icon: <FileUp size={18} /> },
+      { r: 'services', label: 'My services', icon: <CalendarDays size={18} /> },
+      { r: 'settings', label: 'Contact & alerts', icon: <BellRing size={18} /> },
+      { r: 'assistant', label: 'Assistant', icon: <Bot size={18} /> },
+    ] },
+  ],
+  staff: [
+    { sec: 'Staff console', items: [
+      { r: 'control', label: 'Control room', icon: <Radar size={18} /> },
+      { r: 'backoffice', label: 'Back office', icon: <Briefcase size={18} /> },
+      { r: 'modules', label: 'Modules', icon: <Boxes size={18} /> },
+      { r: 'analytics', label: 'Analytics', icon: <GaugeIcon size={18} /> },
+      { r: 'reports', label: 'Reports', icon: <FileBarChart size={18} /> },
+    ] },
+    { sec: 'System', items: [
+      { r: 'admin', label: 'Administration', icon: <SlidersHorizontal size={18} /> },
+      { r: 'platform', label: 'Platform', icon: <Server size={18} /> },
+      { r: 'requirements', label: 'Requirements', icon: <ListChecks size={18} /> },
+      { r: 'qa', label: 'QA & security', icon: <ClipboardCheck size={18} /> },
+    ] },
+  ],
+  checker: [
+    { sec: 'Staff console', items: [
+      { r: 'backoffice', label: 'Back office', icon: <Briefcase size={18} /> },
+      { r: 'modules', label: 'Modules', icon: <Boxes size={18} /> },
+      { r: 'analytics', label: 'Analytics', icon: <GaugeIcon size={18} /> },
+      { r: 'reports', label: 'Reports', icon: <FileBarChart size={18} /> },
+    ] },
+    { sec: 'System', items: [
+      { r: 'admin', label: 'Administration', icon: <SlidersHorizontal size={18} /> },
+      { r: 'platform', label: 'Platform', icon: <Server size={18} /> },
+      { r: 'requirements', label: 'Requirements', icon: <ListChecks size={18} /> },
+      { r: 'qa', label: 'QA & security', icon: <ClipboardCheck size={18} /> },
+    ] },
+  ],
+}
+
 const ABOUT: Record<string, [string, string]> = {
   profile: ['What your traffic file says about you, and how to change it.', 'ما يحتويه ملفك المروري عنك وكيفية تغييره.'],
   documents: ['Upload your Emirates ID, licence or photo; each file is checked and scanned.', 'ارفع هويتك أو رخصتك أو صورتك؛ يُفحص كل ملف.'],
@@ -49,7 +101,6 @@ const ABOUT: Record<string, [string, string]> = {
   qa: ['Checks you can run yourself, with the result we expect for each.', 'فحوص يمكنك تشغيلها بنفسك مع النتيجة المتوقعة لكل منها.'],
 }
 
-// Quick jump: Ctrl+K (or Cmd+K) opens a list of pages to filter and open with the keyboard.
 function QuickJump({ items, go, lang }: { items: { r: string; label: string; icon: React.ReactNode }[]; go: (r: string) => void; lang: string }) {
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
@@ -120,13 +171,36 @@ function InboxBell({ go }: { go: (r: string) => void }) {
   )
 }
 
+// Role sign-in card shown on the home page.
+function RoleCard({ kind, label, sub, icon, acc, onClick }: { kind: string; label: string; sub: string; icon: React.ReactNode; acc: string; onClick: () => void }) {
+  return (
+    <button className="btn primary lg role-card" onClick={onClick} style={{ width: '100%', textAlign: 'start', justifyContent: 'flex-start' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ width: 44, height: 44, borderRadius: 12, display: 'grid', placeItems: 'center', background: 'rgba(34, 211, 238, 0.12)', color: 'var(--cyan)', border: '1px solid rgba(34, 211, 238, 0.25)' }}>{icon}</div>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--text)' }}>{label}</div>
+          <div style={{ color: 'var(--muted)', fontSize: 13 }}>{sub}</div>
+        </div>
+      </div>
+      <div style={{ marginInlineStart: 'auto', fontSize: 13, color: 'var(--muted)' }}>{acc}</div>
+    </button>
+  )
+}
+
 export default function App() {
   const { t, lang, toggle } = useI18n()
   const [route, setRoute] = useState<Route>(routeOf)
   const [customer, setCustomer] = useState(() => load('customer'))
+  const [kind, setKind] = useState<'customer' | 'staff' | 'checker' | null>(() => {
+    if (load('customer')) return 'customer'
+    if (load('staff')) return 'staff'
+    if (load('checker')) return 'checker'
+    return null
+  })
   const [toast, setToast] = useState<{ text: string; bad?: boolean } | null>(null)
   const [logoClicks, setLogoClicks] = useState(0)
   const [firstName, setFirstName] = useState<{ en?: string | null; nl?: string | null } | null>(null)
+
   // The citizen's first name for the greeting (from their own traffic file).
   useEffect(() => {
     if (!customer) { setFirstName(null); return }
@@ -139,6 +213,7 @@ export default function App() {
       .then((back) => {
         if (back !== null) {
           setCustomer(load('customer'))
+          setKind('customer')
           setRoute(routeOf())
         }
       })
@@ -157,39 +232,23 @@ export default function App() {
   const go = (r: string) => { location.hash = `#/${r}` }
   const customerSignIn = () => signInCustomer({ returnTo: '#/dashboard', lang })
 
+  // Staff sign-in helper with preset credentials shown in the role card.
+  const staffSignIn = (username: string, password: string, roleKind: 'staff' | 'checker') => {
+    signInStaff(username, password, roleKind)
+      .then(() => { setKind(roleKind); setRoute(routeOf()) })
+      .catch((e) => setToast({ text: String(e.message ?? e), bad: true }))
+  }
+
   const onError = useCallback((e: unknown) => {
-    if (e instanceof SignedOut) { setCustomer(null); return }
+    if (e instanceof SignedOut) { setCustomer(null); setKind(null); setRoute('home'); return }
     if (e instanceof ApiError && e.status === 404) { setToast({ text: t.noFile, bad: true }); return }
     setToast({ text: e instanceof Error ? e.message : String(e), bad: true })
   }, [t])
 
-  const nav: { sec: string; items: { r: Route; label: string; icon: React.ReactNode; soon?: boolean }[] }[] = [
-    { sec: t.sections.citizen, items: [
-      { r: 'home', label: t.nav.home, icon: <HomeIcon size={18} /> },
-      { r: 'guide', label: lang === 'ar' ? 'دليل الخدمات' : 'Service guide', icon: <BookOpen size={18} /> },
-      { r: 'dashboard', label: t.nav.dashboard, icon: <LayoutDashboard size={18} /> },
-      { r: 'profile', label: lang === 'ar' ? 'ملفي الشخصي' : 'My profile', icon: <UserRound size={18} /> },
-      { r: 'documents', label: lang === 'ar' ? 'مستنداتي' : 'My documents', icon: <FileUp size={18} /> },
-      { r: 'services', label: lang === 'ar' ? 'خدماتي' : 'My services', icon: <CalendarDays size={18} /> },
-      { r: 'settings', label: t.nav.settings, icon: <BellRing size={18} /> },
-      { r: 'assistant', label: t.nav.assistant, icon: <Bot size={18} /> },
-    ] },
-    { sec: t.sections.staff, items: [
-      { r: 'control', label: t.nav.control, icon: <Radar size={18} /> },
-      { r: 'backoffice', label: lang === 'ar' ? 'المكتب الخلفي' : 'Back office', icon: <Briefcase size={18} /> },
-      { r: 'modules', label: t.nav.modules, icon: <Boxes size={18} /> },
-      { r: 'analytics', label: t.nav.analytics, icon: <GaugeIcon size={18} /> },
-      { r: 'reports', label: lang === 'ar' ? 'التقارير' : 'Reports', icon: <FileBarChart size={18} /> },
-    ] },
-    { sec: t.sections.system, items: [
-      { r: 'admin', label: lang === 'ar' ? 'الإدارة' : 'Administration', icon: <SlidersHorizontal size={18} /> },
-      { r: 'platform', label: t.nav.platform, icon: <Server size={18} /> },
-      { r: 'requirements', label: lang === 'ar' ? 'المتطلبات' : 'Requirements', icon: <ListChecks size={18} /> },
-      { r: 'qa', label: lang === 'ar' ? 'الجودة والأمان' : 'QA & security', icon: <ClipboardCheck size={18} /> },
-    ] },
-  ]
+  const nav = NAV_BY_ROLE[kind ?? null]
   const current = nav.flatMap((s) => s.items).find((i) => i.r === route) ?? (route === 'receipt' ? { label: t.receipt } : undefined)
 
+  const signInHeadline = kind ? `Sign in as ${kind}` : 'Welcome to ITMS'
   let page: React.ReactNode
   if (route === 'home') page = <Home go={go} onCustomer={customerSignIn} />
   else if (route === 'dashboard') {
@@ -223,6 +282,16 @@ export default function App() {
   else if (route === 'receipt') page = <Receipt go={go} />
   else page = <div className="card empty" style={{ padding: 60 }}>{t.comingSoon}</div>
 
+  const signedIn = kind !== null
+  const handleSignOut = () => {
+    if (kind === 'customer') signOut('customer')
+    else if (kind === 'staff') signOut('staff')
+    else if (kind === 'checker') signOut('checker')
+    setKind(null)
+    setCustomer(null)
+    setRoute('home')
+  }
+
   return (
     <div className="shell">
       <div className="uae-ribbon" aria-hidden="true" />
@@ -237,18 +306,33 @@ export default function App() {
             <div className="nav-sec">{s.sec}</div>
             {s.items.map((i) => (
               <button key={i.r} className={`nav-item ${route === i.r ? 'active' : ''}`} onClick={() => go(i.r)} aria-current={route === i.r ? 'page' : undefined}>
-                {i.icon}{i.label}{i.soon && <span className="soon">•</span>}
+                {i.icon}{i.label}
               </button>
             ))}
           </div>
         ))}
         <a className="nav-item" href="/api.html" target="_blank" rel="noreferrer"><Braces size={18} />{lang === 'ar' ? 'مستكشف الواجهات' : 'API explorer'}<span className="soon">↗</span></a>
+        {signedIn && (
+          <button className="nav-item" onClick={handleSignOut} style={{ marginTop: 12, color: 'var(--red)' }}>
+            <LogOut size={16} /> {t.signOut}
+          </button>
+        )}
+        <RequirementsPanel go={go} lang={lang} />
+        <HealthPanel lang={lang} />
         <div className="side-foot">
           <span className="pill ok" style={{ alignSelf: 'flex-start' }}><span className="dot live" /> local stack · gateway :9080</span>
           <small className="muted" style={{ fontSize: 11.5 }}>{lang === 'ar' ? 'اضغط ? للاختصارات' : 'Press ? for shortcuts'}</small>
         </div>
       </aside>
       <main className="main">
+        {!signedIn && route !== 'home' && (
+          <div className="card" style={{ maxWidth: 520, margin: '8vh auto', textAlign: 'center', padding: 40 }}>
+            <ShieldCheck size={48} style={{ marginBottom: 18 }} />
+            <h2 style={{ margin: '0 0 8px 0' }}>{signInHeadline}</h2>
+            <p className="muted">{t.tagline}</p>
+            <button className="btn primary lg" onClick={() => go('home')} style={{ marginTop: 18 }}><LogIn size={18} /> {lang === 'ar' ? 'العودة إلى البداية' : 'Back to start'}</button>
+          </div>
+        )}
         {route !== 'home' && (
           <div className="topbar">
             <div>
@@ -260,8 +344,8 @@ export default function App() {
             {customer && <InboxBell go={go} />}
             <ThemeToggle />
             <button className="btn" onClick={toggle}><Globe size={16} /> {t.language}</button>
-            {customer && ['dashboard', 'settings', 'services', 'profile'].includes(route) && (
-              <button className="btn ghost" onClick={() => { signOut('customer'); setCustomer(null) }}><LogOut size={16} /> {t.signOut}</button>
+            {signedIn && (
+              <button className="btn ghost" onClick={handleSignOut}><LogOut size={16} /> {t.signOut}</button>
             )}
           </div>
         )}
@@ -271,6 +355,12 @@ export default function App() {
         <PageBoundary key={route} ar={lang === 'ar'}>{page}</PageBoundary>
       </main>
       {toast && <div className={`toast ${toast.bad ? 'bad' : ''}`} role="status">{toast.text}</div>}
+      {signedIn && <LiveTicker lang={lang} />}
+      <div className="ambient-particles" aria-hidden="true">
+        {Array.from({ length: 8 }, (_, i) => (
+          <i key={i} style={{ left: `${10 + (i * 11.25)}%`, top: `${30 + (i * 7)}%`, animationDelay: `${i * 1.8}s` }} />
+        ))}
+      </div>
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import { LayoutDashboard, MousePointerClick, Radar, ShieldCheck } from 'lucide-react'
+import { LayoutDashboard, MousePointerClick, Radar, ShieldCheck, User, UserCheck, LogIn } from 'lucide-react'
 import { CountUp } from '../components'
 import { useI18n } from '../i18n'
 
@@ -37,27 +37,100 @@ function place(names: string[], radius: number, offset = 0) {
   })
 }
 
+function node(p: { n: string; left: string; top: string }) {
+  const [route, en, a] = WHERE[p.n]
+  const ar = document.documentElement.lang === 'ar'
+  const label = ar ? a : en
+  return (
+    <button key={p.n} className="node" style={{ left: p.left, top: p.top }} onClick={() => window.location.hash = `#/${route}`} title={label}
+      aria-label={`${p.n}: ${label}`}><i />{p.n}</button>
+  )
+}
+
 export default function Home({ go, onCustomer }: { go: (r: string) => void; onCustomer: () => void }) {
   const { t, lang } = useI18n()
   const ar = lang === 'ar'
-  const node = (p: { n: string; left: string; top: string }) => {
-    const [route, en, a] = WHERE[p.n]
-    const label = ar ? a : en
-    return (
-      <button key={p.n} className="node" style={{ left: p.left, top: p.top }} onClick={() => go(route)} title={label}
-        aria-label={`${p.n}: ${label}`}><i />{p.n}</button>
-    )
-  }
   return (
     <div className="hero">
+      <div className="particles" aria-hidden="true">
+        {Array.from({ length: 12 }, (_, i) => (
+          <i key={i} style={{ left: `${(i * 8.33)}%`, top: `${20 + (i * 6)}%`, animationDelay: `${i * 0.6}s` }} />
+        ))}
+      </div>
       <div>
         <span className="pill uae"><span className="dot live" /> {t.brandLong}</span>
         <h2>{t.heroA} <span className="grad-text">{t.heroB}</span></h2>
         <p>{t.tagline}</p>
-        <div className="ctas">
-          <button className="btn primary lg" onClick={onCustomer}><ShieldCheck size={18} /> {t.signInNational}</button>
-          <button className="btn lg" onClick={() => go('control')}><Radar size={18} /> {t.staffCta}</button>
-          <button className="btn ghost lg" onClick={() => go('dashboard')}><LayoutDashboard size={18} /> {t.heroCta}</button>
+        <div style={{ maxWidth: 640 }}>
+          <h3 style={{ color: 'var(--text)', margin: '10px 0 14px', fontSize: 16 }}>{ar ? 'اختر طريقة الدخول' : 'Choose how to sign in'}</h3>
+          <div className="role-grid">
+            <button className="btn primary lg role-card" onClick={onCustomer} style={{ width: '100%', textAlign: 'start', justifyContent: 'flex-start' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ width: 44, height: 44, borderRadius: 12, display: 'grid', placeItems: 'center', background: 'rgba(34, 211, 238, 0.12)', color: 'var(--cyan)', border: '1px solid rgba(34, 211, 238, 0.25)' }}><ShieldCheck size={18} /></div>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--text)' }}>{t.signInNational}</div>
+                  <div style={{ color: 'var(--muted)', fontSize: 13 }}>{t.noFile}</div>
+                </div>
+              </div>
+              <div style={{ marginInlineStart: 'auto', fontSize: 13, color: 'var(--muted)' }}>784199012345671</div>
+            </button>
+            <button className="btn lg role-card" onClick={() => {
+              // Staff sign-in with preset dev.maker credentials
+              fetch('http://localhost:8180/realms/itms/protocol/openid-connect/token', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({ grant_type: 'password', client_id: 'itms-dev-cli', scope: 'openid', username: 'dev.maker', password: import.meta.env.DEV_MAKER_PASSWORD ?? '' }),
+              }).then(async (r) => {
+                if (!r.ok) { alert(t.noFile); return }
+                const tok = await r.json()
+                sessionStorage.setItem('itms.session.staff', JSON.stringify({
+                  accessToken: tok.access_token,
+                  idToken: tok.id_token,
+                  refreshToken: tok.refresh_token,
+                  expiresAt: Date.now() + tok.expires_in * 1000,
+                  claims: JSON.parse(atob(tok.access_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/').replace(/=+$/, '')))
+                }))
+                window.location.hash = '#/control'
+              }).catch(() => alert('Sign-in failed'))
+            }} style={{ width: '100%', textAlign: 'start', justifyContent: 'flex-start' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ width: 44, height: 44, borderRadius: 12, display: 'grid', placeItems: 'center', background: 'rgba(139, 92, 246, 0.12)', color: '#a78bfa', border: '1px solid rgba(139, 92, 246, 0.25)' }}><User size={18} /></div>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--text)' }}>{ar ? 'ضابط - غرفة التحكم' : 'Officer - Control room'}</div>
+                  <div style={{ color: 'var(--muted)', fontSize: 13 }}>dev.maker</div>
+                </div>
+              </div>
+              <div style={{ marginInlineStart: 'auto', fontSize: 13, color: 'var(--muted)' }}>{t.staffCta}</div>
+            </button>
+            <button className="btn lg role-card" onClick={() => {
+              // Supervisor sign-in with preset dev.checker credentials
+              fetch('http://localhost:8180/realms/itms/protocol/openid-connect/token', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({ grant_type: 'password', client_id: 'itms-dev-cli', scope: 'openid', username: 'dev.checker', password: import.meta.env.DEV_CHECKER_PASSWORD ?? '' }),
+              }).then(async (r) => {
+                if (!r.ok) { alert(t.noFile); return }
+                const tok = await r.json()
+                sessionStorage.setItem('itms.session.checker', JSON.stringify({
+                  accessToken: tok.access_token,
+                  idToken: tok.id_token,
+                  refreshToken: tok.refresh_token,
+                  expiresAt: Date.now() + tok.expires_in * 1000,
+                  claims: JSON.parse(atob(tok.access_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/').replace(/=+$/, '')))
+                }))
+                window.location.hash = '#/backoffice'
+              }).catch(() => alert('Sign-in failed'))
+            }} style={{ width: '100%', textAlign: 'start', justifyContent: 'flex-start' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ width: 44, height: 44, borderRadius: 12, display: 'grid', placeItems: 'center', background: 'rgba(251, 191, 36, 0.1)', color: 'var(--amber)', border: '1px solid rgba(251, 191, 36, 0.25)' }}><UserCheck size={18} /></div>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--text)' }}>{ar ? 'مشرف - المكتب الخلفي' : 'Supervisor - Back office'}</div>
+                  <div style={{ color: 'var(--muted)', fontSize: 13 }}>dev.checker</div>
+                </div>
+              </div>
+              <div style={{ marginInlineStart: 'auto', fontSize: 13, color: 'var(--muted)' }}>{ar ? 'الاعتمادات والحجوزات' : 'Approvals and holds'}</div>
+            </button>
+          </div>
         </div>
         <div className="stats">
           <div className="stat"><b className="grad-text"><CountUp to={27} /></b><span>{t.stats.services}</span></div>

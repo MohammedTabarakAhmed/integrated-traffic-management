@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { BookOpen, Calculator, CheckCircle2, KeyRound, ListTree, Scale, UserCheck } from 'lucide-react'
+import { BookOpen, Calculator, CheckCircle2, KeyRound, ListTree, Scale, UserCheck, ListChecks } from 'lucide-react'
 import { ApiError, call, money, when } from '../api'
 import { load, signInStaff } from '../auth'
 import { Card, Skeleton, StatusPill, tabFromLink } from '../components'
@@ -167,6 +167,39 @@ export default function Admin({ notify }: { notify: (t: string, bad?: boolean) =
           <p className="muted" style={{ fontSize: 12.5, marginBottom: 0 }}>{ar ? 'لا يعتمد المنشئ تغييره بنفسه؛ يقوم بذلك شخص آخر.' : 'A maker never approves their own change; a second person does.'}</p>
         </Card>
       )}
+
+      <section className="card req-progress page-enter" style={{ gridColumn: '1 / -1' }}>
+        <div className="req-progress-head">
+          <ListChecks size={16} />
+          <span>{ar ? 'متطلبات الإدارة' : 'Administration requirements'}</span>
+          <span className="pill ok">{ar ? 'مباشر' : 'live'}</span>
+        </div>
+        <div className="req-progress-items">
+          {[
+            { id: 'VF-001', en: 'Violation catalogue with versions and regional variants', ar: 'دليل المخالفات بإصداراته ومتغيراته الإقليمية' },
+            { id: 'VF-002', en: 'Fine amount, points, legal article, impound days, court referral', ar: 'مبلغ الغرامة، النقاط، المادة القانونية، أيام الحجز، إحالة للمحكمة' },
+            { id: 'VF-003', en: 'Repeat offence multiplier; speed band calculation', ar: 'مضاعف المخالفة المتكررة؛ حساب شريحة السرعة' },
+            { id: 'VF-004', en: 'Effective from date; never retroactive', ar: 'تاريخ السريان؛ لا رجعية أبداً' },
+            { id: 'CC-010', en: 'Bilingual reference lists with effective dates and external codes', ar: 'قوائم مرجعية ثنائية اللغة مع تواريخ السريان والرموز الخارجية' },
+            { id: 'CC-114', en: 'Reference data changes through maker-checker', ar: 'تغييرات البيانات المرجعية عبر المنشئ والمدقق' },
+            { id: 'CC-020', en: 'Service catalogue with code, names, module, channels, documents, fees, rules, workflow, SLA, regions', ar: 'دليل الخدمات بالرمز، الأسماء، الوحدة، القنوات، المستندات، الرسوم، القواعد، سير العمل، SLA، المناطق' },
+            { id: 'CC-040', en: 'Fee per service, region, customer category, vehicle category, effective dates', ar: 'رسوم لكل خدمة، منطقة، فئة متعامل، فئة مركبة، تواريخ سريان' },
+            { id: 'CC-046', en: 'Fee changes need maker-checker; never retroactive', ar: 'تغييرات الرسوم تحتاج منشئ ومدقق؛ لا رجعية' },
+            { id: 'CC-047', en: 'Itemised fee quote before paying', ar: 'عرض سعر مفصل قبل الدفع' },
+            { id: 'CC-001', en: 'RBAC with region/centre/module data scopes', ar: 'RBAC مع نطاقات بيانات المنطقة/المركز/الوحدة' },
+            { id: 'CC-002', en: 'Segregation of duties (maker ≠ checker)', ar: 'فصل الواجبات (المنشئ ≠ المدقق)' },
+            { id: 'CC-005', en: 'Roles created/changed at runtime without code', ar: 'أدوار تُنشأ/تتغير وقت التشغيل دون كود' },
+            { id: 'CC-110', en: 'External partner codes on reference items', ar: 'رموز الشركاء الخارجيين على عناصر المرجع' },
+            { id: 'CC-112', en: 'Regional variants override national items', ar: 'المتغيرات الإقليمية تتجاوز العناصر الوطنية' },
+          ].map((r) => (
+            <div key={r.id} className="req-progress-row">
+              <span className="req-progress-id mono" style={{ color: 'var(--uae-green)' }}>{r.id}</span>
+              <span className="req-progress-text" style={{ flex: 1 }}>{ar ? r.ar : r.en}</span>
+              <span className="pill ok">{ar ? 'مبني' : 'built'}</span>
+            </div>
+          ))}
+        </div>
+      </section>
     </>
   )
 }

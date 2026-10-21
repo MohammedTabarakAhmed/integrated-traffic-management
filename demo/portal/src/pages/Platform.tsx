@@ -1,3 +1,4 @@
+import { DemoScript } from '../DemoScript'
 import { useEffect, useState } from 'react'
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
 import { Boxes, Braces, Database, GitBranch, KeyRound, Network, Radio, ShieldCheck, Smartphone, Workflow } from 'lucide-react'
@@ -137,6 +138,8 @@ export default function Platform() {
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>{TOOLS.map((t) => <span key={t} className="pill info">{t}</span>)}
           <a className="btn primary" style={{ marginInlineStart: 'auto' }} href="/api.html" target="_blank" rel="noreferrer"><Braces size={16} /> {ar ? 'افتح مستكشف الواجهات (27 مواصفة)' : 'Open the API explorer (27 specs)'}</a></div>
       </Card>
+
+      <DemoScript go={(r) => { window.location.hash = `#/${r}` }} lang={lang} customerSignIn={() => {}} />
     </>
   )
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { BellRing, CalendarDays, FileText, IdCard, Mail, MapPin, Phone, UserRound } from 'lucide-react'
+import { BellRing, CalendarDays, FileText, IdCard, Mail, MapPin, Phone, UserRound, ListChecks } from 'lucide-react'
 import { call, when } from '../api'
 import { Card, Skeleton, StatusPill } from '../components'
 import { useI18n } from '../i18n'
@@ -63,6 +63,30 @@ export default function Profile({ go }: { go: (r: string) => void }) {
         </div>
         <p className="muted" style={{ fontSize: 12.5, marginBottom: 0 }}>{ar ? 'لحماية حسابك، يطلب تغيير بيانات التواصل رمزًا لمرة واحدة.' : 'To protect your account, changing contact details asks for a one-time password.'}</p>
       </Card>
+
+      <section className="card req-progress page-enter" style={{ gridColumn: '1 / -1' }}>
+        <div className="req-progress-head">
+          <ListChecks size={16} />
+          <span>{ar ? 'متطلبات الملف الشخصي' : 'Profile requirements'}</span>
+          <span className="pill ok">{ar ? 'مباشر' : 'live'}</span>
+        </div>
+        <div className="req-progress-items">
+          {[
+            { id: 'DL-001', en: 'Traffic file opened against national identity register or passport', ar: 'فتح ملف مروري مقابل سجل الهوية الوطنية أو جواز السفر' },
+            { id: 'DL-005', en: 'Bilingual names; blood group, education, profession, religion (where required)', ar: 'أسماء ثنائية؛ فصيلة دم، تعليم، مهنة، دين (حيث يُطلب)' },
+            { id: 'DL-012', en: 'File categories: individual, company, government, diplomatic, military', ar: 'فئات الملف: فردي، شركة، حكومة، دبلوماسي، عسكري' },
+            { id: 'CC-012', en: 'Names and addresses stored in both languages', ar: 'الأسماء والعناوين مخزنة باللغتين' },
+            { id: 'CC-080', en: 'Documents uploaded (Emirates ID, licence, photo) with malware scan', ar: 'مستندات مرفوعة (هوية، رخصة، صورة) مع فحص برمجيات ضارة' },
+            { id: 'SEC-014', en: 'Classification-driven masking; reveal is audited', ar: 'إخفاء يعتمد على التصنيف؛ الكشف يُدقق' },
+          ].map((r) => (
+            <div key={r.id} className="req-progress-row">
+              <span className="req-progress-id mono" style={{ color: 'var(--uae-green)' }}>{r.id}</span>
+              <span className="req-progress-text" style={{ flex: 1 }}>{ar ? r.ar : r.en}</span>
+              <span className="pill ok">{ar ? 'مبني' : 'built'}</span>
+            </div>
+          ))}
+        </div>
+      </section>
     </div>
   )
 }

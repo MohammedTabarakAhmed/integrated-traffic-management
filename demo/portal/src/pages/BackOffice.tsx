@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Briefcase, CheckCircle2, Gavel, Hand, History, Lock, LockOpen, XCircle } from 'lucide-react'
+import { Briefcase, CheckCircle2, Gavel, Hand, History, Lock, LockOpen, XCircle, Award, ListChecks } from 'lucide-react'
 import { ApiError, call, money, when } from '../api'
 import { load, signInStaff } from '../auth'
 import { Card, Drawer, Skeleton, StatusPill, tabFromLink, Timeline } from '../components'
@@ -89,6 +89,33 @@ export default function BackOffice({ notify }: { notify: (t: string, bad?: boole
         ))}
         <span className="pill ok" style={{ marginInlineStart: 'auto' }}><Hand size={12} /> dev.checker</span>
       </div>
+
+      <section className="card uat-badges page-enter" style={{ marginTop: 10 }}>
+        <div className="uat-badges-head">
+          <Award size={16} />
+          <span>{ar ? 'متطلبات القبول المعروضة هنا' : 'UAT requirements demonstrated here'}</span>
+          <span className="pill warn">{ar ? 'مباشر' : 'live'}</span>
+        </div>
+        <div className="uat-badges-list">
+          {[
+            { id: 'VF-051', en: 'Accept (cancel), Reduce (with limit), Reject objection', ar: 'قبول (إلغاء)، تخفيض (بحد)، رفض الاعتراض', done: tab === 'objections' && (objections?.length ?? 0) > 0 },
+            { id: 'VF-052', en: 'Fine paused while objection reviewed; points not counted', ar: 'الغرامة معلّقة أثناء المراجعة؛ النقاط لا تُحتسب', done: tab === 'objections' },
+            { id: 'CC-060', en: 'Workflow engine with approval/review/inspection steps', ar: 'محرك سير عمل بخطوات اعتماد/مراجعة/تفتيش', done: tab === 'queue' },
+            { id: 'CC-061', en: 'Queues by role, region, centre; round-robin / least-loaded', ar: 'طوابير حسب الدور، المنطقة، المركز؛ توزيع دورًا/أقل حملًا', done: tab === 'queue' && (items?.length ?? 0) > 0 },
+            { id: 'CC-062', en: 'SLA per step; escalation to supervisor; customer delay notice', ar: 'SLA لكل خطوة؛ تصعيد للمشرف؛ تنبيه تأخير للمتعامل', done: tab === 'queue' },
+            { id: 'CC-063', en: 'Personal/team/esc. queues with filters; bulk assignment', ar: 'طوابير شخصية/فريقية/مصعّدة مع فلاتر؛ تعيين جماعي', done: tab === 'queue' },
+            { id: 'CC-065', en: 'Return to customer pauses SLA; resume moves due date', ar: 'الإرجاع للمتعامل يوقف SLA؛ الاستئناف يحرك تاريخ الاستحقاق', done: tab === 'queue' },
+            { id: 'CC-030', en: 'Hold on traffic file blocks listed services', ar: 'حجز على الملف يحظر الخدمات المذكورة', done: tab === 'holds' && (holds?.length ?? 0) > 0 },
+            { id: 'CC-032', en: 'Eligibility check shows hold blocks renewal', ar: 'فحص الأهلية يوضح أن الحجز يحظر التجديد', done: tab === 'holds' },
+          ].map((u) => (
+            <div key={u.id} className={`uat-badge ${u.done ? 'done' : ''}`}>
+              <span className="uat-id mono" style={{ color: u.done ? 'var(--uae-green)' : 'var(--uae-amber)' }}>{u.id}</span>
+              <span className="uat-text" style={{ flex: 1 }}>{ar ? u.ar : u.en}</span>
+              <span className={`pill ${u.done ? 'ok' : 'warn'}`}>{u.done ? (ar ? 'مكتمل' : 'done') : (ar ? 'قيد التنفيذ' : 'pending')}</span>
+            </div>
+          ))}
+        </div>
+      </section>
 
       {tab === 'newfile' && <NewFile notify={notify} />}
       {tab === 'applications' && <Applications notify={notify} />}

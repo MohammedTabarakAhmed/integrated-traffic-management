@@ -1,4 +1,5 @@
 import { LayoutDashboard, MousePointerClick, Radar, ShieldCheck, User, UserCheck, LogIn } from 'lucide-react'
+import { useState } from 'react'
 import { CountUp } from '../components'
 import { useI18n } from '../i18n'
 
@@ -47,9 +48,19 @@ function node(p: { n: string; left: string; top: string }) {
   )
 }
 
-export default function Home({ go, onCustomer, onStaff, onChecker }: { go: (r: string) => void; onCustomer: () => void; onStaff: () => void; onChecker: () => void }) {
+export default function Home({ go, onCustomer, onStaff, onChecker }: { go: (r: string) => void; onCustomer: () => void; onStaff: (u: string, p: string) => void; onChecker: (u: string, p: string) => void }) {
   const { t, lang } = useI18n()
   const ar = lang === 'ar'
+  // Credential prompts: officer/supervisor must enter their own user name and password; nothing is signed in silently.
+  const [form, setForm] = useState<'staff' | 'checker' | null>(null)
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const submit = () => {
+    if (!form || !username.trim() || !password) return
+    const call = form === 'staff' ? onStaff : onChecker
+    call(username.trim(), password)
+    setForm(null); setPassword('')
+  }
   return (
     <div className="hero">
       <div className="particles" aria-hidden="true">
@@ -74,7 +85,7 @@ export default function Home({ go, onCustomer, onStaff, onChecker }: { go: (r: s
               </div>
               <div style={{ marginInlineStart: 'auto', fontSize: 13, color: 'var(--muted)' }}>784199012345671</div>
             </button>
-            <button className="btn lg role-card" onClick={onStaff} style={{ width: '100%', textAlign: 'start', justifyContent: 'flex-start' }}>
+            <button className="btn lg role-card" onClick={() => { setForm('staff'); setUsername('dev.maker'); setPassword('') }} style={{ width: '100%', textAlign: 'start', justifyContent: 'flex-start' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <div style={{ width: 44, height: 44, borderRadius: 12, display: 'grid', placeItems: 'center', background: 'rgba(139, 92, 246, 0.12)', color: '#a78bfa', border: '1px solid rgba(139, 92, 246, 0.25)' }}><User size={18} /></div>
                 <div>
@@ -84,7 +95,7 @@ export default function Home({ go, onCustomer, onStaff, onChecker }: { go: (r: s
               </div>
               <div style={{ marginInlineStart: 'auto', fontSize: 13, color: 'var(--muted)' }}>{t.staffCta}</div>
             </button>
-            <button className="btn lg role-card" onClick={onChecker} style={{ width: '100%', textAlign: 'start', justifyContent: 'flex-start' }}>
+            <button className="btn lg role-card" onClick={() => { setForm('checker'); setUsername('dev.checker'); setPassword('') }} style={{ width: '100%', textAlign: 'start', justifyContent: 'flex-start' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <div style={{ width: 44, height: 44, borderRadius: 12, display: 'grid', placeItems: 'center', background: 'rgba(251, 191, 36, 0.1)', color: 'var(--amber)', border: '1px solid rgba(251, 191, 36, 0.25)' }}><UserCheck size={18} /></div>
                 <div>
@@ -95,6 +106,27 @@ export default function Home({ go, onCustomer, onStaff, onChecker }: { go: (r: s
               <div style={{ marginInlineStart: 'auto', fontSize: 13, color: 'var(--muted)' }}>{ar ? 'الاعتمادات والحجوزات' : 'Approvals and holds'}</div>
             </button>
           </div>
+          {form && (
+            <div className="card" style={{ padding: 18, marginTop: 10 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 13, color: 'var(--muted)' }}>
+                  {ar ? 'اسم المستخدم' : 'User name'}
+                  <input autoFocus value={username} onChange={(e) => setUsername(e.target.value)}
+                    style={{ font: 'inherit', color: 'var(--text)', background: 'var(--sunken)', border: '1px solid var(--line-strong)', borderRadius: 10, padding: '10px 12px' }} />
+                </label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 13, color: 'var(--muted)' }}>
+                  {ar ? 'كلمة المرور' : 'Password'}
+                  <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') submit() }}
+                    style={{ font: 'inherit', color: 'var(--text)', background: 'var(--sunken)', border: '1px solid var(--line-strong)', borderRadius: 10, padding: '10px 12px' }} />
+                </label>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button className="btn primary" onClick={submit}>{ar ? 'تسجيل الدخول' : 'Sign in'}</button>
+                  <button className="btn" onClick={() => setForm(null)}>{ar ? 'إلغاء' : 'Cancel'}</button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
         <div className="stats">
           <div className="stat"><b className="grad-text"><CountUp to={27} /></b><span>{t.stats.services}</span></div>

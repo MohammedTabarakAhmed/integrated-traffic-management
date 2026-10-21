@@ -268,7 +268,7 @@ export default function App() {
 
   const signInHeadline = kind ? `Sign in as ${kind}` : 'Welcome to ITMS'
   let page: React.ReactNode
-  if (route === 'home') page = <Home go={go} onCustomer={customerSignIn} onStaff={() => staffSignIn('dev.maker', import.meta.env.VITE_ITMS_STAFF_PASSWORD ?? '')} onChecker={() => checkerSignIn('dev.checker', import.meta.env.VITE_ITMS_CHECKER_PASSWORD ?? '')} />
+  if (route === 'home') page = <Home go={go} onCustomer={customerSignIn} onStaff={(u, p) => staffSignIn(u, p)} onChecker={(u, p) => checkerSignIn(u, p)} />
   else if (route === 'dashboard') {
     page = customer ? <Dashboard onError={onError} notify={(text) => setToast({ text })} /> : (
       <div className="card" style={{ maxWidth: 520, margin: '8vh auto', textAlign: 'center', padding: 36 }}>

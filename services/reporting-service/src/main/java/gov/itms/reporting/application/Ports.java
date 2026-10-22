@@ -1,8 +1,10 @@
 package gov.itms.reporting.application;
 
+import gov.itms.reporting.domain.KpiSetting;
 import gov.itms.reporting.domain.Report;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 /** What reporting needs: its own warehouse and the caller's data scope. */
 public final class Ports {
@@ -34,5 +36,16 @@ public final class Ports {
 
         /** A grant with national scope: may also see facts that carry no region. */
         boolean national();
+    }
+
+    /** KPI targets and red/amber/green thresholds (RPT-012), kept beside the warehouse, one row per KPI. */
+    public interface KpiSettings {
+
+        /** Writes the setting; a KPI already configured is replaced in place (business users may re-set it). */
+        void upsert(KpiSetting setting);
+
+        Optional<KpiSetting> find(String code);
+
+        List<KpiSetting> all();
     }
 }

@@ -463,6 +463,8 @@ routes:
     uris:
       - /v1/reports
       - /v1/report-runs
+      - /v1/kpi-settings
+      - /v1/kpi-settings/*
   - id: licensing-service
     name: licensing-service
     upstream_id: licensing-service

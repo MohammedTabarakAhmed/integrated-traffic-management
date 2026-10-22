@@ -17,10 +17,14 @@ info:
     another is 403 `REGION_OUT_OF_SCOPE`; facts without a region need a national grant (RPT-004). Every run is
     audited. With `Accept: text/csv` the run is a CSV file (UTF-8 with byte-order mark, bilingual title and print date
     first; RPT-002). Not yet in this version: PDF and Excel export, the Authority's letterhead, scheduled delivery
-    (RPT-003), background runs for larger ranges (RPT-005), dashboards and maps (RPT-010, RPT-011), KPI targets
-    (RPT-012) and the self-service tool (RPT-021).
+    (RPT-003), background runs for larger ranges (RPT-005), dashboards and maps (RPT-010, RPT-011) and the
+    self-service tool (RPT-021).
 
-    A report run changes nothing, so it needs no `Idempotency-Key`. Request input (SEC-022) is hardened once in
+    KPI settings (RPT-012): a business user with `report.kpi.manage` sets a KPI's target and its red/amber/green
+    thresholds (absolute values, `higherIsBetter` chooses the direction of "good"); one row per KPI, changed in
+    place, audited, with the event `itms.reporting.kpi-setting-set`. Reading needs `report.read`; the RAG call
+    evaluates an actual value by the thresholds, nothing else. The POST needs an `Idempotency-Key`; a report run
+    changes nothing, so it needs none. Request input (SEC-022) is hardened once in
     itms-platform: unknown fields and malformed values are refused with 400 `VALIDATION_FAILED`.
 servers:
   - url: /
@@ -28,6 +32,7 @@ security:
   - bearerAuth: []
 tags:
   - name: Reports
+  - name: KpiSettings
 paths:
   /v1/reports:
     get:
@@ -76,9 +81,109 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+  /v1/kpi-settings:
+    post:
+      tags: [KpiSettings]
+      operationId: setKpiSetting
+      summary: Set (or re-set) a KPI's target and red/amber/green thresholds (RPT-012)
+      description: |
+        One row per KPI, replaced in place; every change is audited. 422 `KPI_INVALID` or `KPI_LIMITS_INVALID`
+        (the red and amber thresholds are in the wrong order for the KPI's direction).
+      parameters: [ { $ref: '#/components/parameters/IdempotencyKey' } ]
+      x-itms-permission: report.kpi.manage
+      x-itms-scope: national
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/KpiSetRequest' }
+      responses:
+        '200':
+          description: The setting as kept
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KpiSetting' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [KpiSettings]
+      operationId: listKpiSettings
+      summary: Every configured KPI's target and thresholds (RPT-012)
+      x-itms-permission: report.read
+      x-itms-scope: national
+      responses:
+        '200':
+          description: Every KPI setting, by code
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/KpiSetting' } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/kpi-settings/{code}:
+    get:
+      tags: [KpiSettings]
+      operationId: getKpiSetting
+      summary: The target and thresholds of one KPI (RPT-012)
+      x-itms-permission: report.read
+      x-itms-scope: national
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[A-Z][A-Z0-9_]{1,39}$' }
+      responses:
+        '200':
+          description: The setting
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KpiSetting' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/kpi-settings/{code}/rag:
+    get:
+      tags: [KpiSettings]
+      operationId: evaluateKpi
+      summary: RED, AMBER or GREEN for an actual value, by the KPI's thresholds (RPT-012)
+      x-itms-permission: report.read
+      x-itms-scope: national
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[A-Z][A-Z0-9_]{1,39}$' }
+        - name: actual
+          in: query
+          required: true
+          schema: { type: integer, format: int64, minimum: -9007199254740999, maximum: 9007199254740999 }
+      responses:
+        '200':
+          description: The evaluation
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KpiRag' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
 components:
   securitySchemes:
     bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Chosen by the client, new for every intended setting; sent again unchanged on a retry (API_SPECIFICATION
+        §2, ADR-032), so a setting keeps at most one change per key (a replayed key returns the stored response).
+      schema: { type: string, pattern: '^[A-Za-z0-9._:-]{8,128}$' }
   responses:
     Problem:
       description: The request was refused
@@ -89,6 +194,37 @@ components:
     Period:
       type: string
       enum: [DAY, MONTH]
+    KpiSetRequest:
+      type: object
+      additionalProperties: false
+      required: [code, target, redThreshold, amberThreshold]
+      properties:
+        code: { type: string, pattern: '^[A-Z][A-Z0-9_]{1,39}$' }
+        target: { type: integer, format: int64 }
+        redThreshold: { type: integer, format: int64 }
+        amberThreshold: { type: integer, format: int64 }
+        higherIsBetter: { oneOf: [ { type: boolean }, { type: 'null' } ] }
+    KpiSetting:
+      type: object
+      additionalProperties: false
+      required: [code, target, redThreshold, amberThreshold, higherIsBetter, updatedBy, updatedAt]
+      properties:
+        code: { type: string }
+        target: { type: integer, format: int64 }
+        redThreshold: { type: integer, format: int64 }
+        amberThreshold: { type: integer, format: int64 }
+        higherIsBetter: { type: boolean }
+        updatedBy: { type: string }
+        updatedAt: { type: string }
+    KpiRag:
+      type: object
+      additionalProperties: false
+      required: [code, actual, target, status]
+      properties:
+        code: { type: string }
+        actual: { type: integer, format: int64 }
+        target: { type: integer, format: int64 }
+        status: { type: string, enum: [RED, AMBER, GREEN] }
     Definition:
       type: object
       additionalProperties: false

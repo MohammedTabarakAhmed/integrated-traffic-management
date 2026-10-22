@@ -35,9 +35,12 @@ itms:
     iam:
       base-url: ${ITMS_IAM_URL:}
       cache-ttl: ${ITMS_IAM_CACHE_TTL:60s}
-  # A report run changes nothing, so it needs no Idempotency-Key (API_SPECIFICATION §2).
+  # KPI setting changes (RPT-012) change data, so they need an Idempotency-Key (API_SPECIFICATION §2); a report run
+  # changes nothing, so it needs none.
   idempotency:
-    enabled: false
+    enabled: true
+    paths:
+      - /v1/kpi-settings
   # Reporting (RPT-001, RPT-004, RPT-005, RPT-020, RPT-022). The pseudonymisation key is a secret file
   # (itms.reporting.pseudonym-key under ITMS_SECRETS_DIR); without it the service does not start.
   reporting:

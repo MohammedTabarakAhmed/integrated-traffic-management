@@ -1,6 +1,8 @@
 package gov.itms.reporting.infrastructure;
 
 import gov.itms.platform.audit.AuditRecorder;
+import gov.itms.platform.events.DomainEventRecorder;
+import gov.itms.reporting.application.KpiSettingsService;
 import gov.itms.reporting.application.Pseudonymiser;
 import gov.itms.reporting.application.ReportingService;
 import gov.itms.reporting.domain.Report;
@@ -35,6 +37,13 @@ public class ReportingConfiguration {
                 audit, new ReportingService.Settings(properties.reports().stream()
                         .map(r -> new Report.Definition(r.code(), r.titleNl(), r.titleEn(), r.eventTypes(),
                                 r.amountField())).toList(), properties.maxDays()), clock);
+    }
+
+    /** KPI targets and thresholds (RPT-012), wired beside the warehouse in the same database. */
+    @Bean
+    KpiSettingsService kpiSettingsService(JdbcClient jdbc, AuditRecorder audit, DomainEventRecorder events,
+                                          Clock clock) {
+        return new KpiSettingsService(new JdbcKpiSettings(jdbc), audit, events, clock);
     }
 
     /** The intake of domain events (RPT-020): off unless the broker is available, like the outbox relay. */

@@ -165,4 +165,59 @@ class ReportApiIT {
         assertThat(api.post("/v1/report-runs", Map.of("code", "VIOLATIONS_RECORDED", "from", "2026-01-01", "to",
                 "2026-01-02", "extra", true), NATIONAL).getResponse().getStatus()).isEqualTo(400);
     }
+
+    @Test
+    @Tag("RPT-012")
+    @Tag("CC-120")
+    @DisplayName("RPT-012: a manager sets a KPI's target and thresholds and re-sets them in place; viewers read"
+            + " and evaluate an actual value by them but cannot change them; a replayed key changes nothing again")
+    void kpiSettings() throws Exception {
+        RequestPostProcessor MANAGER = user("u-kpi", "REPORT_MANAGER", "report.read", "report.kpi.manage");
+        String code = "KPI_ON_TIME_" + Long.toString(System.nanoTime(), 36).toUpperCase();
+
+        JsonNode s = api.expect(api.post("/v1/kpi-settings", Map.of("code", code, "target", 90, "redThreshold",
+                70, "amberThreshold", 80), MANAGER), 200);
+        assertThat(s.get("code").asString()).isEqualTo(code);
+        assertThat(s.get("higherIsBetter").asBoolean()).isTrue(); // the default direction
+        assertThat(s.get("updatedBy").asString()).isEqualTo("u-kpi");
+        assertThat(s.get("updatedAt").asString()).isNotEmpty();
+
+        // A viewer sees the settings and evaluates an actual value, but cannot change a threshold.
+        assertThat(api.expect(api.get("/v1/kpi-settings/" + code, DUBAI), 200).get("target").asLong()).isEqualTo(90);
+        assertThat(api.expect(api.get("/v1/kpi-settings/" + code + "/rag?actual=75", DUBAI), 200)
+                .get("status").asString()).isEqualTo("AMBER");
+        assertThat(api.expect(api.get("/v1/kpi-settings/" + code + "/rag?actual=85", DUBAI), 200)
+                .get("status").asString()).isEqualTo("GREEN");
+        assertThat(api.post("/v1/kpi-settings", Map.of("code", code, "target", 90, "redThreshold", 70,
+                "amberThreshold", 80), DUBAI).getResponse().getStatus()).isEqualTo(403);
+        assertThat(api.get("/v1/kpi-settings", NOBODY).getResponse().getStatus()).isEqualTo(403);
+
+        // A second setting with the same key is a replay: no new row, the same response.
+        String key = "it-kpi-" + code;
+        Map<String, Object> body = Map.of("code", code, "target", 90, "redThreshold", 70, "amberThreshold", 80);
+        JsonNode replay = api.expect(api.post("/v1/kpi-settings", body, MANAGER, key), 200);
+        assertThat(api.expect(api.post("/v1/kpi-settings", body, MANAGER, key), 200))
+                .isEqualTo(replay);
+        assertThat(db.sql("select count(*) from report_kpi_setting where code = :c").param("c", code)
+                .query(Long.class).single()).isEqualTo(1);
+
+        // Re-setting with a new key replaces the thresholds in place; the invalid order is refused.
+        Map<String, Object> reset = Map.of("code", code, "target", 20, "redThreshold", 30, "amberThreshold", 25,
+                "higherIsBetter", false);
+        api.expect(api.post("/v1/kpi-settings", reset, MANAGER), 200);
+        JsonNode after = api.expect(api.get("/v1/kpi-settings/" + code, DUBAI), 200);
+        assertThat(after.get("target").asLong()).isEqualTo(20);
+        assertThat(after.get("redThreshold").asLong()).isEqualTo(30);
+        assertThat(after.get("higherIsBetter").asBoolean()).isFalse();
+        assertThat(db.sql("select count(*) from report_kpi_setting where code = :c").param("c", code)
+                .query(Long.class).single()).isEqualTo(1);
+        assertThat(api.expect(api.get("/v1/kpi-settings/" + code + "/rag?actual=27", DUBAI), 200)
+                .get("status").asString()).isEqualTo("AMBER");
+        assertThat(api.expect(api.get("/v1/kpi-settings/" + code + "/rag?actual=40", DUBAI), 200)
+                .get("status").asString()).isEqualTo("RED");
+        assertThat(api.expect(api.post("/v1/kpi-settings", Map.of("code", code, "target", 90, "redThreshold", 90,
+                "amberThreshold", 80), MANAGER), 422).get("code").asString()).isEqualTo("KPI_LIMITS_INVALID");
+        assertThat(api.expect(api.get("/v1/kpi-settings/KPI_UNKNOWN_ONE", DUBAI), 404)
+                .get("code").asString()).isEqualTo("KPI_NOT_FOUND");
+    }
 }

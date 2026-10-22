@@ -941,6 +941,106 @@ class ViolationApiIT {
     }
 
     @Test
+    @Tag("VF-046")
+    @Tag("CC-001")
+    @Tag("CC-120")
+    @DisplayName("VF-046: an officer records the driver's signed undertaking on a violation; one pledge per "
+            + "violation; the future cannot be signed; the record is append-only and audited")
+    void pledges() throws Exception {
+        String fine = catalogue(10_000, 0);
+        String number = recorded(fine, "TF-PL-" + suffix().replace('_', '-')).get("number").asString();
+        RequestPostProcessor pledger = user("u-pledge", "VIOLATION_OFFICER", "violation.record", "violation.read",
+                "violation.pledge.create");
+        Map<String, Object> pledge = Map.of("signedBy", "Ahmed Khan", "signedAt",
+                clock.instant().minusSeconds(600).toString(),
+                "note", "the driver undertakes to appear at the hearing", "documentIds", List.of("DOC-PL-1"));
+        assertThat(postAs("/v1/violations/" + number + "/pledges", pledge, officer(), "it-" + UUID.randomUUID())
+                .getResponse().getStatus()).as("no pledge grant").isEqualTo(403);
+        JsonNode taken = expect(postAs("/v1/violations/" + number + "/pledges", pledge, pledger,
+                "it-" + UUID.randomUUID()), 201);
+        assertThat(taken.get("violationNumber").asString()).isEqualTo(number);
+        assertThat(taken.get("signedBy").asString()).isEqualTo("Ahmed Khan");
+        // CC-001: a regional officer pledges only in the violation's region
+        Map<String, Object> southPledge = new HashMap<>(pledge);
+        assertThat(postAs("/v1/violations/" + number + "/pledges", southPledge,
+                regionalOfficer("SOUTH"), "it-" + UUID.randomUUID()).getResponse().getStatus())
+                .as("region out of scope").isEqualTo(403);
+        // one pledge per violation; the second is refused
+        assertThat(code(postAs("/v1/violations/" + number + "/pledges", pledge, pledger, "it-" + UUID.randomUUID())))
+                .isEqualTo("PLEDGE_EXISTS");
+        // future signings are refused
+        Map<String, Object> future = Map.of("signedBy", "Sara Ali", "signedAt",
+                clock.instant().plusSeconds(3600).toString());
+        assertThat(code(postAs("/v1/violations/" + number + "/pledges", future, pledger, "it-" + UUID.randomUUID())))
+                .isEqualTo("PLEDGE_SIGNED_IN_FUTURE");
+        // the pledge can be read back (VF-016) and is never changed or deleted
+        expect(getAs("/v1/violations/" + number + "/pledges", officer()), 200);
+        assertThatThrownBy(() -> db.sql("update violation_pledge set signed_by = 'X' where signed_by = 'Ahmed Khan'")
+                .update()).isInstanceOf(DataAccessException.class).hasMessageContaining("never changed");
+        assertThatThrownBy(() -> db.sql("delete from violation_pledge").update())
+                .isInstanceOf(DataAccessException.class).hasMessageContaining("never deleted");
+        // CC-120: recorded audited, and announced (the notification may subscribe to it)
+        assertThat(db.sql("select count(*) from event_outbox where event_type = 'itms.violation.pledge-recorded' "
+                + "and subject = :n").param("n", number).query(Long.class).single()).isEqualTo(1);
+    }
+
+    @Test
+    @Tag("VF-047")
+    @Tag("CC-001")
+    @Tag("CC-120")
+    @DisplayName("VF-047: a supervisor records administrative preservation orders with their references; no "
+            + "reference twice; the record is append-only and audited")
+    void preservationOrders() throws Exception {
+        String fine = catalogue(15_000, 0);
+        String number = recorded(fine, "TF-PO-" + suffix().replace('_', '-')).get("number").asString();
+        RequestPostProcessor orderer = user("u-order", "VIOLATION_SUPERVISOR", "violation.cancel", "violation.read",
+                "violation.preservation.create");
+        Map<String, Object> order = Map.of("reference", "PO-" + suffix(), "source", "Administrative Court",
+                "startAt", clock.instant().minusSeconds(300).toString(), "note", "received with the case");
+        assertThat(postAs("/v1/violations/" + number + "/preservation-orders", order, supervisor(),
+                "it-" + UUID.randomUUID()).getResponse().getStatus()).as("no order grant").isEqualTo(403);
+        // an order ends after it starts (422 ORDER_INVALID)
+        assertThat(code(postAs("/v1/violations/" + number + "/preservation-orders", new HashMap<>(Map.of("reference",
+                "PO-REV-" + suffix(), "source", "Administrative Court", "startAt",
+                clock.instant().toString(), "endAt", clock.instant().minusSeconds(300).toString())), orderer,
+                "it-" + UUID.randomUUID()))).isEqualTo("ORDER_INVALID");
+        JsonNode recordedOrder = expect(postAs("/v1/violations/" + number + "/preservation-orders", order, orderer,
+                "it-" + UUID.randomUUID()), 201);
+        assertThat(recordedOrder.get("reference").asString()).isEqualTo(order.get("reference"));
+        assertThat(recordedOrder.get("endAt").asString()).isEmpty();
+        assertThat(code(postAs("/v1/violations/" + number + "/preservation-orders", order, orderer,
+                "it-" + UUID.randomUUID()))).isEqualTo("ORDER_REFERENCE_RECORDED");
+        // a second, differently referenced order is recorded; both can be read back
+        Map<String, Object> second = Map.of("reference", "PO-" + suffix(), "source", "Municipality", "startAt",
+                clock.instant().toString(), "endAt", clock.instant().plusSeconds(86_400).toString());
+        expect(postAs("/v1/violations/" + number + "/preservation-orders", second, orderer,
+                "it-" + UUID.randomUUID()), 201);
+        assertThat(expect(getAs("/v1/violations/" + number + "/preservation-orders", orderer), 200).get("items"))
+                .hasSize(2);
+        // CC-001: an order is recorded only in the violation's region
+        assertThat(postAs("/v1/violations/" + number + "/preservation-orders", Map.of("reference", "PO-X-" + suffix(),
+                "source", "Municipality", "startAt", clock.instant().toString()), regionalOfficer("SOUTH"),
+                "it-" + UUID.randomUUID()).getResponse().getStatus()).as("region out of scope").isEqualTo(403);
+        // the order rows are never changed or deleted
+        assertThatThrownBy(() -> db.sql("update violation_preservation_order set source = 'X'").update())
+                .isInstanceOf(DataAccessException.class).hasMessageContaining("never changed");
+        assertThatThrownBy(() -> db.sql("delete from violation_preservation_order").update())
+                .isInstanceOf(DataAccessException.class).hasMessageContaining("never deleted");
+        assertThat(db.sql("select count(*) from event_outbox where event_type = "
+                + "'itms.violation.preservation-order-recorded' and subject = :n").param("n", number)
+                .query(Long.class).single()).isEqualTo(2);
+    }
+
+    /** CC-001: an officer or supervisor whose grant reaches {@code region} only. */
+    private static RequestPostProcessor regionalOfficer(String region) {
+        return jwt().jwt(j -> j.subject("u-pledge-" + region).claim("preferred_username", "u-pledge-" + region)
+                .claim("roles", List.of("VIOLATION_OFFICER"))
+                .claim("permissions", List.of("violation.record", "violation.read", "violation.pledge.create",
+                        "violation.preservation.create"))
+                .claim("region", region));
+    }
+
+    @Test
     @Tag("XB-001")
     @DisplayName("XB-001: a violation by a vehicle registered in a partner state is recorded and announced for sending")
     void outboundCrossborder() throws Exception {

@@ -77,6 +77,7 @@
       <And><Class name="gov.itms.vehicle.infrastructure.VehicleServiceConfiguration$PlateExpiryJob"/><Field name="plates"/></And>
       <And><Class name="gov.itms.violation.application.CrossborderViolations"/><Field name="~violations|repo|links"/></And>
       <And><Class name="gov.itms.violation.application.ObjectionService"/><Field name="~objections|links|violations"/></And>
+      <And><Class name="gov.itms.violation.application.ViolationOrders"/><Field name="~pledges|orders|violations"/></And>
       <And><Class name="gov.itms.violation.application.ViolationBooks"/><Field name="repo"/></And>
       <And><Class name="gov.itms.violation.application.CustomerViolations"/><Field name="~repo|violations"/></And>
       <And><Class name="gov.itms.violation.infrastructure.ViolationServiceConfiguration$UnpaidHoldJob"/><Field name="violations"/></And>

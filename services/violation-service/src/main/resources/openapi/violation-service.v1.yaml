@@ -527,6 +527,125 @@ paths:
         '422': { $ref: '#/components/responses/Problem' }
         '400': { $ref: '#/components/responses/Problem' }
 
+  /v1/violations/{number}/pledges:
+    post:
+      tags: [Violations]
+      operationId: recordViolationPledge
+      summary: Record the driver's signed undertaking (pledge) on a violation (VF-046)
+      description: |
+        A record only: the violation keeps one pledge, and neither the pledge nor the violation change. 404
+        `VIOLATION_NOT_FOUND`, 409 `PLEDGE_EXISTS` when a pledge already exists, 422 `PLEDGE_SIGNED_IN_FUTURE` when the
+        signing time is in the future or `PLEDGE_INVALID` for an invalid signer.
+      x-itms-permission: violation.pledge.create
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/Number'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [signedBy, signedAt]
+              properties:
+                signedBy: { type: string, minLength: 1, maxLength: 200 }
+                signedAt: { type: string, format: date-time }
+                note: { type: string, maxLength: 500 }
+                documentIds: { type: array, maxItems: 20, items: { type: string, maxLength: 64 } }
+      responses:
+        '201': { description: Pledge recorded, content: { application/json: { schema: { $ref: '#/components/schemas/Pledge' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [Violations]
+      operationId: listViolationPledges
+      summary: The pledges of one violation, newest first (VF-046, VF-016)
+      x-itms-permission: violation.read
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/Number'
+      responses:
+        '200':
+          description: Pledges
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Pledge' } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /v1/violations/{number}/preservation-orders:
+    post:
+      tags: [Violations]
+      operationId: recordViolationPreservationOrder
+      summary: Record an administrative preservation order with its reference on a violation (VF-047)
+      description: |
+        A record only: the order never changes the violation; it is recorded for the case file with its own reference.
+        404 `VIOLATION_NOT_FOUND`, 409 `ORDER_REFERENCE_RECORDED` when the violation already carries this reference,
+        422 `ORDER_INVALID` when the order's reference is missing or its end is before its start.
+      x-itms-permission: violation.preservation.create
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/Number'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reference, source, startAt]
+              properties:
+                reference: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9._/-]{0,59}$' }
+                source: { type: string, minLength: 1, maxLength: 200 }
+                startAt: { type: string, format: date-time }
+                endAt: { type: [string, 'null'], format: date-time }
+                note: { type: string, maxLength: 500 }
+      responses:
+        '201': { description: Preservation order recorded, content: { application/json: { schema: { $ref: '#/components/schemas/PreservationOrder' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [Violations]
+      operationId: listViolationPreservationOrders
+      summary: The preservation orders of one violation, newest first (VF-047, VF-016)
+      x-itms-permission: violation.read
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/Number'
+      responses:
+        '200':
+          description: Preservation orders
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/PreservationOrder' } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
   /v1/me/violations/{number}/objections:
     post:
       tags: [Violations]
@@ -828,6 +947,35 @@ components:
         reportSerial: { type: string }
         violationNumber: { type: string }
         enteredAt: { type: string, format: date-time }
+    Pledge:
+      type: object
+      additionalProperties: false
+      required: [id, violationId, violationNumber, signedBy, signedAt, documentIds, recordedBy, recordedAt]
+      properties:
+        id: { type: string, format: uuid }
+        violationId: { type: string, format: uuid }
+        violationNumber: { type: string }
+        signedBy: { type: string }
+        signedAt: { type: string, format: date-time }
+        note: { type: [string, 'null'] }
+        documentIds: { type: array, items: { type: string } }
+        recordedBy: { type: string }
+        recordedAt: { type: string, format: date-time }
+    PreservationOrder:
+      type: object
+      additionalProperties: false
+      required: [id, violationId, violationNumber, reference, source, startAt, recordedBy, recordedAt]
+      properties:
+        id: { type: string, format: uuid }
+        violationId: { type: string, format: uuid }
+        violationNumber: { type: string }
+        reference: { type: string, description: 'The order''s own reference as issued by the ordering authority' }
+        source: { type: string }
+        startAt: { type: string, format: date-time }
+        endAt: { type: [string, 'null'], format: date-time }
+        note: { type: [string, 'null'] }
+        recordedBy: { type: string }
+        recordedAt: { type: string, format: date-time }
     Violation:
       type: object
       additionalProperties: false

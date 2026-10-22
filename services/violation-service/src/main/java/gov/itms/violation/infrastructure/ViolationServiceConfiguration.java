@@ -11,6 +11,7 @@ import gov.itms.violation.application.CustomerViolations;
 import gov.itms.violation.application.InstalmentService;
 import gov.itms.violation.application.ObjectionService;
 import gov.itms.violation.application.ViolationBooks;
+import gov.itms.violation.application.ViolationOrders;
 import gov.itms.violation.domain.BlackPoints;
 import gov.itms.violation.domain.InstalmentPlan;
 import gov.itms.violation.domain.UnpaidHold;
@@ -242,6 +243,14 @@ public class ViolationServiceConfiguration {
                                       DomainEventRecorder events, Clock clock, ViolationProperties properties) {
         return new ObjectionService(new JdbcObjectionRepository(jdbc), new JdbcCrossborderLinks(jdbc), violations,
                 audit, events, clock, properties.objectionWindow());
+    }
+
+    /** Pledges (VF-046) and administrative preservation orders (VF-047) recorded on violations; append-only. */
+    @Bean
+    ViolationOrders violationOrders(JdbcClient jdbc, ViolationService violations, AuditRecorder audit,
+                                    DomainEventRecorder events, Clock clock) {
+        JdbcCaseRecords records = new JdbcCaseRecords(jdbc);
+        return new ViolationOrders(records, records, violations, audit, events, clock);
     }
 
     /** VF-030 (Q-072 (a)): {@code itms.violations.points-at} CONFIRMATION (default) or RECORDING. */

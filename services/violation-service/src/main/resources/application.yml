@@ -141,6 +141,8 @@ itms:
       - /v1/violations/*/objections
       - /v1/me/violations/*/objections
       - /v1/objections/*/decisions
+      - /v1/violations/*/pledges
+      - /v1/violations/*/preservation-orders
     retention: ${ITMS_IDEMPOTENCY_RETENTION:24h}
     lock-timeout: ${ITMS_IDEMPOTENCY_LOCK_TIMEOUT:30s}
     cleanup-interval: ${ITMS_IDEMPOTENCY_CLEANUP_INTERVAL:15m}

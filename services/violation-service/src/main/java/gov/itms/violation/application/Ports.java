@@ -234,6 +234,26 @@ public final class Ports {
         java.util.Optional<Registered> byPlate(String plate);
     }
 
+    /** Pledges recorded on violations (VF-046). */
+    public interface Pledges {
+
+        /** False when the violation already has a pledge. */
+        boolean insert(gov.itms.violation.domain.ViolationPledge pledge);
+
+        /** The pledges of one violation, newest first. */
+        List<gov.itms.violation.domain.ViolationPledge> pledgesOf(String violationNumber);
+    }
+
+    /** Administrative preservation orders recorded on violations (VF-047). */
+    public interface PreservationOrders {
+
+        /** False when the violation already carries this order reference. */
+        boolean insert(gov.itms.violation.domain.PreservationOrder order);
+
+        /** The orders of one violation, newest first. */
+        List<gov.itms.violation.domain.PreservationOrder> ordersOf(String violationNumber);
+    }
+
     /** rental-service: the contract covering a plate at an instant (TR-032, VF-014). */
     public interface Rentals {
 

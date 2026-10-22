@@ -2,6 +2,7 @@ package gov.itms.appointment.application;
 
 import gov.itms.appointment.domain.Booking;
 import gov.itms.appointment.domain.Calendar;
+import gov.itms.appointment.domain.QueueTicket;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
@@ -58,6 +59,23 @@ public interface AppointmentRepository {
 
     /** BOOKED bookings starting before {@code until} with no reminder yet; locked, skipping rows others hold. */
     List<Booking> dueForReminder(Instant now, Instant until, int limit);
+
+    // ---- queue tickets (CH-031)
+
+    /** Serialises queue numbering of one centre for the day (lock on the centre's row). */
+    void lockCentreForQueue(String centreCode);
+
+    /** The next queue ticket number of a centre for the day (1, 2, ...). */
+    int nextTicketNo(String centreCode, Instant from, Instant to);
+
+    void insertQueueTicket(QueueTicket ticket);
+
+    Optional<QueueTicket> findQueueTicketForUpdate(String ticketNo);
+
+    void updateQueueTicket(QueueTicket ticket);
+
+    /** The queue tickets issued at a centre in [{@code from}, {@code to}), oldest first. */
+    List<QueueTicket> queueTickets(String centreCode, Instant from, Instant to, int limit);
 
     /** Key used by {@link #bookedCounts}. */
     static String slotKey(String resourceCode, Instant start) {

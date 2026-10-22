@@ -3,6 +3,7 @@ package gov.itms.appointment.application;
 import gov.itms.appointment.domain.Booking;
 import gov.itms.appointment.domain.Calendar;
 import gov.itms.appointment.domain.DomainException;
+import gov.itms.appointment.domain.QueueTicket;
 import gov.itms.platform.audit.AuditRecorder;
 import gov.itms.platform.events.DomainEventRecorder;
 import gov.itms.platform.security.CurrentActor;
@@ -11,6 +12,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -38,8 +40,10 @@ public class AppointmentService {
     public static final String CALENDAR_MANAGE = "appointment.calendar.manage";
     public static final String BOOK = "appointment.book";
     public static final String ATTENDANCE = "appointment.attendance";
+    public static final String QUEUE_MANAGE = "appointment.queue.manage";
     public static final String READ = "appointment.read";
     private static final int MAX_SLOT_DAYS = 31;
+    private static final DateTimeFormatter YY_MM_DD = DateTimeFormatter.ofPattern("yyMMdd");
 
     private final AppointmentRepository repo;
     private final AuditRecorder audit;
@@ -320,7 +324,109 @@ public class AppointmentService {
         return due.size();
     }
 
-    // ---- helpers
+    // ---- queue tickets (CH-031)
+
+    /** Issues a ticket at a centre, numbered for the day (for example Q-C123-251022-7). The centre must be active. */
+    @Transactional
+    public QueueTicket issueTicket(String centreCode, String serviceCode, Caller caller) {
+        channelOf(caller);
+        Calendar.Centre centre = centre(centreCode);
+        requireRegion(caller, QUEUE_MANAGE, centre.region());
+        if (!centre.active()) {
+            throw DomainException.conflict("CENTRE_CLOSED", "the centre does not take visitors", List.of("CH-031"));
+        }
+        if (serviceCode != null && repo.findSettings(serviceCode).isEmpty()) {
+            throw notFound("SERVICE_NOT_BOOKABLE", serviceCode);
+        }
+        Instant now = clock.instant();
+        LocalDate day = LocalDate.ofInstant(now, centre.zone());
+        repo.lockCentreForQueue(centreCode);
+        int n = repo.nextTicketNo(centreCode, day.atStartOfDay(centre.zone()).toInstant(),
+                day.plusDays(1).atStartOfDay(centre.zone()).toInstant());
+        String no = "Q-" + centreCode + "-" + YY_MM_DD.format(day) + "-" + n;
+        QueueTicket t = QueueTicket.issue(UUID.randomUUID(), centreCode, serviceCode, no,
+                caller.actor().id(), now);
+        repo.insertQueueTicket(t);
+        audit.record("QUEUE_TICKET_ISSUED", "QueueTicket", no, null, ticketSnapshot(t), null);
+        events.record("itms.appointment.queue-ticket-issued", no, Map.of("ticketNo", no, "centre", centreCode));
+        return t;
+    }
+
+    /** Calls a ticket to a counter (CH-031): the waiting time ends here. */
+    @Transactional
+    public QueueTicket callTicket(String ticketNo, String counter, Caller caller) {
+        channelOf(caller);
+        QueueTicket t = repo.findQueueTicketForUpdate(ticketNo)
+                .orElseThrow(() -> notFound("TICKET_NOT_FOUND", ticketNo));
+        requireRegion(caller, QUEUE_MANAGE, centre(t.centreCode()).region());
+        t.call(counter, clock.instant());
+        repo.updateQueueTicket(t);
+        audit.record("QUEUE_TICKET_CALLED", "QueueTicket", ticketNo, null, ticketSnapshot(t), null);
+        events.record("itms.appointment.queue-ticket-called", ticketNo, Map.of("ticketNo", ticketNo,
+                "centre", t.centreCode(), "counter", counter));
+        return t;
+    }
+
+    /** Finishes the service of a ticket (CH-031): the service time ends here. */
+    @Transactional
+    public QueueTicket serveTicket(String ticketNo, Caller caller) {
+        channelOf(caller);
+        QueueTicket t = repo.findQueueTicketForUpdate(ticketNo)
+                .orElseThrow(() -> notFound("TICKET_NOT_FOUND", ticketNo));
+        requireRegion(caller, QUEUE_MANAGE, centre(t.centreCode()).region());
+        t.serve(clock.instant());
+        repo.updateQueueTicket(t);
+        audit.record("QUEUE_TICKET_SERVED", "QueueTicket", ticketNo, null, ticketSnapshot(t), null);
+        events.record("itms.appointment.queue-ticket-served", ticketNo, ticketSnapshot(t));
+        return t;
+    }
+
+    /** The customer gives up (CH-031): a reported reason, the waiting time kept, no service time. */
+    @Transactional
+    public QueueTicket leaveTicket(String ticketNo, String reason, Caller caller) {
+        channelOf(caller);
+        QueueTicket t = repo.findQueueTicketForUpdate(ticketNo)
+                .orElseThrow(() -> notFound("TICKET_NOT_FOUND", ticketNo));
+        requireRegion(caller, QUEUE_MANAGE, centre(t.centreCode()).region());
+        t.leave(reason, clock.instant());
+        repo.updateQueueTicket(t);
+        audit.record("QUEUE_TICKET_LEFT", "QueueTicket", ticketNo, null, ticketSnapshot(t), reason);
+        events.record("itms.appointment.queue-ticket-left", ticketNo, Map.of("ticketNo", ticketNo,
+                "centre", t.centreCode()));
+        return t;
+    }
+
+    /** The queue of a day at a centre with its waiting and service times (CH-031). */
+    @Transactional(readOnly = true)
+    public QueueDay queueDay(String centreCode, LocalDate day, int limit, Caller caller) {
+        checkLimit(limit);
+        Calendar.Centre centre = centre(centreCode);
+        requireRegion(caller, READ, centre.region());
+        List<QueueTicket> tickets = repo.queueTickets(centreCode,
+                day.atStartOfDay(centre.zone()).toInstant(), day.plusDays(1).atStartOfDay(centre.zone()).toInstant(),
+                limit);
+        return new QueueDay(tickets, metricsOf(tickets, limit));
+    }
+
+    static QueueMetrics metricsOf(List<QueueTicket> tickets, int limit) {
+        long avgWaiting = Math.round(tickets.stream().filter(t -> t.waiting() != null)
+                .mapToLong(t -> t.waiting().toMinutes()).average().orElse(0));
+        long avgService = Math.round(tickets.stream().filter(t -> t.service() != null)
+                .mapToLong(t -> t.service().toMinutes()).average().orElse(0));
+        int called = (int) tickets.stream().filter(t -> t.waiting() != null).count();
+        int served = (int) tickets.stream().filter(t -> t.service() != null).count();
+        return new QueueMetrics(tickets.size(), tickets.size() >= limit, called, served, avgWaiting, avgService);
+    }
+
+    public record QueueDay(List<QueueTicket> tickets, QueueMetrics metrics) {
+        public QueueDay {
+            tickets = List.copyOf(tickets);
+        }
+    }
+
+    public record QueueMetrics(int issued, boolean truncatedAtLimit, int called, int served, long avgWaitingMinutes,
+                        long avgServiceMinutes) {
+    }
 
     /** Checks that {@code start} is a free slot of the resource (or of any resource serving the service). */
     private Calendar.Resource place(Calendar.Centre centre, Calendar.ServiceSettings settings, String serviceCode,
@@ -377,6 +483,28 @@ public class AppointmentService {
         if (!b.customerId().equals(caller.actor().id())) {
             requireRegion(caller, permission, region);
         }
+    }
+
+    static Map<String, Object> ticketSnapshot(QueueTicket t) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("ticketNo", t.ticketNo());
+        m.put("centre", t.centreCode());
+        m.put("serviceCode", t.serviceCode());
+        m.put("status", t.status().name());
+        if (t.counter() != null) {
+            m.put("counter", t.counter());
+        }
+        if (t.waiting() != null) {
+            m.put("waitingMinutes", t.waiting().toMinutes());
+        }
+        if (t.service() != null) {
+            m.put("serviceMinutes", t.service().toMinutes());
+        }
+        if (t.leftReason() != null) {
+            m.put("leftReason", t.leftReason());
+        }
+        m.put("issuedBy", t.issuedBy());
+        return m;
     }
 
     static Map<String, Object> snapshot(Booking b) {

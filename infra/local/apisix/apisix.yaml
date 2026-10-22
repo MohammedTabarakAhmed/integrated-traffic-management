@@ -318,6 +318,8 @@ routes:
       - /v1/slots
       - /v1/bookings
       - /v1/bookings/*
+      - /v1/queue-tickets
+      - /v1/queue-tickets/*
   - id: audit-service
     name: audit-service
     upstream_id: audit-service

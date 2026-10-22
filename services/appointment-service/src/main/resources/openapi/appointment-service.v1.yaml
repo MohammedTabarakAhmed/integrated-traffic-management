@@ -17,6 +17,12 @@ info:
     online booking for the penalty period and emit `itms.appointment.no-show` with the penalty fee code (CC-093). A job
     emits `itms.appointment.reminder-due` before each appointment for notification-service.
 
+    Queue management (CH-031; ADR-070): staff with `appointment.queue.manage` issue walk-up tickets (`Q-<centre>-<day>-<n>`,
+    numbered per centre and day), call them to a counter, finish the service or record a departure with a reason;
+    the queue call `GET /v1/queue-tickets` shows the day's tickets with their waiting and service times (minutes)
+    and averages. Every change is audited and recorded (`itms.appointment.queue-ticket-*`); the POSTs need an
+    `Idempotency-Key`. No rule is invented downstream: the queue changes no booking, hold or fee.
+
     The channel is the `X-Channel` header. Only GET/POST are used (INT-003).
 servers:
   - url: /
@@ -25,6 +31,7 @@ security:
 tags:
   - name: Calendars
   - name: Bookings
+  - name: Queue
 
 paths:
   /v1/appointment-centres:
@@ -378,6 +385,119 @@ paths:
         '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
 
+  /v1/queue-tickets:
+    post:
+      tags: [Queue]
+      operationId: issueQueueTicket
+      summary: Issue a walk-up queue ticket at a centre, numbered for the day (CH-031)
+      x-itms-permission: appointment.queue.manage
+      x-itms-scope: [region]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QueueIssueRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/QueueTicket' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [Queue]
+      operationId: listQueueTickets
+      summary: A centre's queue of one day with waiting and service times (CH-031)
+      x-itms-permission: appointment.read
+      x-itms-scope: [region]
+      parameters:
+        - name: centreCode
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/Code' }
+        - name: date
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 500 }
+      responses:
+        '200': { $ref: '#/components/responses/QueueDay' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+
+  /v1/queue-tickets/{ticketNo}/calls:
+    post:
+      tags: [Queue]
+      operationId: callQueueTicket
+      summary: Call a ticket to a counter; the waiting time ends here (CH-031)
+      description: 404 `TICKET_NOT_FOUND`; 409 `TICKET_NOT_OPEN` (already called or closed), `TICKET_TIME_BACKWARDS`.
+      x-itms-permission: appointment.queue.manage
+      x-itms-scope: [region]
+      parameters:
+        - { name: ticketNo, in: path, required: true, schema: { type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,29}$' } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QueueCallRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/QueueTicket' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+
+  /v1/queue-tickets/{ticketNo}/completions:
+    post:
+      tags: [Queue]
+      operationId: completeQueueTicket
+      summary: The service is done; the service time ends here (CH-031)
+      description: 404 `TICKET_NOT_FOUND`; 409 `TICKET_NOT_CALLED`.
+      x-itms-permission: appointment.queue.manage
+      x-itms-scope: [region]
+      parameters:
+        - { name: ticketNo, in: path, required: true, schema: { type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,29}$' } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200': { $ref: '#/components/responses/QueueTicket' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+
+  /v1/queue-tickets/{ticketNo}/departures:
+    post:
+      tags: [Queue]
+      operationId: departQueueTicket
+      summary: The customer gives up, with a reason (CH-031)
+      description: 404 `TICKET_NOT_FOUND`; 409 `TICKET_NOT_OPEN`.
+      x-itms-permission: appointment.queue.manage
+      x-itms-scope: [region]
+      parameters:
+        - { name: ticketNo, in: path, required: true, schema: { type: string, pattern: '^[A-Z0-9][A-Z0-9_-]{1,29}$' } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QueueDepartureRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/QueueTicket' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -418,6 +538,16 @@ components:
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
+    QueueTicket:
+      description: Queue ticket
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/QueueTicket' }
+    QueueDay:
+      description: The queue of the day with its metrics
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/QueueDay' }
     Centre:
       description: Centre calendar
       content:
@@ -443,6 +573,61 @@ components:
     Code:
       type: string
       pattern: '^[A-Z0-9][A-Z0-9_]{1,39}$'
+    QueueIssueRequest:
+      type: object
+      additionalProperties: false
+      required: [centreCode]
+      properties:
+        centreCode: { $ref: '#/components/schemas/Code' }
+        serviceCode: { $ref: '#/components/schemas/NullableCode' }
+    QueueCallRequest:
+      type: object
+      additionalProperties: false
+      required: [counter]
+      properties:
+        counter: { type: string, minLength: 1, maxLength: 40 }
+    QueueDepartureRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 3, maxLength: 500 }
+    QueueTicket:
+      type: object
+      additionalProperties: false
+      required: [ticketNo, centreCode, status, issuedAt, issuedBy]
+      properties:
+        ticketNo: { type: string }
+        centreCode: { type: string }
+        serviceCode: { oneOf: [ { $ref: '#/components/schemas/Code' }, { type: 'null' } ] }
+        status: { type: string, enum: [ISSUED, CALLED, SERVED, LEFT] }
+        counter: { oneOf: [ { type: string }, { type: 'null' } ] }
+        issuedAt: { type: string, format: date-time }
+        calledAt: { oneOf: [ { type: string, format: date-time }, { type: 'null' } ] }
+        finishedAt: { oneOf: [ { type: string, format: date-time }, { type: 'null' } ] }
+        leftAt: { oneOf: [ { type: string, format: date-time }, { type: 'null' } ] }
+        leftReason: { oneOf: [ { type: string }, { type: 'null' } ] }
+        waitingMinutes: { oneOf: [ { type: integer }, { type: 'null' } ] }
+        serviceMinutes: { oneOf: [ { type: integer }, { type: 'null' } ] }
+        issuedBy: { type: string }
+    QueueMetrics:
+      type: object
+      additionalProperties: false
+      required: [issued, truncatedAtLimit, called, served, avgWaitingMinutes, avgServiceMinutes]
+      properties:
+        issued: { type: integer }
+        truncatedAtLimit: { type: boolean }
+        called: { type: integer }
+        served: { type: integer }
+        avgWaitingMinutes: { type: integer }
+        avgServiceMinutes: { type: integer }
+    QueueDay:
+      type: object
+      additionalProperties: false
+      required: [items, metrics]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/QueueTicket' } }
+        metrics: { $ref: '#/components/schemas/QueueMetrics' }
     NullableCode:
       oneOf: [ { $ref: '#/components/schemas/Code' }, { type: 'null' } ]
     Time:

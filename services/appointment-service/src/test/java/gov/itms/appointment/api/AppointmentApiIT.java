@@ -90,11 +90,13 @@ class AppointmentApiIT {
     }
 
     private static RequestPostProcessor admin() {
-        return user("u-admin", "APPOINTMENT_ADMIN", "appointment.calendar.manage");
+        return user("u-admin", "APPOINTMENT_ADMIN", "appointment.calendar.manage", "appointment.queue.manage",
+                "appointment.read");
     }
 
     private static RequestPostProcessor agent() {
-        return user("u-agent", "APPOINTMENT_AGENT", "appointment.book", "appointment.attendance", "appointment.read");
+        return user("u-agent", "APPOINTMENT_AGENT", "appointment.book", "appointment.attendance", "appointment.read",
+                "appointment.queue.manage");
     }
 
     private static RequestPostProcessor customer(String sub) {
@@ -146,7 +148,7 @@ class AppointmentApiIT {
     }
 
     private MvcResult postAs(String path, Object body, RequestPostProcessor who) throws Exception {
-        boolean idempotent = path.startsWith("/v1/bookings");
+        boolean idempotent = path.startsWith("/v1/bookings") || path.startsWith("/v1/queue-tickets");
         return call(post(path), Request.Method.POST, path, body, who, idempotent ? "it-" + UUID.randomUUID() : null);
     }
 
@@ -257,6 +259,67 @@ class AppointmentApiIT {
         }
         assertThat(db.sql("select count(*) from booking where resource_code = :r and status = 'BOOKED'")
                 .param("r", cal[2]).query(Long.class).single()).isEqualTo(1);
+    }
+
+    @Test
+    @Tag("CH-031")
+    @DisplayName("CH-031: tickets are issued and numbered per day, called to a counter, served or departed;"
+            + " the day's queue shows the waiting and service times; nobody else manages the counter")
+    void queueTickets() throws Exception {
+        String[] cal = calendar(1);
+        LocalDate today = LocalDate.now(ZoneOffset.UTC);
+
+        JsonNode first = body(postAs("/v1/queue-tickets", Map.of("centreCode", cal[0], "serviceCode", cal[1]),
+                agent()));
+        JsonNode second = body(postAs("/v1/queue-tickets", Map.of("centreCode", cal[0]), agent()));
+        assertThat(first.get("status").asString()).isEqualTo("ISSUED");
+        assertThat(first.hasNonNull("waitingMinutes")).isFalse();
+        assertThat(first.get("issuedBy").asString()).isEqualTo("u-agent");
+        assertThat(second.get("ticketNo").asString()).isNotEqualTo(first.get("ticketNo").asString());
+        assertThat(body(getAs("/v1/queue-tickets?centreCode=" + cal[0] + "&date=" + today, agent()))
+                .get("metrics").get("issued").asInt()).isEqualTo(2);
+
+        String no1 = first.get("ticketNo").asString();
+        JsonNode called = body(postAs("/v1/queue-tickets/" + no1 + "/calls", Map.of("counter", "C-3"), agent()));
+        assertThat(called.get("status").asString()).isEqualTo("CALLED");
+        assertThat(called.get("counter").asString()).isEqualTo("C-3");
+        assertThat(called.get("waitingMinutes").asLong()).as("waiting in whole minutes, from zero up")
+                .isGreaterThanOrEqualTo(0L);
+        JsonNode served = body(postAs("/v1/queue-tickets/" + no1 + "/completions", null, agent()));
+        assertThat(served.get("status").asString()).isEqualTo("SERVED");
+        assertThat(served.get("serviceMinutes").asLong()).as("service in whole minutes, from zero up")
+                .isGreaterThanOrEqualTo(0L);
+
+        String no2 = second.get("ticketNo").asString();
+        assertThat(body(postAs("/v1/queue-tickets/" + no2 + "/departures",
+                Map.of("reason", "queue too long"), agent())).get("status").asString()).isEqualTo("LEFT");
+
+        assertThat(code(postAs("/v1/queue-tickets/" + no2 + "/calls", Map.of("counter", "C-4"), agent())))
+                .isEqualTo("TICKET_NOT_OPEN");
+        assertThat(code(postAs("/v1/queue-tickets/" + no1 + "/calls", Map.of("counter", "C-4"), agent())))
+                .isEqualTo("TICKET_NOT_OPEN");
+        assertThat(code(postAs("/v1/queue-tickets/" + no1 + "/completions", null, agent())))
+                .isEqualTo("TICKET_NOT_CALLED");
+        assertThat(code(postAs("/v1/queue-tickets/Q-NO_THERE-251001-9/calls", Map.of("counter", "C"), agent())))
+                .isEqualTo("TICKET_NOT_FOUND");
+
+        JsonNode day = body(getAs("/v1/queue-tickets?centreCode=" + cal[0] + "&date=" + today, agent()));
+        assertThat(day.get("metrics").get("issued").asInt()).isEqualTo(2);
+        assertThat(day.get("metrics").get("called").asInt()).isEqualTo(2);
+        assertThat(day.get("metrics").get("served").asInt()).isEqualTo(1);
+        assertThat(day.get("items").findValuesAsString("ticketNo")).containsExactlyInAnyOrder(no1, no2);
+
+        // outside: a customer has neither the manage grant nor the read grant; the administrator has both
+        assertThat(postAs("/v1/queue-tickets", Map.of("centreCode", cal[0]), customer("c-5"))
+                .getResponse().getStatus()).isEqualTo(403);
+        assertThat(getAs("/v1/queue-tickets?centreCode=" + cal[0] + "&date=" + today, customer("c-5"))
+                .getResponse().getStatus()).isEqualTo(403);
+        assertThat(postAs("/v1/queue-tickets", Map.of("centreCode", cal[0]), admin())
+                .getResponse().getStatus()).isEqualTo(200);
+
+        assertThat(db.sql("select action from audit_outbox where entity_id = :n order by occurred_at")
+                .param("n", no1).query(String.class).list()).containsExactly("QUEUE_TICKET_ISSUED",
+                "QUEUE_TICKET_CALLED", "QUEUE_TICKET_SERVED");
     }
 
     @Test

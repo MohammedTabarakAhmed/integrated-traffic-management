@@ -3,6 +3,7 @@ package gov.itms.appointment.infrastructure;
 import gov.itms.appointment.application.AppointmentRepository;
 import gov.itms.appointment.domain.Booking;
 import gov.itms.appointment.domain.Calendar;
+import gov.itms.appointment.domain.QueueTicket;
 import java.sql.Array;
 import java.sql.Date;
 import java.sql.ResultSet;
@@ -267,6 +268,76 @@ class JdbcAppointmentRepository implements AppointmentRepository {
                          order by start_at limit :l for update skip locked""")
                 .param("now", Timestamp.from(now)).param("until", Timestamp.from(until)).param("l", limit)
                 .query(JdbcAppointmentRepository::mapBooking).list();
+    }
+
+    // ---- queue tickets (CH-031)
+
+    private static final String TICKET_SELECT = """
+            select id, centre_code, service_code, ticket_no, issued_by, issued_at, status, counter, called_at,
+                   finished_at, left_at, left_reason from queue_ticket""";
+
+    @Override
+    public void lockCentreForQueue(String centreCode) {
+        jdbc.sql("select code from appointment_centre where code = :c for update").param("c", centreCode)
+                .query().listOfRows();
+    }
+
+    @Override
+    public int nextTicketNo(String centreCode, Instant from, Instant to) {
+        return jdbc.sql("""
+                        select count(*) + 1 from queue_ticket
+                        where centre_code = :c and issued_at >= :from and issued_at < :to""")
+                .param("c", centreCode).param("from", Timestamp.from(from)).param("to", Timestamp.from(to))
+                .query(Integer.class).single();
+    }
+
+    @Override
+    public void insertQueueTicket(QueueTicket t) {
+        jdbc.sql("""
+                        insert into queue_ticket (id, centre_code, service_code, ticket_no, issued_by, issued_at,
+                            status, counter, called_at, finished_at, left_at, left_reason)
+                        values (:id, :centre, :service, :no, :by, :issued, :status, :counter, :called, :finished,
+                            :left, :reason)""")
+                .param("id", t.id()).param("centre", t.centreCode()).param("service", t.serviceCode())
+                .param("no", t.ticketNo()).param("by", t.issuedBy())
+                .param("issued", Timestamp.from(t.issuedAt())).param("status", t.status().name())
+                .param("counter", t.counter()).param("called", ts(t.calledAt()))
+                .param("finished", ts(t.finishedAt())).param("left", ts(t.leftAt()))
+                .param("reason", t.leftReason()).update();
+    }
+
+    @Override
+    public Optional<QueueTicket> findQueueTicketForUpdate(String ticketNo) {
+        return jdbc.sql(TICKET_SELECT + " where ticket_no = :n for update").param("n", ticketNo)
+                .query(JdbcAppointmentRepository::mapTicket).optional();
+    }
+
+    @Override
+    public void updateQueueTicket(QueueTicket t) {
+        jdbc.sql("""
+                        update queue_ticket set status = :status, counter = :counter, called_at = :called,
+                            finished_at = :finished, left_at = :left, left_reason = :reason
+                        where id = :id""")
+                .param("status", t.status().name()).param("counter", t.counter()).param("called", ts(t.calledAt()))
+                .param("finished", ts(t.finishedAt())).param("left", ts(t.leftAt())).param("reason", t.leftReason())
+                .param("id", t.id()).update();
+    }
+
+    @Override
+    public List<QueueTicket> queueTickets(String centreCode, Instant from, Instant to, int limit) {
+        return jdbc.sql(TICKET_SELECT + """
+                          where centre_code = :c and issued_at >= :from and issued_at < :to
+                         order by issued_at, ticket_no limit :l""")
+                .param("c", centreCode).param("from", Timestamp.from(from)).param("to", Timestamp.from(to))
+                .param("l", limit).query(JdbcAppointmentRepository::mapTicket).list();
+    }
+
+    private static QueueTicket mapTicket(ResultSet rs, int row) throws SQLException {
+        return QueueTicket.restore(rs.getObject("id", UUID.class), rs.getString("centre_code"),
+                rs.getString("service_code"), rs.getString("ticket_no"), rs.getString("issued_by"),
+                rs.getTimestamp("issued_at").toInstant(), QueueTicket.Status.valueOf(rs.getString("status")),
+                rs.getString("counter"), instant(rs.getTimestamp("called_at")), instant(rs.getTimestamp("finished_at")),
+                instant(rs.getTimestamp("left_at")), rs.getString("left_reason"));
     }
 
     private Calendar.Centre mapCentre(ResultSet rs, int row) throws SQLException {

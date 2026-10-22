@@ -9,6 +9,7 @@ import gov.itms.appointment.domain.Calendar;
 import gov.itms.appointment.domain.CalendarTest;
 import gov.itms.appointment.domain.Channel;
 import gov.itms.appointment.domain.DomainException;
+import gov.itms.appointment.domain.QueueTicket;
 import gov.itms.platform.audit.AuditRecorder;
 import gov.itms.platform.events.DomainEventRecorder;
 import gov.itms.platform.security.CurrentActor;
@@ -352,6 +353,33 @@ class AppointmentServiceTest {
             return bookings.values().stream().filter(b -> b.status() == Booking.Status.BOOKED
                     && b.reminderSentAt() == null && b.start().isBefore(until) && b.start().isAfter(now))
                     .limit(limit).toList();
+        }
+
+        @Override
+        public void lockCentreForQueue(String centreCode) {
+        }
+
+        @Override
+        public int nextTicketNo(String centreCode, Instant from, Instant to) {
+            return 1;
+        }
+
+        @Override
+        public void insertQueueTicket(QueueTicket ticket) {
+        }
+
+        @Override
+        public Optional<QueueTicket> findQueueTicketForUpdate(String ticketNo) {
+            return Optional.empty();
+        }
+
+        @Override
+        public void updateQueueTicket(QueueTicket ticket) {
+        }
+
+        @Override
+        public List<QueueTicket> queueTickets(String centreCode, Instant from, Instant to, int limit) {
+            return List.of();
         }
     }
 }

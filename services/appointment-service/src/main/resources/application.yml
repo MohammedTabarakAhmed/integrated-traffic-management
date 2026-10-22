@@ -52,13 +52,18 @@ itms:
       lead: ${ITMS_APPOINTMENTS_REMINDER_LEAD:24h}
       interval: ${ITMS_APPOINTMENTS_REMINDER_INTERVAL:5m}
       batch-size: ${ITMS_APPOINTMENTS_REMINDER_BATCH_SIZE:200}
-  # API_SPECIFICATION §2, ADR-032: booking and changing a booking need an Idempotency-Key.
+  # API_SPECIFICATION §2, ADR-032: booking and changing a booking need an Idempotency-Key, and so does a queue
+  # change (CH-031).
   idempotency:
     enabled: true
     paths:
       - /v1/bookings
       - /v1/bookings/*/changes
       - /v1/bookings/*/cancellations
+      - /v1/queue-tickets
+      - /v1/queue-tickets/*/calls
+      - /v1/queue-tickets/*/completions
+      - /v1/queue-tickets/*/departures
     retention: ${ITMS_IDEMPOTENCY_RETENTION:24h}
     lock-timeout: ${ITMS_IDEMPOTENCY_LOCK_TIMEOUT:30s}
     cleanup-interval: ${ITMS_IDEMPOTENCY_CLEANUP_INTERVAL:15m}

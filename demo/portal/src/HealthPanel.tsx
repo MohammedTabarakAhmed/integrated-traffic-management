@@ -22,23 +22,20 @@ const GROUP_ICON: Record<string, React.ReactNode> = {
 export function HealthPanel({ lang }: { lang: string }) {
   const ar = lang === 'ar'
   const [services, setServices] = useState<Service[]>([])
-  const [last, setLast] = useState<number>(0)
 
   useEffect(() => {
-    let t: any
     const tick = async () => {
       try {
         const d = await fetch('/demo/health').then((r) => r.json())
-        const svc: Service[] = (d.services ?? []).map((s: any) => ({
+        const svc: Service[] = ((d?.services ?? []) as { name: string; port: number; group: string; up: boolean | null; ms: number | null }[]).map((s) => ({
           name: s.name, port: s.port, group: s.group,
           up: s.up ?? null, ms: s.ms ?? null,
         }))
         setServices(svc)
-        setLast(Date.now())
       } catch { /* ignore: stack may be down */ }
     }
     tick()
-    t = setInterval(tick, 15000)
+    const t = setInterval(tick, 15000)
     return () => clearInterval(t)
   }, [])
 

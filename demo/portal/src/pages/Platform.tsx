@@ -139,7 +139,7 @@ export default function Platform() {
           <a className="btn primary" style={{ marginInlineStart: 'auto' }} href="/api.html" target="_blank" rel="noreferrer"><Braces size={16} /> {ar ? 'افتح مستكشف الواجهات (27 مواصفة)' : 'Open the API explorer (27 specs)'}</a></div>
       </Card>
 
-      <DemoScript go={(r) => { window.location.hash = `#/${r}` }} lang={lang} customerSignIn={() => {}} />
+      <DemoScript go={(r) => { window.location.hash = `#/${r}` }} lang={lang} />
     </>
   )
 }

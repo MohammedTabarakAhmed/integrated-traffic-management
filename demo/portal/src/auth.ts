@@ -23,6 +23,34 @@ export type Claims = Record<string, unknown> & {
 export type Kind = 'customer' | 'staff' | 'checker' // checker: the second person of maker-checker (module tour)
 
 const storeKey = (k: Kind) => `itms.session.${k}`
+// A manual sign-out must stay signed out: the pages' preset sign-ins (env passwords) must not
+// silently bring the account back. A manual sign-in clears the flag again.
+const SIGNED_OUT_KEY = 'itms.signedOut'
+
+function setSignedOut(v: boolean) {
+  try {
+    if (v) sessionStorage.setItem(SIGNED_OUT_KEY, '1')
+    else sessionStorage.removeItem(SIGNED_OUT_KEY)
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+/** True after a manual sign-out in this tab: preset sign-ins stay off until the user signs in themselves. */
+export function signedOutByUser(): boolean {
+  try {
+    return sessionStorage.getItem(SIGNED_OUT_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+/** The preset sign-in used by page effects to prepare their role. Never overrides a session the user
+ *  signed out of (demo refresh would otherwise log them straight back in); returns null then. */
+export async function autoSignInStaff(username: string, password: string, kind: 'staff' | 'checker' = 'staff'): Promise<Session | null> {
+  if (signedOutByUser()) return null
+  return signInStaff(username, password, kind)
+}
 
 function decode(jwt: string): Claims {
   const part = jwt.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')
@@ -136,8 +164,12 @@ export async function completeRedirect(): Promise<string | null> {
   return pending.returnTo ?? ''
 }
 
-/** Staff sign-in for the control room (local dev accounts only). */
-export async function signInStaff(username: string, password: string): Promise<Session> {
+/** Staff sign-in (local dev accounts). `kind` chooses whose session slot it fills ('staff' = maker,
+ *  'checker' = the second person of maker-checker), so a checker sign-in never overwrites the maker's token. */
+/** Staff sign-in (local dev accounts). `kind` chooses whose session slot it fills ('staff' = maker,
+ *  'checker' = the second person of maker-checker), so a checker sign-in never overwrites the maker's token.
+ *  A manual sign-in also re-enables the preset sign-ins after a sign-out. */
+export async function signInStaff(username: string, password: string, kind: 'staff' | 'checker' = 'staff'): Promise<Session> {
   const res = await fetch(`${REALM}/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -145,7 +177,8 @@ export async function signInStaff(username: string, password: string): Promise<S
   })
   if (!res.ok) throw new Error(res.status === 401 ? 'Wrong user name or password' : `Sign-in failed (${res.status})`)
   const s = toSession(await res.json())
-  save('staff', s)
+  save(kind, s)
+  setSignedOut(false)
   return s
 }
 
@@ -159,19 +192,22 @@ export async function signInChecker(username: string, password: string): Promise
   if (!res.ok) throw new Error(res.status === 401 ? 'Wrong user name or password' : `Sign-in failed (${res.status})`)
   const s = toSession(await res.json())
   save('checker', s)
+  setSignedOut(false)
   return s
 }
 
-/** Sign out any role. Customer goes through Keycloak logout; staff/checker just clear their session. */
+/** Sign out any role. Customer goes through Keycloak logout; staff/checker just clear their session.
+ *  The tab remembers the sign-out so no preset sign-in brings the account back on the next page. */
 export function signOut(k: Kind) {
   const s = load(k)
   save(k, null)
+  setSignedOut(true)
   if (k === 'customer' && s?.idToken) {
     const q = new URLSearchParams({ id_token_hint: s.idToken, post_logout_redirect_uri: redirectUri() })
     location.assign(`${KEYCLOAK}${REALM}/logout?${q}`)
   } else {
-    // Staff / checker: no browser-based OIDC session to end at Keycloak, just clear local storage and go home.
+    // Staff / checker: no browser-based OIDC session to end at Keycloak. The session is dropped here and the
+    // app itself resets everything for the home page in the same tick — no reload needed, so sign-out is instant.
     location.hash = '#/home'
-    location.reload()
   }
 }

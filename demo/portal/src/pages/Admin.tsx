@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { BookOpen, Calculator, CheckCircle2, KeyRound, ListTree, Scale, UserCheck, ListChecks } from 'lucide-react'
 import { ApiError, call, money, when } from '../api'
-import { load, signInStaff } from '../auth'
+import { autoSignInStaff, load } from '../auth'
 import { Card, Skeleton, StatusPill, tabFromLink } from '../components'
 import { useI18n } from '../i18n'
 import Access from './Access'
@@ -38,8 +38,8 @@ export default function Admin({ notify }: { notify: (t: string, bad?: boolean) =
   useEffect(() => {
     const env = import.meta.env
     const tasks: Promise<unknown>[] = []
-    if (!load('staff') && env.VITE_ITMS_STAFF_PASSWORD) tasks.push(signInStaff('dev.maker', env.VITE_ITMS_STAFF_PASSWORD as string, 'staff'))
-    if (!load('checker') && env.VITE_ITMS_CHECKER_PASSWORD) tasks.push(signInStaff('dev.checker', env.VITE_ITMS_CHECKER_PASSWORD as string, 'checker'))
+    if (!load('staff') && env.VITE_ITMS_STAFF_PASSWORD) tasks.push(autoSignInStaff('dev.maker', env.VITE_ITMS_STAFF_PASSWORD as string, 'staff') as Promise<unknown>)
+    if (!load('checker') && env.VITE_ITMS_CHECKER_PASSWORD) tasks.push(autoSignInStaff('dev.checker', env.VITE_ITMS_CHECKER_PASSWORD as string, 'checker') as Promise<unknown>)
     Promise.all(tasks).then(() => setReady(true)).catch(() => {})
   }, [])
 

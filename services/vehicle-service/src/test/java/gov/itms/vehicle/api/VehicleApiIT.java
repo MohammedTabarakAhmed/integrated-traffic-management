@@ -204,6 +204,8 @@ class VehicleApiIT {
         spec.put("axles", 2);
         spec.put("cylinders", 4);
         spec.put("category", category);
+        spec.put("engineCapacityCc", 1598);
+        spec.put("origin", "Japan");
         return Map.of("vin", vin, "spec", spec, "ownerFileNumber", "TF-" + vin.substring(10), "region", "NORTH");
     }
 
@@ -244,6 +246,9 @@ class VehicleApiIT {
         assertThat(v.get("registrationValid").asBoolean()).isTrue();
         assertThat(v.get("registrationExpiry").asString()).isEqualTo(TODAY.plusMonths(12).minusDays(1).toString());
         assertThat(v.get("plateNumber").asString()).startsWith("A ");
+        assertThat(v.get("spec").get("engineCapacityCc").asInt()).as("VL-001: engine capacity stored and read back")
+                .isEqualTo(1598);
+        assertThat(v.get("spec").get("origin").asString()).isEqualTo("Japan");
         assertThat(db.sql("select status from plate where display = :d").param("d", v.get("plateNumber").asString())
                 .query(String.class).single()).isEqualTo("ASSIGNED");
         assertThat(body(getAs("/v1/vehicles/" + vin + "/history", officer())).get("items").findValuesAsString("event"))

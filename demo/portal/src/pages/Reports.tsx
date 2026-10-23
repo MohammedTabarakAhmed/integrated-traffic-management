@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Download, FileBarChart, Play, ListChecks } from 'lucide-react'
 import { ApiError, call, money } from '../api'
-import { fresh, load, signInStaff } from '../auth'
+import { autoSignInStaff, fresh, load } from '../auth'
 import { Card, Skeleton } from '../components'
 import { useI18n } from '../i18n'
 
@@ -26,7 +26,7 @@ export default function Reports({ notify }: { notify: (t: string, bad?: boolean)
 
   useEffect(() => {
     const pw = import.meta.env.VITE_ITMS_CHECKER_PASSWORD as string | undefined
-    if (!ready && pw) signInStaff('dev.checker', pw, 'checker').then(() => setReady(true)).catch(() => {})
+    if (!ready && pw) autoSignInStaff('dev.checker', pw, 'checker').then((s) => { if (s) setReady(true) }).catch(() => {})
   }, [ready])
   useEffect(() => {
     if (ready) call<{ items: Def[] }>('checker', 'GET', '/v1/reports', undefined, lang).then((r) => setDefs(r.items)).catch(() => setDefs([]))

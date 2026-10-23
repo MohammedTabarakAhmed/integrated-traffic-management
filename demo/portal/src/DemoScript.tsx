@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Play, Pause, Check, Clock, SkipForward, Zap, Terminal, CheckCircle2, AlertTriangle, RotateCcw } from 'lucide-react'
+import { Play, Pause, Check, Clock, SkipForward, Zap, CheckCircle2, AlertTriangle, RotateCcw } from 'lucide-react'
 import { useI18n } from './i18n'
 
 // Demo script runner: automated walkthrough with step-by-step actions, screenshots, and timing.
@@ -16,9 +16,7 @@ const STEPS = [
   { id: 'platform', title: { en: 'Platform & API', ar: 'المنصة والواجهات' }, desc: { en: 'Architecture map, roadmap 0-14, requirement status, API explorer', ar: 'خريطة البنية، خارطة الطريق، حالة المتطلبات، مستكشف الواجهات' }, target: 'platform', action: 'platform', duration: 30 },
 ]
 
-type Step = typeof STEPS[0]
-
-export function DemoScript({ go, lang, customerSignIn }: { go: (r: string) => void; lang: string; customerSignIn: () => void }) {
+export function DemoScript({ go, lang }: { go: (r: string) => void; lang: string }) {
   const { t } = useI18n()
   const ar = lang === 'ar'
   const [running, setRunning] = useState(false)

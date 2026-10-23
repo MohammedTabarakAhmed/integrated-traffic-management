@@ -19,7 +19,7 @@ public class VehicleTest {
 
     public static Vehicle.Spec spec(String category, int modelYear) {
         return new Vehicle.Spec("ENG-1", "TOYOTA", "COROLLA", modelYear, "SEDAN", List.of("WHITE"), "PETROL", "LEFT",
-                5, 1200, 1700, 2, 4, category);
+                5, 1200, 1700, 2, 4, category, null, null);
     }
 
     @Test
@@ -65,16 +65,32 @@ public class VehicleTest {
         assertThatThrownBy(() -> spec("private", 2024)).isInstanceOf(DomainException.class).extracting("code")
                 .isEqualTo("FIELD_INVALID");
         assertThatThrownBy(() -> new Vehicle.Spec("ENG-1", "TOYOTA", "COROLLA", 2024, "SEDAN", List.of(), "PETROL",
-                "LEFT", 5, 1200, 1700, 2, 4, "PRIVATE")).isInstanceOf(DomainException.class).extracting("code")
-                .isEqualTo("FIELD_INVALID");
-        assertThatThrownBy(() -> new Vehicle.Spec("ENG-1", "TOYOTA", "COROLLA", 2024, "SEDAN", List.of("WHITE"),
-                "PETROL", "MIDDLE", 5, 1200, 1700, 2, 4, "PRIVATE")).isInstanceOf(DomainException.class)
+                "LEFT", 5, 1200, 1700, 2, 4, "PRIVATE", null, null)).isInstanceOf(DomainException.class)
                 .extracting("code").isEqualTo("FIELD_INVALID");
         assertThatThrownBy(() -> new Vehicle.Spec("ENG-1", "TOYOTA", "COROLLA", 2024, "SEDAN", List.of("WHITE"),
-                "PETROL", "LEFT", 5, 1800, 1700, 2, 4, "PRIVATE")).as("gross below empty weight")
+                "PETROL", "MIDDLE", 5, 1200, 1700, 2, 4, "PRIVATE", null, null)).isInstanceOf(DomainException.class)
+                .extracting("code").isEqualTo("FIELD_INVALID");
+        assertThatThrownBy(() -> new Vehicle.Spec("ENG-1", "TOYOTA", "COROLLA", 2024, "SEDAN", List.of("WHITE"),
+                "PETROL", "LEFT", 5, 1800, 1700, 2, 4, "PRIVATE", null, null)).as("gross below empty weight")
                 .isInstanceOf(DomainException.class).extracting("code").isEqualTo("VEHICLE_DATA_INVALID");
         assertThatThrownBy(() -> Vehicle.create(UUID.randomUUID(), "1HGCM82633A004352", spec("PRIVATE", 2024),
                 "tf 1", "NORTH", NOW)).isInstanceOf(DomainException.class).extracting("code")
                 .isEqualTo("FIELD_INVALID");
+    }
+
+    @Test
+    @Tag("VL-001")
+    @DisplayName("VL-001: engine capacity and origin are stored parts of the technical data; formats checked when given")
+    void engineCapacityAndOrigin() {
+        Vehicle.Spec full = new Vehicle.Spec("ENG-1", "TOYOTA", "COROLLA", 2024, "SEDAN", List.of("WHITE"), "PETROL",
+                "LEFT", 5, 1200, 1700, 2, 4, "PRIVATE", 1598, "Japan");
+        assertThat(full.engineCapacityCc()).isEqualTo(1598);
+        assertThat(full.origin()).isEqualTo("Japan");
+        assertThatThrownBy(() -> new Vehicle.Spec("ENG-1", "TOYOTA", "COROLLA", 2024, "SEDAN", List.of("WHITE"),
+                "PETROL", "LEFT", 5, 1200, 1700, 2, 4, "PRIVATE", 0, "Japan")).isInstanceOf(DomainException.class)
+                .extracting("code").isEqualTo("FIELD_INVALID");
+        assertThatThrownBy(() -> new Vehicle.Spec("ENG-1", "TOYOTA", "COROLLA", 2024, "SEDAN", List.of("WHITE"),
+                "PETROL", "LEFT", 5, 1200, 1700, 2, 4, "PRIVATE", 1900, "	unknown;:"))
+                .isInstanceOf(DomainException.class).extracting("code").isEqualTo("FIELD_INVALID");
     }
 }

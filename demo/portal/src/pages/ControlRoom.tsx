@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Ban, Check, CheckCircle2, Clock, Copy, Lock, Radar, ShieldAlert, ShieldX, Siren, Smartphone, TrafficCone, Zap, Award } from 'lucide-react'
+import { Ban, Check, CheckCircle2, Clock, Copy, Download, Lock, Radar, ShieldAlert, ShieldX, Siren, Smartphone, TrafficCone, Zap, Award } from 'lucide-react'
 import { ApiError, call } from '../api'
 import { load, signInStaff } from '../auth'
 import { Card, Gauge, StatusPill } from '../components'
@@ -78,6 +78,21 @@ export default function ControlRoom() {
       `File ${file ?? '—'} · points ${acct ? `${acct.activePoints}/${acct.threshold}` : '—'} · suspension ${acct?.activeSuspension ? `#${acct.activeSuspension.ordinal} until ${acct.activeSuspension.until}` : 'none'} · hold ${hold ? `${hold.holdType} ${hold.status}` : 'none'} · renewal ${elig ? (elig.eligible ? 'ALLOWED' : 'BLOCKED') : 'not checked'}`, '',
       ...[...feed].reverse().map((f) => `- ${f.at.toISOString()} ${tone[f.tone]} ${f.en}`)].join('\n')
     try { await navigator.clipboard.writeText(md); setCopied(true); setTimeout(() => setCopied(false), 1800) } catch { /* clipboard blocked */ }
+  }
+  // The same evidence as a file, for pasting into a ticket or saving next to the test run.
+  const downloadFeed = () => {
+    const esc = (s: string) => `"${s.replace(/"/g, '""')}"`
+    const head = 'time,tone,event'
+    const rows = [...feed].reverse().map((f) => `${f.at.toISOString()},${f.tone},${esc(f.en)}`)
+    const csv = [head, ...rows].join('\n')
+    const url = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `itms-control-feed-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.csv`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
   }
   const seen = useRef<{ susp: string | null; entries: Set<string> | null }>({ susp: null, entries: null })
 
@@ -244,6 +259,8 @@ export default function ControlRoom() {
         <Card className="span-2" title={ar ? 'سجل الأحداث' : 'Event feed'} icon={<Zap size={16} />} right={<span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             {feed.length > 0 && <button className="btn ghost" onClick={copyFeed} title={ar ? 'نسخ السجل كـ Markdown' : 'Copy the feed as Markdown for a test report'}>
               {copied ? <Check size={14} /> : <Copy size={14} />} {copied ? (ar ? 'نُسخ' : 'Copied') : 'Markdown'}</button>}
+            {feed.length > 0 && <button className="btn ghost" onClick={downloadFeed} title={ar ? 'تنزيل السجل كملف CSV' : 'Download the feed as a CSV file for the test report'}>
+              <Download size={14} /> CSV</button>}
             <span className="pill">{feed.length}</span></span>}>
           <div className="feed">
             {feed.length === 0 ? <div className="empty">{ar ? 'بانتظار الأحداث' : 'Waiting for events'}</div> :
@@ -252,8 +269,6 @@ export default function ControlRoom() {
               ))}
           </div>
         </Card>
-        <Card title={ar ? 'قيود النقاط' : 'Point entries'} icon={<ShieldAlert size={16} />} right={<span className="pill">{acct?.entries.length ?? 0}</span>}>
-</Card>
 
       <section className="card uat-badges page-enter">
         <div className="uat-badges-head">
@@ -264,7 +279,7 @@ export default function ControlRoom() {
         <div className="uat-badges-list">
           {[
             { id: 'UAT-1', en: 'Black-point suspension at 24 points → hold + renewal blocked', ar: 'إيقاف الرخصة عند 24 نقطة ← حجز + تجديد محظور', done: !!susp },
-            { id: 'VF-030', en: 'Points recorded when violation confirmed', ar: 'النقاط تُسجّل عند تأكيد المخالفة', done: acct?.entries.length > 0 },
+            { id: 'VF-030', en: 'Points recorded when violation confirmed', ar: 'النقاط تُسجّل عند تأكيد المخالفة', done: (acct?.entries.length ?? 0) > 0 },
             { id: 'VF-031', en: 'Point expiry after 1 year', ar: 'انتهاء النقاط بعد سنة', done: true },
             { id: 'VF-032', en: 'Suspension periods 3/6/12 months by ordinal', ar: 'فترات الإيقاف 3/6/12 شهرًا حسب الترتيب', done: !!susp },
             { id: 'VF-033', en: 'Warnings at 12 and 18 points', ar: 'تحذيرات عند 12 و 18 نقطة', done: (acct?.activePoints ?? 0) >= 12 },

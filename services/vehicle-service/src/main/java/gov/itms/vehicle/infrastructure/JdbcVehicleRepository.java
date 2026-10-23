@@ -27,7 +27,8 @@ class JdbcVehicleRepository implements Ports.VehicleRepository {
     static final String VEHICLE_SELECT = """
             select id, vin, engine_no, make, model, model_year, body_type, colours, fuel_type, steering, seats,
                 empty_weight_kg, gross_weight_kg, axles, cylinders, category, owner_file_number, region, status,
-                registration_expiry, plate_id, plate_number, created_at, version, customs_certificate_no
+                registration_expiry, plate_id, plate_number, created_at, version, customs_certificate_no,
+                engine_capacity_cc, origin
             from vehicle""";
     private static final String SERIES_SELECT = """
             select code, region, plate_category, colour_code, design, prefix, first_number, last_number,
@@ -65,10 +66,11 @@ class JdbcVehicleRepository implements Ports.VehicleRepository {
         jdbc.sql("""
                         insert into vehicle (id, vin, engine_no, make, model, model_year, body_type, colours,
                             fuel_type, steering, seats, empty_weight_kg, gross_weight_kg, axles, cylinders, category,
-                            owner_file_number, region, status, created_at, customs_certificate_no)
+                            owner_file_number, region, status, created_at, customs_certificate_no, engine_capacity_cc,
+                            origin)
                         values (:id, :vin, :engine, :make, :model, :year, :body, string_to_array(:colours, ','),
                             :fuel, :steering, :seats, :empty, :gross, :axles, :cylinders, :category, :owner,
-                            :region, :status, :at, :customs)""")
+                            :region, :status, :at, :customs, :capacity, :origin)""")
                 .param("id", v.id()).param("vin", v.vin()).param("engine", s.engineNo()).param("make", s.make())
                 .param("model", s.model()).param("year", s.modelYear()).param("body", s.bodyType())
                 .param("colours", String.join(",", s.colours())).param("fuel", s.fuelType())
@@ -76,7 +78,8 @@ class JdbcVehicleRepository implements Ports.VehicleRepository {
                 .param("gross", s.grossWeightKg()).param("axles", s.axles()).param("cylinders", s.cylinders())
                 .param("category", s.category()).param("owner", v.ownerFileNumber()).param("region", v.region())
                 .param("status", v.status().name()).param("at", Timestamp.from(v.createdAt()))
-                .param("customs", v.customsCertificateNo()).update();
+                .param("customs", v.customsCertificateNo()).param("capacity", s.engineCapacityCc())
+                .param("origin", s.origin()).update();
     }
 
     @Override
@@ -106,14 +109,16 @@ class JdbcVehicleRepository implements Ports.VehicleRepository {
                         update vehicle set owner_file_number = :owner, region = :region, status = :status,
                             registration_expiry = :expiry, plate_id = :plate, plate_number = :plateNumber,
                             engine_no = :engine, body_type = :body, colours = string_to_array(:colours, ','),
-                            category = :category, customs_certificate_no = :customs, version = version + 1
+                            category = :category, customs_certificate_no = :customs,
+                            engine_capacity_cc = :capacity, origin = :origin, version = version + 1
                         where id = :id and version = :version""")
                 .param("owner", v.ownerFileNumber()).param("region", v.region()).param("status", v.status().name())
                 .param("expiry", v.registrationExpiry() == null ? null : Date.valueOf(v.registrationExpiry()))
                 .param("plate", v.plateId()).param("plateNumber", v.plateNumber()).param("id", v.id())
                 .param("engine", v.spec().engineNo()).param("body", v.spec().bodyType())
                 .param("colours", String.join(",", v.spec().colours())).param("category", v.spec().category())
-                .param("customs", v.customsCertificateNo()).param("version", v.version()).update();
+                .param("customs", v.customsCertificateNo()).param("capacity", v.spec().engineCapacityCc())
+                .param("origin", v.spec().origin()).param("version", v.version()).update();
         if (n != 1) {
             throw new OptimisticLockingFailureException("vehicle " + v.vin() + " changed concurrently");
         }
@@ -310,7 +315,8 @@ class JdbcVehicleRepository implements Ports.VehicleRepository {
                 rs.getInt("model_year"), rs.getString("body_type"), strings(rs.getArray("colours")),
                 rs.getString("fuel_type"), rs.getString("steering"), rs.getInt("seats"),
                 rs.getInt("empty_weight_kg"), rs.getInt("gross_weight_kg"), rs.getInt("axles"),
-                rs.getInt("cylinders"), rs.getString("category"));
+                rs.getInt("cylinders"), rs.getString("category"),
+                rs.getObject("engine_capacity_cc", Integer.class), rs.getString("origin"));
         Date expiry = rs.getDate("registration_expiry");
         Vehicle v = Vehicle.restore(rs.getObject("id", UUID.class), rs.getString("vin"), spec,
                 rs.getTimestamp("created_at").toInstant(), rs.getString("owner_file_number"), rs.getString("region"),

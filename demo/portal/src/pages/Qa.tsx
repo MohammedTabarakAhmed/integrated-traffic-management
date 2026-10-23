@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { ArrowRight, Check, CheckCircle2, ClipboardCheck, Clock, Copy, Download, Database, KeyRound, ListChecks, Network, Play, Printer, Radio, Rocket, Server, ShieldCheck, Workflow, XCircle } from 'lucide-react'
-import { load, signInStaff } from '../auth'
+import { autoSignInStaff, load } from '../auth'
 import { Card } from '../components'
 import { useI18n } from '../i18n'
 import { QA_AR } from './qa-ar'
@@ -24,7 +24,7 @@ const f = async (input: string, init?: RequestInit) => {
 async function staffToken(): Promise<string> {
   let s = load('staff')
   const pw = import.meta.env.VITE_ITMS_STAFF_PASSWORD as string | undefined
-  if (!s && pw) s = await signInStaff('dev.maker', pw, 'staff')
+  if (!s && pw) s = await autoSignInStaff('dev.maker', pw, 'staff')
   if (!s) throw new Error('staff not signed in')
   return s.accessToken
 }

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { CheckCircle2, LayoutDashboard, RefreshCcw, ShieldCheck } from 'lucide-react'
+import { CheckCircle2, LayoutDashboard, Printer, RefreshCcw, ShieldCheck } from 'lucide-react'
 import { money } from '../api'
 import { useI18n } from '../i18n'
 
@@ -69,6 +69,12 @@ export default function Receipt({ go }: { go: (r: string) => void }) {
         <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
           <button className="btn primary" onClick={() => go('dashboard')}><LayoutDashboard size={16} /> {t.back}</button>
           <button className="btn" onClick={retry} disabled={busy || !payment}><RefreshCcw size={16} /> {t.retryCallback}</button>
+          {payment && (
+            <button className="btn" onClick={() => window.print()}
+              title={lang === 'ar' ? 'اطبع الإيصال كسجل' : 'Print the receipt for your records'}>
+              <Printer size={16} /> {lang === 'ar' ? 'اطبع' : 'Print'}
+            </button>
+          )}
         </div>
       </section>
     </>

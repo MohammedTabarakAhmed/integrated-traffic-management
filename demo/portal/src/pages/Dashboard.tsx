@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AlertOctagon, Bell, Camera, CarFront, CreditCard, FileText, Inbox, MapPin, ReceiptText, Wallet, ListChecks } from 'lucide-react'
+import { AlertOctagon, Bell, Camera, CarFront, CreditCard, Download, FileText, Inbox, MapPin, ReceiptText, Wallet, ListChecks } from 'lucide-react'
 import { call, money, SignedOut, when } from '../api'
 import { load } from '../auth'
 import Objection from './Objection'
@@ -48,6 +48,8 @@ export default function Dashboard({ onError, notify }: { onError: (e: unknown) =
   const [d, setD] = useState<Data | null>(null)
   const [failed, setFailed] = useState(false)
   const [paying, setPaying] = useState(false)
+  const [payingId, setPayingId] = useState<string | null>(null) // the one fine being paid alone
+  const [fineFilter, setFineFilter] = useState<'all' | 'OPEN' | 'PAID'>('all')
   const [objecting, setObjecting] = useState<string | null>(null)
   const [txn, setTxn] = useState<{ x: Txn; history: History[] | null } | null>(null)
   const [msg, setMsg] = useState<Message | null>(null)
@@ -111,6 +113,7 @@ export default function Dashboard({ onError, notify }: { onError: (e: unknown) =
   }
 
   const open = d.violations.filter((v) => v.status === 'OPEN')
+  const shownFines = d.violations.filter((v) => fineFilter === 'all' || v.status === fineFilter)
   const due = d.payables.filter((p) => p.payable.status === 'OPEN' && !p.paused)
   const paused = new Set(d.payables.filter((p) => p.paused).map((p) => p.payable.itemRef))
   const dueTotal = due.reduce((s, p) => s + p.payable.total, 0)
@@ -133,6 +136,40 @@ export default function Dashboard({ onError, notify }: { onError: (e: unknown) =
       onError(e)
       setPaying(false)
     }
+  }
+
+  // Pay one fine alone: a basket of exactly that item, then the same hosted gateway (FN-001).
+  const payOne = async (v: Violation) => {
+    const p = due.find((p) => p.payable.itemRef === v.number)
+    if (!p || payingId) return
+    setPayingId(v.number)
+    try {
+      const basket = await call<{ id: string }>('customer', 'POST', '/v1/me/baskets', { payableIds: [p.payable.id] }, lang)
+      const started = await call<{ redirectUrl: string | null }>('customer', 'POST', `/v1/baskets/${basket.id}/payments`,
+        { method: 'GATEWAY_CARD', returnUrl: `${location.origin}/#/receipt` }, lang)
+      if (started.redirectUrl) location.assign(started.redirectUrl.replace(/^http:\/\/localhost:5173(?=\/mock-gateway\/)/, location.origin))
+    } catch (e) {
+      onError(e)
+    } finally {
+      setPayingId(null)
+    }
+  }
+
+  // A CSV statement of every fine on the file (field codes kept for the record; amounts in minor units).
+  const downloadFinesCsv = () => {
+    const esc = (s: string | number) => `"${String(s).replace(/"/g, '""')}"`
+    const csv = [
+      'violation,status,amount_minor,currency,black_points,location,occurred_at,region',
+      ...d.violations.map((v) => [v.number, v.status, v.fineMinor, 'XTS', v.blackPoints, v.location, v.occurredAt, v.region].map(esc).join(',')),
+    ].join('\n')
+    const url = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `itms-fines-${d.file.fileNumber}.csv`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
   }
 
   return (
@@ -199,8 +236,20 @@ export default function Dashboard({ onError, notify }: { onError: (e: unknown) =
         </Card>
         <Card className="span-2" title={t.violations} icon={<Camera size={16} />} right={<span className="pill">{d.violations.length}</span>}>
           {d.violations.length === 0 ? <div className="empty">{t.noViolations}</div> : (
-            <div className="list">
-              {d.violations.slice(0, 6).map((v) => (
+            <>
+              <div style={{ display: 'flex', gap: 6, margin: '2px 0 8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                {([['all', 'الكل', 'All'], ['OPEN', 'مفتوحة', 'Open'], ['PAID', 'مدفوعة', 'Paid']] as const).map(([k, a, e]) => (
+                  <button key={k} className={`chip ${fineFilter === k ? 'on' : ''}`} aria-pressed={fineFilter === k} onClick={() => setFineFilter(k)}>
+                    {lang === 'ar' ? a : e} <span style={{ opacity: 0.55 }}>{fineFilter === 'all' && k === 'all' ? d.violations.length : d.violations.filter((v) => v.status === k).length}</span>
+                  </button>
+                ))}
+                <button className="btn ghost" style={{ marginInlineStart: 'auto', padding: '5px 10px' }} onClick={downloadFinesCsv}
+                  title={lang === 'ar' ? 'تنزيل كشف كل الغرامات كملف CSV' : 'Download a CSV statement of every fine'}>
+                  <Download size={14} /> {lang === 'ar' ? 'كشف الغرامات' : 'Fines CSV'}
+                </button>
+              </div>
+              <div className="list">
+                {shownFines.slice(0, 6).map((v) => (
                 <div className={`row ${fresh.has(v.number) ? 'fresh' : ''}`} key={v.number}>
                   <div className={`ico ${v.status === 'PAID' ? 'green' : 'red'}`}><Camera size={17} /></div>
                   <div className="grow">
@@ -215,11 +264,21 @@ export default function Dashboard({ onError, notify }: { onError: (e: unknown) =
                   <div className="amount">{money(v.fineMinor, currency, lang)}</div>
                   {paused.has(v.number) ? <span className="pill info">{t.underObjection}</span> : <StatusPill s={v.status} />}
                   {v.status === 'OPEN' && !paused.has(v.number) && (
-                    <button className="btn ghost" style={{ padding: '6px 10px' }} onClick={() => setObjecting(v.number)}>{t.object}</button>
+                    <>
+                      {!due.some((p) => p.payable.itemRef === v.number) ? null : (
+                        <button className="btn ghost" style={{ padding: '6px 10px' }} onClick={() => payOne(v)} disabled={payingId !== null || paying}
+                          title={lang === 'ar' ? 'ادفع هذه المخالفة وحدها' : 'Pay this fine alone'}>
+                          <CreditCard size={14} /> {payingId === v.number ? t.paying : (lang === 'ar' ? 'دفع' : 'Pay')}
+                        </button>
+                      )}
+                      <button className="btn ghost" style={{ padding: '6px 10px' }} onClick={() => setObjecting(v.number)}>{t.object}</button>
+                    </>
                   )}
                 </div>
               ))}
+              {shownFines.length === 0 && <div className="empty">{lang === 'ar' ? 'لا مخالفات في هذا العرض' : 'No fines in this view'}</div>}
             </div>
+            </>
           )}
         </Card>
         <Card className="span-2" title={t.transactions} icon={<ReceiptText size={16} />}>

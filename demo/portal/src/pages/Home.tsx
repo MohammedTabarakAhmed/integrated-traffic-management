@@ -1,4 +1,4 @@
-import { LayoutDashboard, MousePointerClick, Radar, ShieldCheck, User, UserCheck, LogIn } from 'lucide-react'
+import { MousePointerClick, ShieldCheck, User, UserCheck } from 'lucide-react'
 import { useState } from 'react'
 import { CountUp } from '../components'
 import { useI18n } from '../i18n'
@@ -48,7 +48,7 @@ function node(p: { n: string; left: string; top: string }) {
   )
 }
 
-export default function Home({ go, onCustomer, onStaff, onChecker }: { go: (r: string) => void; onCustomer: () => void; onStaff: (u: string, p: string) => void; onChecker: (u: string, p: string) => void }) {
+export default function Home({ onCustomer, onStaff, onChecker }: { onCustomer: () => void; onStaff: (u: string, p: string) => void; onChecker: (u: string, p: string) => void }) {
   const { t, lang } = useI18n()
   const ar = lang === 'ar'
   // Credential prompts: officer/supervisor must enter their own user name and password; nothing is signed in silently.

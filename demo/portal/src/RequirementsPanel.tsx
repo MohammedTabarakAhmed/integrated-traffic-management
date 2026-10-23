@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ListChecks, Play, ChevronRight, AlertCircle, CheckCircle2, Clock } from 'lucide-react'
+import { ListChecks, ChevronRight, AlertCircle, CheckCircle2, Clock } from 'lucide-react'
 
 // Compact live requirements panel for the sidebar: counts per status, per-module progress bars,
 // and a "view all" link. Reads the same /demo/ledger the requirements page reads.

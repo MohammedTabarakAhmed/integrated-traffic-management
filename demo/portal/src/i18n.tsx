@@ -9,6 +9,7 @@ const en = {
   heroB: 'One live platform.',
   tagline: 'One national platform for traffic files, licences, vehicles, violations, payments and more.',
   signInNational: 'Sign in with National Digital ID',
+  who: 'Signed in as',
   signOut: 'Sign out',
   language: 'العربية',
   nav: {
@@ -114,6 +115,7 @@ const ar: Dict = {
   heroB: 'منصة واحدة حيّة.',
   tagline: 'منصة وطنية واحدة للملفات المرورية والرخص والمركبات والمخالفات والمدفوعات وغيرها.',
   signInNational: 'الدخول بالهوية الرقمية الوطنية',
+  who: 'مسجّل الدخول باسم',
   signOut: 'تسجيل الخروج',
   language: 'English',
   nav: {

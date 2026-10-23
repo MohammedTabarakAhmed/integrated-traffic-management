@@ -7,6 +7,7 @@ import gov.itms.vehicle.domain.Records;
 import gov.itms.vehicle.domain.Registration;
 import gov.itms.vehicle.domain.Vehicle;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -43,16 +44,17 @@ class VehicleController {
     record SpecDto(@NotBlank String engineNo, @NotBlank String make, @NotBlank String model, int modelYear,
                    @NotBlank String bodyType, @NotNull @Size(min = 1, max = 3) List<@NotBlank String> colours,
                    @NotBlank String fuelType, @NotBlank String steering, int seats, int emptyWeightKg,
-                   int grossWeightKg, int axles, int cylinders, @NotBlank String category) {
+                   int grossWeightKg, int axles, int cylinders, @NotBlank String category,
+                   @Min(1) @Max(20_000) Integer engineCapacityCc, @Size(max = 40) String origin) {
         Vehicle.Spec toDomain() {
             return new Vehicle.Spec(engineNo, make, model, modelYear, bodyType, colours, fuelType, steering, seats,
-                    emptyWeightKg, grossWeightKg, axles, cylinders, category);
+                    emptyWeightKg, grossWeightKg, axles, cylinders, category, engineCapacityCc, origin);
         }
 
         static SpecDto of(Vehicle.Spec s) {
             return new SpecDto(s.engineNo(), s.make(), s.model(), s.modelYear(), s.bodyType(), s.colours(),
                     s.fuelType(), s.steering(), s.seats(), s.emptyWeightKg(), s.grossWeightKg(), s.axles(),
-                    s.cylinders(), s.category());
+                    s.cylinders(), s.category(), s.engineCapacityCc(), s.origin());
         }
     }
 

@@ -1542,6 +1542,10 @@ components:
         axles: { type: integer, minimum: 1, maximum: 20 }
         cylinders: { type: integer, minimum: 0, maximum: 32 }
         category: { $ref: '#/components/schemas/Code' }
+        engineCapacityCc:
+          oneOf: [ { type: integer, minimum: 1, maximum: 20000 }, { type: 'null' } ]
+        origin:
+          oneOf: [ { type: string, pattern: '^[A-Za-z][A-Za-z ]{1,39}$' }, { type: 'null' } ]
     CreateRequest:
       type: object
       additionalProperties: false

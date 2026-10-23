@@ -265,7 +265,7 @@ public class VehicleTransactions implements PaidHandler {
         Vehicle.Spec changed = new Vehicle.Spec(engineNo == null ? s.engineNo() : engineNo, s.make(), s.model(),
                 s.modelYear(), bodyType == null ? s.bodyType() : bodyType, colours == null ? s.colours() : colours,
                 s.fuelType(), s.steering(), s.seats(), s.emptyWeightKg(), s.grossWeightKg(), s.axles(),
-                s.cylinders(), category == null ? s.category() : category);
+                s.cylinders(), category == null ? s.category() : category, s.engineCapacityCc(), s.origin());
         if (changed.equals(s)) {
             throw DomainException.validation("NOTHING_CHANGED", "the request changes nothing", List.of("VL-013"));
         }
@@ -735,7 +735,7 @@ public class VehicleTransactions implements PaidHandler {
                 v.changed(new Vehicle.Spec(r.value("engineNo"), s.make(), s.model(), s.modelYear(),
                         r.value("bodyType"), List.of(r.value("colours").split(",")), s.fuelType(), s.steering(),
                         s.seats(), s.emptyWeightKg(), s.grossWeightKg(), s.axles(), s.cylinders(),
-                        r.value("category")));
+                        r.value("category"), s.engineCapacityCc(), s.origin()));
                 repo.updateVehicle(v);
                 desk.issueCard(v, Records.Delivery.CENTRE, null);
                 yield "CHANGED";

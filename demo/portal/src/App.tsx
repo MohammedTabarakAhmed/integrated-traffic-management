@@ -1,6 +1,6 @@
 import { LiveTicker } from './LiveTicker'
 import { useCallback, useEffect, useState } from 'react'
-import { Bell, BellRing, Bot, Moon, Search, Sun, UserRound, Briefcase, BookOpen, CalendarDays, FileUp, ListChecks, FileBarChart, SlidersHorizontal, Boxes, Braces, ClipboardCheck, Gauge as GaugeIcon, Globe, Home as HomeIcon, LayoutDashboard, LogOut, Radar, Server, ShieldCheck, LogIn, User, CheckCheck, LogIn as LogInIcon } from 'lucide-react'
+import { Bell, BellRing, Bot, Moon, Search, Sun, UserRound, Briefcase, BookOpen, CalendarDays, FileUp, ListChecks, FileBarChart, SlidersHorizontal, Boxes, Braces, ClipboardCheck, Gauge as GaugeIcon, Globe, Home as HomeIcon, LayoutDashboard, LogOut, Radar, Server, ShieldCheck, LogIn } from 'lucide-react'
 import { ApiError, SignedOut, call } from './api'
 import { completeRedirect, load, signInCustomer, signInStaff, signInChecker, signOut } from './auth'
 import { PageBoundary } from './components'
@@ -180,28 +180,14 @@ function InboxBell({ go }: { go: (r: string) => void }) {
   )
 }
 
-// Role sign-in card shown on the home page.
-function RoleCard({ kind, label, sub, icon, acc, onClick }: { kind: string; label: string; sub: string; icon: React.ReactNode; acc: string; onClick: () => void }) {
-  return (
-    <button className="btn primary lg role-card" onClick={onClick} style={{ width: '100%', textAlign: 'start', justifyContent: 'flex-start' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <div style={{ width: 44, height: 44, borderRadius: 12, display: 'grid', placeItems: 'center', background: 'rgba(34, 211, 238, 0.12)', color: 'var(--cyan)', border: '1px solid rgba(34, 211, 238, 0.25)' }}>{icon}</div>
-        <div>
-          <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--text)' }}>{label}</div>
-          <div style={{ color: 'var(--muted)', fontSize: 13 }}>{sub}</div>
-        </div>
-      </div>
-      <div style={{ marginInlineStart: 'auto', fontSize: 13, color: 'var(--muted)' }}>{acc}</div>
-    </button>
-  )
-}
+// Role sign-in cards live in pages/Home.tsx; the home page renders them itself.
 
 export default function App() {
   const { t, lang, toggle } = useI18n()
   const [route, setRoute] = useState<Route>(routeOf)
   const [customer, setCustomer] = useState(() => load('customer'))
-  const [staff, setStaff] = useState(() => load('staff'))
-  const [checker, setChecker] = useState(() => load('checker'))
+  const [, setStaff] = useState(() => load('staff')) // value read via load('staff') when needed
+  const [, setChecker] = useState(() => load('checker'))
   const [kind, setKind] = useState<'customer' | 'staff' | 'checker' | null>(() => {
     if (load('customer')) return 'customer'
     if (load('staff')) return 'staff'
@@ -211,6 +197,9 @@ export default function App() {
   const [toast, setToast] = useState<{ text: string; bad?: boolean } | null>(null)
   const [logoClicks, setLogoClicks] = useState(0)
   const [firstName, setFirstName] = useState<{ en?: string | null; nl?: string | null } | null>(null)
+
+  // Who is signed in, from the claims of the stored session (dev.maker / dev.checker / the citizen).
+  const who = kind ? load(kind)?.claims.preferred_username ?? null : null
 
   // The citizen's first name for the greeting (from their own traffic file).
   useEffect(() => {
@@ -268,7 +257,7 @@ export default function App() {
 
   const signInHeadline = kind ? `Sign in as ${kind}` : 'Welcome to ITMS'
   let page: React.ReactNode
-  if (route === 'home') page = <Home go={go} onCustomer={customerSignIn} onStaff={(u, p) => staffSignIn(u, p)} onChecker={(u, p) => checkerSignIn(u, p)} />
+  if (route === 'home') page = <Home onCustomer={customerSignIn} onStaff={(u, p) => staffSignIn(u, p)} onChecker={(u, p) => checkerSignIn(u, p)} />
   else if (route === 'dashboard') {
     page = customer ? <Dashboard onError={onError} notify={(text) => setToast({ text })} /> : (
       <div className="card" style={{ maxWidth: 520, margin: '8vh auto', textAlign: 'center', padding: 36 }}>
@@ -300,21 +289,20 @@ export default function App() {
   else if (route === 'receipt') page = <Receipt go={go} />
   else page = <div className="card empty" style={{ padding: 60 }}>{t.comingSoon}</div>
 
+  // RBAC: a signed-in role that lacks access to this route never receives the
+  // page content — not even for a moment (no flash before the redirect below).
+  if (kind !== null && !canAccessRoute(kind, route)) {
+    page = <div className="card empty" style={{ padding: 60 }}>{t.comingSoon}</div>
+  }
+
   const signedIn = kind !== null
 
-  // RBAC guard: check if current role can access this route
+  // Redirect, immediately (no timer): a citizen typing #/requirements goes home.
   const hasAccess = canAccessRoute(kind, route)
-  const [showUnauthorized, setShowUnauthorized] = useState(false)
-
   useEffect(() => {
     if (signedIn && !hasAccess) {
-      setShowUnauthorized(true)
-      const timer = setTimeout(() => {
-        setRoute('home')
-        location.hash = '#/home'
-        setShowUnauthorized(false)
-      }, 2000)
-      return () => clearTimeout(timer)
+      setRoute('home')
+      location.hash = '#/home'
     }
   }, [signedIn, hasAccess, route])
 
@@ -332,12 +320,19 @@ export default function App() {
   return (
     <div className={`shell ${signedIn ? '' : 'no-sidebar'}`}>
       <div className="uae-ribbon" aria-hidden="true" />
-      <Hidden go={go} notify={(text) => setToast({ text })} logoClicks={logoClicks} />
+      <Hidden go={go} notify={(text) => setToast({ text })} logoClicks={logoClicks} kind={kind} />
       {signedIn && (
         <aside className="side">
           <div className="logo">
             <div className="logo-mark flag" role="img" aria-label="UAE flag" onClick={() => setLogoClicks((n) => n + 1)}>IT</div>
             <div><b>{t.brand}</b><small>{t.brandLong}</small></div>
+          </div>
+          {/* Identity chip: makes every demo moment unambiguous about which account is acting. */}
+          <div style={{ margin: '6px 2px', padding: '6px 9px', borderRadius: 10, background: 'rgba(34, 211, 238, 0.07)', border: '1px solid rgba(34, 211, 238, 0.18)' }} title={who ?? undefined}>
+            <small style={{ fontSize: 10.5, color: 'var(--muted)' }}>{t.who}</small>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {who || (kind === 'customer' ? 'National ID' : '—')}
+            </div>
           </div>
           {nav.map((s) => (
             <div key={s.sec}>
@@ -349,14 +344,24 @@ export default function App() {
               ))}
             </div>
           ))}
-          <a className="nav-item" href="/api.html" target="_blank" rel="noreferrer"><Braces size={18} />{lang === 'ar' ? 'مستكشف الواجهات' : 'API explorer'}<span className="soon">↗</span></a>
+          {/* API explorer is a staff-only tool: never shown to citizens. */}
+          {kind !== 'customer' && (
+            <a className="nav-item" href="/api.html" target="_blank" rel="noreferrer"><Braces size={18} />{lang === 'ar' ? 'مستكشف الواجهات' : 'API explorer'}<span className="soon">↗</span></a>
+          )}
           <button className="nav-item" onClick={handleSignOut} style={{ marginTop: 12, color: 'var(--red)' }}>
             <LogOut size={16} /> {t.signOut}
           </button>
-          <RequirementsPanel go={go} lang={lang} />
-          <HealthPanel lang={lang} />
+          {/* System internals (requirements, API explorer, health) are staff-only: never shown to citizens. */}
+          {kind !== 'customer' && (
+            <>
+              <RequirementsPanel go={go} lang={lang} />
+              <HealthPanel lang={lang} />
+            </>
+          )}
           <div className="side-foot">
-            <span className="pill ok" style={{ alignSelf: 'flex-start' }}><span className="dot live" /> local stack · gateway :9080</span>
+            {kind !== 'customer' && (
+              <span className="pill ok" style={{ alignSelf: 'flex-start' }}><span className="dot live" /> local stack · gateway :9080</span>
+            )}
             <small className="muted" style={{ fontSize: 11.5 }}>{lang === 'ar' ? 'اضغط ? للاختصارات' : 'Press ? for shortcuts'}</small>
           </div>
         </aside>
@@ -392,7 +397,8 @@ export default function App() {
         <PageBoundary key={route} ar={lang === 'ar'}>{page}</PageBoundary>
       </main>
       {toast && <div className={`toast ${toast.bad ? 'bad' : ''}`} role="status">{toast.text}</div>}
-      {signedIn && <LiveTicker lang={lang} />}
+      {/* The control-room live bar is a staff tool; citizens never see system internals. */}
+      {signedIn && kind !== 'customer' && <LiveTicker lang={lang} />}
       <div className="ambient-particles" aria-hidden="true">
         {Array.from({ length: 8 }, (_, i) => (
           <i key={i} style={{ left: `${10 + (i * 11.25)}%`, top: `${30 + (i * 7)}%`, animationDelay: `${i * 1.8}s` }} />

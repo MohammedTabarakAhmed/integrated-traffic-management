@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Briefcase, CheckCircle2, Gavel, Hand, History, Lock, LockOpen, XCircle, Award, ListChecks } from 'lucide-react'
+import { Briefcase, CheckCircle2, Download, Gavel, Hand, History, Lock, LockOpen, XCircle, Award } from 'lucide-react'
 import { ApiError, call, money, when } from '../api'
-import { load, signInStaff } from '../auth'
+import { autoSignInStaff, load } from '../auth'
 import { Card, Drawer, Skeleton, StatusPill, tabFromLink, Timeline } from '../components'
 import { useI18n } from '../i18n'
 import { nameOf } from '../names'
@@ -33,7 +33,7 @@ export default function BackOffice({ notify }: { notify: (t: string, bad?: boole
 
   useEffect(() => {
     const pw = import.meta.env.VITE_ITMS_CHECKER_PASSWORD as string | undefined
-    if (!ready && pw) signInStaff('dev.checker', pw, 'checker').then(() => setReady(true)).catch(() => {})
+    if (!ready && pw) autoSignInStaff('dev.checker', pw, 'checker').then((s) => { if (s) setReady(true) }).catch(() => {})
   }, [ready])
 
   const c = <T,>(m: 'GET' | 'POST', p: string, b?: unknown) => call<T>('checker', m, p, b, lang)
@@ -66,6 +66,22 @@ export default function BackOffice({ notify }: { notify: (t: string, bad?: boole
   const openHistory = (i: Item) => {
     setHistory({ item: i, rows: null })
     c<{ items: ItemHistory[] }>('GET', `/v1/work-items/${i.id}/history`).then((r) => setHistory({ item: i, rows: r.items })).catch(fail)
+  }
+  // The work queue as a CSV file for the test report (field codes kept; amounts not part of the queue).
+  const exportQueueCsv = (its: Item[]) => {
+    const esc = (s: string) => `"${String(s).replace(/"/g, '""')}"`
+    const csv = [
+      'reference,service,step,status,assignee,created,due,overdue',
+      ...its.map((i) => [i.reference, i.serviceCode, i.stepCode, i.status, i.assignee ?? 'unassigned', i.createdAt, i.dueAt ?? '', i.overdue ? 'yes' : 'no'].map(esc).join(',')),
+    ].join('\n')
+    const url = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `itms-work-queue-${new Date().toISOString().slice(0, 10)}.csv`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
   }
   const lift = async (h: Hold) => {
     setBusy(h.id)
@@ -145,7 +161,13 @@ export default function BackOffice({ notify }: { notify: (t: string, bad?: boole
       {tab === 'queue' && (
         <Card title={ar ? 'قائمة عمل موظف الحالات' : 'Case-officer work queue'} icon={<Briefcase size={16} />} right={<span className="pill">CC-060 · CC-063</span>}>
           {items === null ? <Skeleton /> : items.length === 0 ? <div className="empty">{ar ? 'القائمة فارغة' : 'The queue is empty'}</div> : (
-            <div className="list">{items.map((i) => (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', margin: '0 0 8px' }}>
+                <button className="btn ghost" onClick={() => exportQueueCsv(items)} title={ar ? 'تنزيل القائمة كملف CSV' : 'Download the queue as a CSV file'}>
+                  <Download size={15} /> {ar ? 'تصدير CSV' : 'Export CSV'}
+                </button>
+              </div>
+              <div className="list">{items.map((i) => (
               <div className="row" key={i.id}>
                 <div className={`ico ${i.overdue ? 'red' : 'cyan'}`}><Briefcase size={16} /></div>
                 <div className="grow">
@@ -159,6 +181,7 @@ export default function BackOffice({ notify }: { notify: (t: string, bad?: boole
                   <button className="btn danger" disabled={busy === i.id} onClick={() => close(i, 'REJECTED')}>{ar ? 'رفض' : 'Reject'}</button></>}
                 <button className="btn ghost" onClick={() => openHistory(i)} aria-label="History"><History size={15} /></button>
               </div>))}</div>
+            </>
           )}
         </Card>
       )}

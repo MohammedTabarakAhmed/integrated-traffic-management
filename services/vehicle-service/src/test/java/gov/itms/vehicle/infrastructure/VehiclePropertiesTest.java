@@ -53,4 +53,18 @@ class VehiclePropertiesTest {
         assertThatThrownBy(() -> props(List.of(), 12, 30, new VehicleProperties.Insurance(null,
                 Duration.ofSeconds(3)))).hasMessageContaining("insurance.base-url");
     }
+
+    @Test
+    @Tag("VL-004")
+    @DisplayName("VL-004: the default category list carries all twelve BRD categories with their rules")
+    void defaultCategories() throws Exception {
+        String yml = java.nio.file.Files.readString(java.nio.file.Path.of(
+                System.getProperty("user.dir"), "src", "main", "resources", "application.yml"));
+        String block = yml.substring(yml.indexOf("categories:"),
+                yml.indexOf("# Increment 2 transactions"));
+        assertThat(List.of("PRIVATE", "COMMERCIAL", "PUBLIC_TRANSPORT", "RENTAL", "GOVERNMENT", "MILITARY",
+                "SECURITY_SERVICES", "DIPLOMATIC", "TRIAL", "EXPORT", "CLASSIC", "HEAVY_EQUIPMENT"))
+                .allSatisfy(code -> assertThat(block).contains("code: " + code));
+        assertThat(block).contains("validity-months").contains("inspection-exempt-years").contains("plate-category");
+    }
 }

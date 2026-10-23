@@ -94,11 +94,11 @@ export function Gauge({ value, max, label }: { value: number; max: number; label
   )
 }
 
-export function Card({ title, icon, right, children, className = '' }: {
-  title?: ReactNode; icon?: ReactNode; right?: ReactNode; children: ReactNode; className?: string
+export function Card({ title, icon, right, children, className = '', style }: {
+  title?: ReactNode; icon?: ReactNode; right?: ReactNode; children: ReactNode; className?: string; style?: React.CSSProperties
 }) {
   return (
-    <section className={`card ${className}`}>
+    <section className={`card ${className}`} style={style}>
       {title && <h3>{icon}{title}{right && <span className="right">{right}</span>}</h3>}
       {children}
     </section>

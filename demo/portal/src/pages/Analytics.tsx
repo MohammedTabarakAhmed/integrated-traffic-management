@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Activity, Car, Fingerprint, Link2, Siren, Wallet, Camera, ListChecks } from 'lucide-react'
 import { call, money } from '../api'
-import { load, signInStaff } from '../auth'
+import { autoSignInStaff, load } from '../auth'
 import { Card, CountUp, Kpi } from '../components'
 import { useI18n } from '../i18n'
 
@@ -29,7 +29,7 @@ export default function Analytics() {
 
   useEffect(() => {
     const pw = import.meta.env.VITE_ITMS_CHECKER_PASSWORD as string | undefined
-    if (!checker && pw) signInStaff('dev.checker', pw, 'checker').then(setChecker).catch(() => {})
+    if (!checker && pw) autoSignInStaff('dev.checker', pw, 'checker').then((s) => { if (s) setChecker(s) }).catch(() => {})
   }, [checker])
 
   const loadReports = useCallback(async () => {
@@ -58,9 +58,7 @@ export default function Analytics() {
     const a = setInterval(loadFeed, 4000)
     const b = setInterval(loadReports, 15000)
     return () => { clearInterval(a); clearInterval(b) }
-  }, [checker, loadReports, loadFeed, verify])
-
-  // 7 days on the x axis, even when a day has no events.
+  }, [checker, loadReports, loadFeed, verify])  // 7 days on the x axis, even when a day has no events.
   const days = Array.from({ length: 7 }, (_, i) => day(new Date(Date.now() - (6 - i) * 86_400_000)))
   const sum = (code: string, d: string, f: 'count' | 'amountMinor') =>
     (runs[code]?.rows ?? []).filter((r) => r.period === d).reduce((s, r) => s + (r[f] ?? 0), 0)
@@ -74,10 +72,18 @@ export default function Analytics() {
   const total = (code: string, f: 'count' | 'amountMinor') => (runs[code]?.rows ?? []).reduce((s, r) => s + (r[f] ?? 0), 0)
   const tip = { contentStyle: { background: '#111a2e', border: '1px solid rgba(148,163,214,0.28)', borderRadius: 12, color: '#e8edf9' } }
 
-  if (!checker) return <div className="card empty">{ar ? 'جارٍ دخول المدقق…' : 'Signing in the auditor (dev.checker)…'}</div>
+  // The page paints at once; the reporting runs and the audit feed fill in when the auditor
+  // sign-in (dev.checker) lands. Blocking the whole page on that sign-in was why the graphs
+  // seemed to load very late (dev.maker holds neither report.read nor audit.read).
+  const auditorNotice = checker ? null : (
+    <div className="card empty" style={{ padding: '10px 16px', marginBottom: 14, fontSize: 13 }}>
+      {ar ? 'جارٍ دخول المدقق (dev.checker) — تظهر الرسوم عند وصول البيانات…' : 'Signing in the auditor (dev.checker) — the graphs fill in as the reporting runs land…'}
+    </div>
+  )
 
   return (
     <>
+      {auditorNotice}
       <div className="grid g-4" style={{ marginBottom: 18 }}>
         <Kpi tone="amber" icon={<Camera size={18} />} value={<CountUp to={total('VIOLATIONS_RECORDED', 'count')} />} label={ar ? 'مخالفات مسجلة (7 أيام)' : 'Violations recorded (7 days)'} />
         <Kpi tone="green" icon={<Wallet size={18} />} value={money(total('PAYMENTS_CONFIRMED', 'amountMinor'), 'XTS', lang)} label={ar ? 'إيرادات محصلة' : 'Revenue collected'} />

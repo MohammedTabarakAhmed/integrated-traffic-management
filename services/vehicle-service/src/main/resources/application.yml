@@ -61,12 +61,18 @@ itms:
       base-url: ${ITMS_INSURANCE_HUB_URL:http://localhost:8097}
       timeout: ${ITMS_INSURANCE_HUB_TIMEOUT:3s}
     categories:
+      # VL-004: the twelve BRD categories. Plate categories map onto the series that exist locally; the move to
+      # reference data (CC-110) supersedes this list.
       - { code: PRIVATE, validity-months: 12, inspection-exempt-years: 3, plate-category: PRIVATE }
       - { code: COMMERCIAL, validity-months: 12, inspection-exempt-years: 0, plate-category: COMMERCIAL }
       - { code: PUBLIC_TRANSPORT, validity-months: 12, inspection-exempt-years: 0, plate-category: PUBLIC }
       - { code: RENTAL, validity-months: 12, inspection-exempt-years: 1, plate-category: RENTAL }
       - { code: GOVERNMENT, validity-months: 12, inspection-exempt-years: 3, plate-category: GOVERNMENT }
+      - { code: MILITARY, validity-months: 12, inspection-exempt-years: 3, plate-category: GOVERNMENT }
+      - { code: SECURITY_SERVICES, validity-months: 12, inspection-exempt-years: 3, plate-category: GOVERNMENT }
       - { code: DIPLOMATIC, validity-months: 12, inspection-exempt-years: 3, plate-category: DIPLOMATIC }
+      - { code: TRIAL, validity-months: 12, inspection-exempt-years: 0, plate-category: PRIVATE }
+      - { code: EXPORT, validity-months: 12, inspection-exempt-years: 0, plate-category: COMMERCIAL }
       - { code: CLASSIC, validity-months: 12, inspection-exempt-years: 0, plate-category: CLASSIC }
       - { code: HEAVY_EQUIPMENT, validity-months: 12, inspection-exempt-years: 0, plate-category: HEAVY }
     # Increment 2 transactions (ADR-059). BRD defaults: reservation 10 working days (VL-033), retention 12 months

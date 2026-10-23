@@ -26,7 +26,7 @@ public final class Vehicle {
     /** Technical data (VL-001); codes come from reference lists (makes, models, colours, fuel types...). */
     public record Spec(String engineNo, String make, String model, int modelYear, String bodyType, List<String> colours,
                        String fuelType, String steering, int seats, int emptyWeightKg, int grossWeightKg, int axles,
-                       int cylinders, String category) {
+                       int cylinders, String category, Integer engineCapacityCc, String origin) {
         public Spec {
             if (engineNo == null || !engineNo.matches("^[A-Z0-9-]{1,40}$")) {
                 throw invalid("engineNo");
@@ -49,6 +49,14 @@ public final class Vehicle {
                     || axles > 20 || cylinders < 0 || cylinders > 32) {
                 throw DomainException.validation("VEHICLE_DATA_INVALID", "a technical value is out of range",
                         List.of("VL-001"));
+            }
+            // VL-001: engine capacity in cc and the origin recorded when present (interim formats until reference
+            // data, CC-110)
+            if (engineCapacityCc != null && (engineCapacityCc < 1 || engineCapacityCc > 20_000)) {
+                throw invalid("engineCapacityCc");
+            }
+            if (origin != null && !origin.matches("^[A-Za-z][A-Za-z ]{1,39}$")) {
+                throw invalid("origin");
             }
         }
     }

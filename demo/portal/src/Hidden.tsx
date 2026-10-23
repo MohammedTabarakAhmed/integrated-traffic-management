@@ -11,6 +11,14 @@ import { useI18n } from './i18n'
 // On UAE National Day (2 December) and Flag Day (3 November) the celebration plays once by itself.
 
 const GO: Record<string, string> = { d: 'dashboard', c: 'control', m: 'modules', b: 'backoffice', a: 'analytics', q: 'qa', p: 'platform', o: 'home', r: 'requirements', s: 'guide' }
+// Where the g-prefixed shortcuts may go, per role; citizens only reach their own pages.
+const CAN_GO: Record<string, Set<string>> = {
+  customer: new Set(['dashboard', 'home', 'guide']),
+  staff: new Set(['dashboard', 'control', 'modules', 'backoffice', 'analytics', 'qa', 'platform', 'home', 'requirements', 'guide']),
+  checker: new Set(['modules', 'backoffice', 'analytics', 'qa', 'platform', 'home', 'requirements', 'guide']),
+}
+const anonymous: Set<string> = new Set(Object.values(GO)) // signed-out visitors keep everything (demo walk)
+
 const KONAMI = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'b', 'a']
 const FLAG = ['#e4002b', '#00843d', '#ffffff', '#000000']
 const typing = (e: KeyboardEvent) => {
@@ -41,9 +49,11 @@ export function Celebration({ onDone }: { onDone: () => void }) {
   )
 }
 
-export default function Hidden({ go, notify, logoClicks }: { go: (r: string) => void; notify: (t: string) => void; logoClicks: number }) {
+export default function Hidden({ go, notify, logoClicks, kind }: { go: (r: string) => void; notify: (t: string) => void; logoClicks: number; kind: Kind | null }) {
   const { lang, toggle } = useI18n()
   const ar = lang === 'ar'
+  // Citizens never get system internals (dev panel, staff shortcuts); anonymous visitors keep everything.
+  const asStaff = kind !== 'customer'
   const [sheet, setSheet] = useState(false)
   const [party, setParty] = useState(false)
   const [dev, setDev] = useState(false)
@@ -65,7 +75,7 @@ export default function Hidden({ go, notify, logoClicks }: { go: (r: string) => 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  useEffect(() => { if (logoClicks >= 5 && logoClicks % 5 === 0) setDev(true) }, [logoClicks])
+  useEffect(() => { if (asStaff && logoClicks >= 5 && logoClicks % 5 === 0) setDev(true) }, [logoClicks, asStaff])
   useEffect(() => {
     if (!dev) return
     const on = () => setTick((n) => n + 1)
@@ -79,7 +89,13 @@ export default function Hidden({ go, notify, logoClicks }: { go: (r: string) => 
       if (KONAMI.every((k, i) => seq.current[i] === k)) { seq.current = []; celebrate(); return }
       if (typing(e) || e.ctrlKey || e.metaKey || e.altKey) return
       if (e.key === 'Escape') { setSheet(false); setDev(false); return }
-      if (Date.now() - g.current < 1200 && GO[e.key]) { g.current = 0; go(GO[e.key]); return }
+      const target = GO[e.key]
+      if (Date.now() - g.current < 1200 && target) {
+        g.current = 0
+        const allowed = kind ? CAN_GO[kind] : anonymous
+        if (allowed && allowed.has(target)) go(target)
+        return
+      }
       if (e.key === 'g') { g.current = Date.now(); return }
       if (e.key === '?') setSheet((s) => !s)
       else if (e.key === 't') (document.querySelector('[data-theme-toggle]') as HTMLButtonElement | null)?.click()
@@ -90,7 +106,7 @@ export default function Hidden({ go, notify, logoClicks }: { go: (r: string) => 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [go, toggle, ar])
 
-  const keys: [string, string, string][] = [
+  const keysAll: [string, string, string][] = [
     ['Ctrl K', 'Jump to any page', 'الانتقال لأي صفحة'],
     ['?', 'This list', 'هذه القائمة'],
     ['g d', 'My dashboard', 'لوحتي'], ['g c', 'Control room', 'غرفة التحكم'], ['g m', 'Modules', 'الوحدات'],
@@ -100,6 +116,9 @@ export default function Hidden({ go, notify, logoClicks }: { go: (r: string) => 
     ['↑↑↓↓←→←→ B A', 'A little surprise', 'مفاجأة صغيرة'],
     ['Logo × 5', 'Developer panel', 'لوحة المطوّر'],
   ]
+  // The shortcuts sheet only advertises what the signed-in role may reach.
+  const STAFF_KEYS = ['g c', 'g m', 'g b', 'g a', 'g r', 'g q', 'Logo × 5']
+  const keys = keysAll.filter(([k]) => asStaff || !STAFF_KEYS.includes(k))
   const sessions = (['customer', 'staff', 'checker'] as Kind[]).map((k) => [k, load(k)] as const).filter(([, s]) => s)
 
   return (

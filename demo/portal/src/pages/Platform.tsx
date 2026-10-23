@@ -6,37 +6,37 @@ import { Card } from '../components'
 import { useI18n } from '../i18n'
 
 // Platform (Increments 0 and 14): the architecture as it runs now (probe of every service plus Prometheus request
-// rates), the increment roadmap and the engineering evidence. Figures are those recorded in the project guide §2-§3.
+// rates), the increment roadmap and the engineering evidence. Figures are those recorded in the project guide Â§2-Â§3.
 
 type Svc = { name: string; port: number; group: string; up: boolean; ms: number | null }
 type Health = { services: Svc[]; infra: { name: string; up: boolean; ms: number | null }[] }
 
 const GROUPS: [string, string, string][] = [
-  ['shared', 'Shared services', 'الخدمات المشتركة'], ['vehicles', 'Vehicles', 'المركبات'], ['licensing', 'Licensing', 'الترخيص'],
-  ['violations', 'Violations', 'المخالفات'], ['revenue', 'Revenue', 'الإيرادات'], ['accidents', 'Accidents', 'الحوادث'],
-  ['permits', 'Permits & rental', 'التصاريح والتأجير'], ['road', 'Road & marine', 'الطرق والملاحة'], ['crossborder', 'Cross-border', 'عبر الحدود'],
-  ['channels', 'Channels', 'القنوات'], ['analytics', 'Analytics', 'التحليلات'],
+  ['shared', 'Shared services', 'Ø§Ù„Ø®Ø¯Ù…Ø§Øª Ø§Ù„Ù…Ø´ØªØ±ÙƒØ©'], ['vehicles', 'Vehicles', 'Ø§Ù„Ù…Ø±ÙƒØ¨Ø§Øª'], ['licensing', 'Licensing', 'Ø§Ù„ØªØ±Ø®ÙŠØµ'],
+  ['violations', 'Violations', 'Ø§Ù„Ù…Ø®Ø§Ù„ÙØ§Øª'], ['revenue', 'Revenue', 'Ø§Ù„Ø¥ÙŠØ±Ø§Ø¯Ø§Øª'], ['accidents', 'Accidents', 'Ø§Ù„Ø­ÙˆØ§Ø¯Ø«'],
+  ['permits', 'Permits & rental', 'Ø§Ù„ØªØµØ§Ø±ÙŠØ­ ÙˆØ§Ù„ØªØ£Ø¬ÙŠØ±'], ['road', 'Road & marine', 'Ø§Ù„Ø·Ø±Ù‚ ÙˆØ§Ù„Ù…Ù„Ø§Ø­Ø©'], ['crossborder', 'Cross-border', 'Ø¹Ø¨Ø± Ø§Ù„Ø­Ø¯ÙˆØ¯'],
+  ['channels', 'Channels', 'Ø§Ù„Ù‚Ù†ÙˆØ§Øª'], ['analytics', 'Analytics', 'Ø§Ù„ØªØ­Ù„ÙŠÙ„Ø§Øª'],
 ]
 
-// State per increment as recorded in the project guide §3 (code done / partial / not started); the demo is not acceptance.
+// State per increment as recorded in the project guide Â§3 (code done / partial / not started); the demo is not acceptance.
 const ROADMAP: [string, string, string, 'done' | 'partial' | 'next'][] = [
-  ['0', 'Walking skeleton', 'الهيكل الأولي', 'done'], ['1', 'Shared services', 'الخدمات المشتركة', 'done'],
-  ['2', 'Vehicles & plates', 'المركبات واللوحات', 'done'], ['3', 'Licensing & exams', 'الترخيص والاختبارات', 'done'],
-  ['4', 'Violations', 'المخالفات', 'partial'], ['5', 'Revenue', 'الإيرادات', 'partial'], ['6', 'Accidents', 'الحوادث', 'partial'],
-  ['7', 'Permits & rental', 'التصاريح والتأجير', 'partial'], ['8', 'Road & marine', 'الطرق والملاحة', 'partial'],
-  ['9', 'Cross-border', 'عبر الحدود', 'done'], ['10', 'Digital channels & UI', 'القنوات الرقمية', 'partial'],
-  ['11', 'Reporting & analytics', 'التقارير والتحليلات', 'partial'], ['12', 'Data migration', 'ترحيل البيانات', 'next'],
-  ['13', 'AI & agents', 'الذكاء الاصطناعي', 'next'], ['14', 'Hardening & acceptance', 'التحصين والقبول', 'next'],
+  ['0', 'Walking skeleton', 'Ø§Ù„Ù‡ÙŠÙƒÙ„ Ø§Ù„Ø£ÙˆÙ„ÙŠ', 'done'], ['1', 'Shared services', 'Ø§Ù„Ø®Ø¯Ù…Ø§Øª Ø§Ù„Ù…Ø´ØªØ±ÙƒØ©', 'done'],
+  ['2', 'Vehicles & plates', 'Ø§Ù„Ù…Ø±ÙƒØ¨Ø§Øª ÙˆØ§Ù„Ù„ÙˆØ­Ø§Øª', 'done'], ['3', 'Licensing & exams', 'Ø§Ù„ØªØ±Ø®ÙŠØµ ÙˆØ§Ù„Ø§Ø®ØªØ¨Ø§Ø±Ø§Øª', 'done'],
+  ['4', 'Violations', 'Ø§Ù„Ù…Ø®Ø§Ù„ÙØ§Øª', 'partial'], ['5', 'Revenue', 'Ø§Ù„Ø¥ÙŠØ±Ø§Ø¯Ø§Øª', 'partial'], ['6', 'Accidents', 'Ø§Ù„Ø­ÙˆØ§Ø¯Ø«', 'partial'],
+  ['7', 'Permits & rental', 'Ø§Ù„ØªØµØ§Ø±ÙŠØ­ ÙˆØ§Ù„ØªØ£Ø¬ÙŠØ±', 'partial'], ['8', 'Road & marine', 'Ø§Ù„Ø·Ø±Ù‚ ÙˆØ§Ù„Ù…Ù„Ø§Ø­Ø©', 'partial'],
+  ['9', 'Cross-border', 'Ø¹Ø¨Ø± Ø§Ù„Ø­Ø¯ÙˆØ¯', 'done'], ['10', 'Digital channels & UI', 'Ø§Ù„Ù‚Ù†ÙˆØ§Øª Ø§Ù„Ø±Ù‚Ù…ÙŠØ©', 'partial'],
+  ['11', 'Reporting & analytics', 'Ø§Ù„ØªÙ‚Ø§Ø±ÙŠØ± ÙˆØ§Ù„ØªØ­Ù„ÙŠÙ„Ø§Øª', 'partial'], ['12', 'Data migration', 'ØªØ±Ø­ÙŠÙ„ Ø§Ù„Ø¨ÙŠØ§Ù†Ø§Øª', 'next'],
+  ['13', 'AI & agents', 'Ø§Ù„Ø°ÙƒØ§Ø¡ Ø§Ù„Ø§ØµØ·Ù†Ø§Ø¹ÙŠ', 'next'], ['14', 'Hardening & acceptance', 'Ø§Ù„ØªØ­ØµÙŠÙ† ÙˆØ§Ù„Ù‚Ø¨ÙˆÙ„', 'next'],
 ]
 
 const EVIDENCE: [string, string, string][] = [
-  ['833', 'automated tests (unit, integration, contract)', 'اختبارًا آليًا'],
-  ['29', 'Maven modules, clean -Psast verify', 'وحدة Maven'],
-  ['57', 'smoke steps green on the running stack', 'خطوة دخان ناجحة'],
-  ['≥80%', 'business-logic coverage gate (JaCoCo)', 'حد التغطية'],
+  ['833', 'automated tests (unit, integration, contract)', 'Ø§Ø®ØªØ¨Ø§Ø±Ù‹Ø§ Ø¢Ù„ÙŠÙ‹Ø§'],
+  ['29', 'Maven modules, clean -Psast verify', 'ÙˆØ­Ø¯Ø© Maven'],
+  ['57', 'smoke steps green on the running stack', 'Ø®Ø·ÙˆØ© Ø¯Ø®Ø§Ù† Ù†Ø§Ø¬Ø­Ø©'],
+  ['â‰¥80%', 'business-logic coverage gate (JaCoCo)', 'Ø­Ø¯ Ø§Ù„ØªØºØ·ÙŠØ©'],
 ]
 const TOOLS = ['ArchUnit layers', 'SpotBugs + FindSecBugs', 'OWASP Dependency-Check', 'CycloneDX SBOM', 'gitleaks', 'OpenAPI 3.1 lint', 'Testcontainers', 'RFC 9457 errors', 'Idempotency-Key', 'Transactional outbox', 'Hash-chained audit', 'Maker-checker']
-const REQS = [{ name: 'Verified', ar: 'متحقق', value: 126, color: '#34d399' }, { name: 'In progress', ar: 'قيد التنفيذ', value: 140, color: '#6366f1' }, { name: 'Not started', ar: 'لم يبدأ', value: 172, color: '#334155' }]
+const REQS = [{ name: 'Verified', ar: 'Ù…ØªØ­Ù‚Ù‚', value: 126, color: '#34d399' }, { name: 'In progress', ar: 'Ù‚ÙŠØ¯ Ø§Ù„ØªÙ†ÙÙŠØ°', value: 140, color: '#6366f1' }, { name: 'Not started', ar: 'Ù„Ù… ÙŠØ¨Ø¯Ø£', value: 172, color: '#334155' }]
 
 export default function Platform() {
   const { lang } = useI18n()
@@ -62,11 +62,11 @@ export default function Platform() {
   const up = h ? h.services.filter((s) => s.up).length : 0
   return (
     <>
-      <Card title={ar ? 'البنية الحية' : 'Live architecture'} icon={<Network size={16} />}
-        right={<span className={`pill ${h && up === h.services.length ? 'ok' : 'warn'}`}><span className="dot live" /> {up}/{h?.services.length ?? 27} {ar ? 'خدمة تعمل' : 'services up'}</span>}>
+      <Card title={ar ? 'Ø§Ù„Ø¨Ù†ÙŠØ© Ø§Ù„Ø­ÙŠØ©' : 'Live architecture'} icon={<Network size={16} />}
+        right={<span className={`pill ${h && up === h.services.length ? 'ok' : 'warn'}`}><span className="dot live" /> {up}/{h?.services.length ?? 27} {ar ? 'Ø®Ø¯Ù…Ø© ØªØ¹Ù…Ù„' : 'services up'}</span>}>
         <div className="arch">
           <div className="arch-row">
-            {[['Citizen portal', 'بوابة المتعامل', <Smartphone size={15} key="a" />], ['Staff console', 'وحدة الموظفين', <Boxes size={15} key="b" />], ['Partners', 'الشركاء', <Radio size={15} key="c" />]].map(([en, a, icon]) => (
+            {[['Citizen portal', 'Ø¨ÙˆØ§Ø¨Ø© Ø§Ù„Ù…ØªØ¹Ø§Ù…Ù„', <Smartphone size={15} key="a" />], ['Staff console', 'ÙˆØ­Ø¯Ø© Ø§Ù„Ù…ÙˆØ¸ÙÙŠÙ†', <Boxes size={15} key="b" />], ['Partners', 'Ø§Ù„Ø´Ø±ÙƒØ§Ø¡', <Radio size={15} key="c" />]].map(([en, a, icon]) => (
               <div key={en as string} className="arch-chip">{icon}{ar ? a : en}</div>))}
           </div>
           <div className="arch-flow" />
@@ -85,7 +85,7 @@ export default function Platform() {
                   {list.map((s) => (
                     <div key={s.name} className={`svc ${s.up ? '' : 'down'}`} title={`${s.name}-service :${s.port}`}>
                       <span className="dot" /><span className="grow">{s.name}</span>
-                      <span className="mono muted">{rps[s.name] !== undefined ? `${rps[s.name].toFixed(1)}/s` : s.ms !== null ? `${s.ms}ms` : '—'}</span>
+                      <span className="mono muted">{rps[s.name] !== undefined ? `${rps[s.name].toFixed(1)}/s` : s.ms !== null ? `${s.ms}ms` : 'â€”'}</span>
                     </div>
                   ))}
                 </div>
@@ -94,25 +94,25 @@ export default function Platform() {
           </div>
           <div className="arch-flow" />
           <div className="arch-row">
-            <div className="arch-chip bus"><Radio size={15} /> Kafka · CloudEvents · {ar ? 'صندوق صادر معاملاتي' : 'transactional outbox'}</div>
-            <div className="arch-chip"><Database size={15} /> PostgreSQL × 27 · {ar ? 'قاعدة لكل خدمة' : 'one DB per service'}</div>
-            <div className="arch-chip"><ShieldCheck size={15} /> OpenBao · MinIO · ClamAV · OTel</div>
+            <div className="arch-chip bus"><Radio size={15} /> Kafka Â· CloudEvents Â· {ar ? 'ØµÙ†Ø¯ÙˆÙ‚ ØµØ§Ø¯Ø± Ù…Ø¹Ø§Ù…Ù„Ø§ØªÙŠ' : 'transactional outbox'}</div>
+            <div className="arch-chip"><Database size={15} /> PostgreSQL Ã— 27 Â· {ar ? 'Ù‚Ø§Ø¹Ø¯Ø© Ù„ÙƒÙ„ Ø®Ø¯Ù…Ø©' : 'one DB per service'}</div>
+            <div className="arch-chip"><ShieldCheck size={15} /> OpenBao Â· MinIO Â· ClamAV Â· OTel</div>
           </div>
         </div>
       </Card>
       <div className="grid g-3" style={{ marginTop: 18 }}>
-        <Card className="span-2" title={ar ? 'خارطة الطريق: المراحل 0-14' : 'Roadmap: increments 0-14'} icon={<GitBranch size={16} />}>
+        <Card className="span-2" title={ar ? 'Ø®Ø§Ø±Ø·Ø© Ø§Ù„Ø·Ø±ÙŠÙ‚: Ø§Ù„Ù…Ø±Ø§Ø­Ù„ 0-14' : 'Roadmap: increments 0-14'} icon={<GitBranch size={16} />}>
           <div className="roadmap">
             {ROADMAP.map(([n, en, a, st]) => (
               <div key={n} className={`rm ${st}`}>
                 <span className="rm-n">{n}</span>
                 <span className="rm-t">{ar ? a : en}</span>
-                <span className={`pill ${st === 'done' ? 'ok' : st === 'partial' ? 'info' : 'future'}`}>{st === 'done' ? (ar ? 'مبني' : 'built') : st === 'partial' ? (ar ? 'جزئي' : 'partial') : (ar ? 'قادم' : 'coming')}</span>
+                <span className={`pill ${st === 'done' ? 'ok' : st === 'partial' ? 'info' : 'future'}`}>{st === 'done' ? (ar ? 'Ù…Ø¨Ù†ÙŠ' : 'built') : st === 'partial' ? (ar ? 'Ø¬Ø²Ø¦ÙŠ' : 'partial') : (ar ? 'Ù‚Ø§Ø¯Ù…' : 'coming')}</span>
               </div>
             ))}
           </div>
         </Card>
-        <Card title={ar ? 'متطلبات وثيقة الأعمال (438)' : 'BRD requirements (438)'} icon={<ShieldCheck size={16} />}>
+        <Card title={ar ? 'Ù…ØªØ·Ù„Ø¨Ø§Øª ÙˆØ«ÙŠÙ‚Ø© Ø§Ù„Ø£Ø¹Ù…Ø§Ù„ (438)' : 'BRD requirements (438)'} icon={<ShieldCheck size={16} />}>
           <div style={{ height: 190, direction: 'ltr' }}>
             <ResponsiveContainer>
               <PieChart>
@@ -126,7 +126,7 @@ export default function Platform() {
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
             {REQS.map((r) => <span key={r.name} className="pill"><span className="dot" style={{ color: r.color }} /> {ar ? r.ar : r.name} {r.value}</span>)}
           </div>
-          <p className="muted" style={{ fontSize: 12, marginBottom: 0, textAlign: 'center' }}>{ar ? 'تتبع كامل من المتطلب إلى الكود والاختبار' : 'Every requirement traced to code and tests'}</p>
+          <p className="muted" style={{ fontSize: 12, marginBottom: 0, textAlign: 'center' }}>{ar ? 'ØªØªØ¨Ø¹ ÙƒØ§Ù…Ù„ Ù…Ù† Ø§Ù„Ù…ØªØ·Ù„Ø¨ Ø¥Ù„Ù‰ Ø§Ù„ÙƒÙˆØ¯ ÙˆØ§Ù„Ø§Ø®ØªØ¨Ø§Ø±' : 'Every requirement traced to code and tests'}</p>
         </Card>
       </div>
       <div className="grid g-4" style={{ marginTop: 18 }}>
@@ -134,9 +134,9 @@ export default function Platform() {
           <section key={en} className="card kpi"><div className="v grad-text" dir="ltr" style={{ textAlign: 'start' }}>{v}</div><div className="l">{ar ? a : en}</div></section>
         ))}
       </div>
-      <Card title={ar ? 'الهندسة والأمان' : 'Engineering & security built in'} icon={<ShieldCheck size={16} />} className="tools-card">
+      <Card title={ar ? 'Ø§Ù„Ù‡Ù†Ø¯Ø³Ø© ÙˆØ§Ù„Ø£Ù…Ø§Ù†' : 'Engineering & security built in'} icon={<ShieldCheck size={16} />} className="tools-card">
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>{TOOLS.map((t) => <span key={t} className="pill info">{t}</span>)}
-          <a className="btn primary" style={{ marginInlineStart: 'auto' }} href="/api.html" target="_blank" rel="noreferrer"><Braces size={16} /> {ar ? 'افتح مستكشف الواجهات (27 مواصفة)' : 'Open the API explorer (27 specs)'}</a></div>
+          <a className="btn primary" style={{ marginInlineStart: 'auto' }} href="/api.html" target="_blank" rel="noreferrer"><Braces size={16} /> {ar ? 'Ø§ÙØªØ­ Ù…Ø³ØªÙƒØ´Ù Ø§Ù„ÙˆØ§Ø¬Ù‡Ø§Øª (27 Ù…ÙˆØ§ØµÙØ©)' : 'Open the API explorer (27 specs)'}</a></div>
       </Card>
 
       <DemoScript go={(r) => { window.location.hash = `#/${r}` }} lang={lang} />

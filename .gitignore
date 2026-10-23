@@ -11,7 +11,7 @@ __pycache__/
 .pytest_cache/
 
 # IDE / personal tool settings
-.local/settings.local.json
+.local/
 .idea/
 .vscode/
 *.iml
@@ -26,8 +26,17 @@ __pycache__/
 *.jks
 secrets/
 
-# Original BRD binary: authoritative copy lives with the Authority; markdown extracts are tracked
+# Confidential / internal working documents (kept out of the repository; see README)
 main_doc/
+docs/brief/
+docs/BRD_*.md
+docs/DECISIONS.md
+docs/PROGRESS.md
+docs/TRACEABILITY.md
+AGENTS.md
+.local/
+.agent-config
+tools/hooks/
 ~$*
 
 # Generated local dev secrets

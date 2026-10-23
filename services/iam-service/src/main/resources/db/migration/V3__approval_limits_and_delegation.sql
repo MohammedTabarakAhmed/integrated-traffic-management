@@ -3,7 +3,7 @@
 
 -- ---------------------------------------------------------------- approval limits (CC-003)
 
--- Current limits of each role. Values are configuration, never code (the project guide §1.4). A role's limits are replaced
+-- Current limits of each role. Values are configuration, never code (the project guide Â§1.4). A role's limits are replaced
 -- as a whole; each replacement also creates a new role version, so stale edits are refused.
 create table approval_limit (
     role_code        varchar(60)  not null references role (code),
@@ -116,9 +116,9 @@ create trigger trg_role_assignment_delegation_check
 -- ---------------------------------------------------------------- catalogue
 
 insert into permission (code, service, description_nl, description_en) values
-    ('iam.delegation.create', 'iam-service', 'تفويض الأدوار وإلغاء التفويض نيابة عن أصحابها',
+    ('iam.delegation.create', 'iam-service', 'ØªÙÙˆÙŠØ¶ Ø§Ù„Ø£Ø¯ÙˆØ§Ø± ÙˆØ¥Ù„ØºØ§Ø¡ Ø§Ù„ØªÙÙˆÙŠØ¶ Ù†ÙŠØ§Ø¨Ø© Ø¹Ù† Ø£ØµØ­Ø§Ø¨Ù‡Ø§',
                                              'Delegate roles and revoke delegations on behalf of their holders'),
-    ('iam.delegation.read',   'iam-service', 'عرض التفويضات',                      'Read delegations');
+    ('iam.delegation.read',   'iam-service', 'Ø¹Ø±Ø¶ Ø§Ù„ØªÙÙˆÙŠØ¶Ø§Øª',                      'Read delegations');
 
 update role
    set permissions = permissions || array['iam.delegation.create', 'iam.delegation.read']::varchar[],

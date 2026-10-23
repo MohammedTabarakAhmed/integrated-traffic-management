@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ITMS requirement-ledger verifier (DLV-001, the project guide §8-9).
+"""ITMS requirement-ledger verifier (DLV-001, the project guide Â§8-9).
 
 Checks:
   1. docs/brief/01_PROJECT_REQUIREMENTS.md (ledger part): IDs well-formed, unique, totals match the header line.
@@ -25,8 +25,8 @@ from pathlib import Path
 ID_RE = re.compile(r"^[A-Z]{2,4}-\d{3}$")
 VALID_STATUS = {"[ ]", "[~]", "[x]", "[!]", "[?]"}
 VALID_PRIORITY = {"M", "S", "C", "W"}
-EMPTY = {"", "—", "-"}
-TOTALS_RE = re.compile(r"Total numbered requirements: \*\*(\d+)\*\* — Must: (\d+), Should: (\d+), Could: (\d+)")
+EMPTY = {"", "â€”", "-"}
+TOTALS_RE = re.compile(r"Total numbered requirements: \*\*(\d+)\*\* â€” Must: (\d+), Should: (\d+), Could: (\d+)")
 TEST_GLOBS = ("**/src/test/**/*.java", "tests/**/*.java", "tests/**/*.py", "tools/**/test_*.py", "**/*.spec.ts", "**/*.test.ts")
 
 

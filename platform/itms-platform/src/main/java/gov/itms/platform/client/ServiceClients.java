@@ -13,7 +13,7 @@ import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 
 /**
- * Builds clients for calls between ITMS services through their APIs (the project guide §2: no access to another service's
+ * Builds clients for calls between ITMS services through their APIs (the project guide Â§2: no access to another service's
  * database; INT-004: OAuth2 client credentials). Each call carries:
  * <ul>
  *   <li>the calling service's own bearer token ({@link ServiceTokenProvider}); the target service resolves that
